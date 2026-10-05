@@ -128,17 +128,23 @@ fn formatter_is_idempotent_and_normalizes_crlf() {
     let once = format_source(src).unwrap();
     let twice = format_source(&once).unwrap();
     assert_eq!(once, twice);
-    assert_eq!(once, "pub routine main() -> void {
+    assert_eq!(
+        once,
+        "pub routine main() -> void {
   return;
 }
-");
+"
+    );
     assert!(is_formatted(&once).unwrap());
 }
 
 #[test]
 fn rejects_unbalanced_blocks() {
-    let err = format_source("fnc nope() -> void {
-").unwrap_err();
+    let err = format_source(
+        "fnc nope() -> void {
+",
+    )
+    .unwrap_err();
     assert!(err.message().contains("unterminated"));
 }
 
