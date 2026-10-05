@@ -294,11 +294,17 @@ fn is_ident_char(c: char) -> bool {
 }
 
 fn leading_closing_braces(line: &str) -> usize {
-    line.chars().take_while(|c| c.is_whitespace() || *c == '}').filter(|c| *c == '}').count()
+    line.chars()
+        .take_while(|c| c.is_whitespace() || *c == '}')
+        .filter(|c| *c == '}')
+        .count()
 }
 
 fn is_closer_line(line: &str) -> bool {
-    line.starts_with('}') || starts_word(line, "end") || starts_word(line, "fi") || starts_word(line, "done")
+    line.starts_with('}')
+        || starts_word(line, "end")
+        || starts_word(line, "fi")
+        || starts_word(line, "done")
 }
 
 fn ends_statement(line: &str) -> bool {
@@ -332,7 +338,9 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
         }
     }
 
-    newest.map(|(_, is_signature)| is_signature).unwrap_or(false)
+    newest
+        .map(|(_, is_signature)| is_signature)
+        .unwrap_or(false)
 }
 
 fn define_kind(line: &str) -> Option<DefineKind> {
@@ -381,7 +389,9 @@ fn is_callable_body_header(line: &str, signature_context: bool) -> bool {
         return false;
     }
     let lower = line.trim_start();
-    for kw in ["if", "for", "while", "switch", "match", "catch", "recover", "defer"] {
+    for kw in [
+        "if", "for", "while", "switch", "match", "catch", "recover", "defer",
+    ] {
         if starts_word(lower, kw) {
             return false;
         }
@@ -394,7 +404,12 @@ fn is_callable_body_header(line: &str, signature_context: bool) -> bool {
     }
     // Methods omit `fnc`. A braced callable inside interface/trait is a default
     // implementation and therefore still uses executable `->` syntax.
-    if signature_context || line.contains("self") || line.contains(") ->") || line.contains("): ") || line.contains(") =>") {
+    if signature_context
+        || line.contains("self")
+        || line.contains(") ->")
+        || line.contains("): ")
+        || line.contains(") =>")
+    {
         return true;
     }
     // Class/actor method shape, including `[Symbol.iterator]()`.
@@ -410,11 +425,15 @@ fn is_callable_signature(line: &str, signature_context: bool) -> bool {
 }
 
 fn contains_word(line: &str, word: &str) -> bool {
-    line.split(|c: char| !is_ident_char(c)).any(|part| part == word)
+    line.split(|c: char| !is_ident_char(c))
+        .any(|part| part == word)
 }
 
 fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
-    let body_at = line.find('{').or_else(|| line.rfind(';')).unwrap_or(line.len());
+    let body_at = line
+        .find('{')
+        .or_else(|| line.rfind(';'))
+        .unwrap_or(line.len());
     let Some(close_paren) = line[..body_at].rfind(')') else {
         return line.to_string();
     };
@@ -441,8 +460,7 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
 fn opens_do_block(line: &str) -> bool {
     let code = strip_line_comment(line);
     let t = code.trim_end();
-    (t.ends_with(" do") || t.ends_with("; do"))
-        && !starts_word(t.trim_start(), "done")
+    (t.ends_with(" do") || t.ends_with("; do")) && !starts_word(t.trim_start(), "done")
 }
 
 fn strip_line_comment(line: &str) -> &str {
@@ -478,7 +496,9 @@ fn strip_line_comment(line: &str) -> &str {
 
 fn contains_unquoted_char(line: &str, needle: char) -> bool {
     let mut state = LexState::default();
-    scan_visible(line, &mut state).into_iter().any(|c| c == needle)
+    scan_visible(line, &mut state)
+        .into_iter()
+        .any(|c| c == needle)
 }
 
 fn scan_braces(line: &str, state: &mut LexState) -> Vec<char> {
