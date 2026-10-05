@@ -40,8 +40,12 @@ class conformance lists.
 ```bash
 cargo install --path .
 
-# rewrite files in place
+# default: preview only, never modify files
 oresfmt src examples
+# would format src/foo.ores
+
+# explicit in-place rewrite
+oresfmt --write src examples
 
 # CI / pre-commit mode; exits 1 if anything would change
 oresfmt --check .
@@ -55,6 +59,28 @@ oresfmt --stdout example.ores
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
 alias. Directories are walked recursively and only `.ores` files are selected.
+
+### Safe writes
+
+Filesystem inputs are **dry-run by default**. `--write` is the only normal mode
+that modifies files, and it performs a full preflight before touching any file.
+This prevents a later unsafe path from leaving a project half-formatted.
+
+For every file that would change, `--write` fails closed when the file is:
+
+- tracked by Git but has staged or unstaged changes;
+- untracked or ignored;
+- outside a Git worktree.
+
+The overrides are intentionally explicit:
+
+```bash
+oresfmt --write --ok-to-mod-dirty-files src
+oresfmt --write --ok-to-mod-untracked-files generated
+oresfmt --write --ok-to-mod-outside-git /tmp/example.ores
+```
+
+These flags only relax write-safety checks. They do not change formatting style.
 
 ## Rust SDK
 
