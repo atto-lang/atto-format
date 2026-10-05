@@ -13,14 +13,15 @@ impl TempRepo {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "oresfmt-{label}-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("oresfmt-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         git(&root, &["init", "-q"]);
         git(&root, &["config", "user.name", "oresfmt-tests"]);
-        git(&root, &["config", "user.email", "oresfmt-tests@example.invalid"]);
+        git(
+            &root,
+            &["config", "user.email", "oresfmt-tests@example.invalid"],
+        );
         Self { root }
     }
 
@@ -119,8 +120,7 @@ fn write_refuses_dirty_tracked_file_by_default() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(fs::read_to_string(path).unwrap(), before);
     assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("refusing to modify dirty tracked file")
+        String::from_utf8_lossy(&output.stderr).contains("refusing to modify dirty tracked file")
     );
 }
 
@@ -131,11 +131,7 @@ fn dirty_tracked_override_is_explicit() {
     repo.commit_all("baseline");
     repo.write("sample.ores", "fnc answer() => int {\nreturn 43;\n}\n");
 
-    let output = repo.run(&[
-        "--write",
-        "--ok-to-mod-dirty-files",
-        "sample.ores",
-    ]);
+    let output = repo.run(&["--write", "--ok-to-mod-dirty-files", "sample.ores"]);
 
     assert!(output.status.success());
     assert_eq!(
@@ -157,11 +153,7 @@ fn write_refuses_untracked_file_unless_explicitly_allowed() {
             .contains("refusing to modify untracked or ignored file")
     );
 
-    let allowed = repo.run(&[
-        "--write",
-        "--ok-to-mod-untracked-files",
-        "sample.ores",
-    ]);
+    let allowed = repo.run(&["--write", "--ok-to-mod-untracked-files", "sample.ores"]);
     assert!(allowed.status.success());
     assert_eq!(fs::read_to_string(path).unwrap(), FORMATTED);
 }
