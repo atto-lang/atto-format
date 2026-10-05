@@ -204,8 +204,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             }
         }
 
-        if ended_callable.is_some() {
-            prev_event = PrevEvent::CallableEnd(ended_callable.unwrap());
+        if let Some(ended_indent) = ended_callable {
+            prev_event = PrevEvent::CallableEnd(ended_indent);
         } else {
             prev_event = PrevEvent::Other;
         }
@@ -217,15 +217,16 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             indent = indent.saturating_sub(nonleading_closes - opens);
         }
 
-        if let Some(kind) = define_kind(&content) {
-            if !contains_unquoted_char(&content, '{') && !ends_statement(&content) {
-                next_order += 1;
-                define_stack.push(DefineFrame {
-                    kind,
-                    order: next_order,
-                });
-                indent += 1;
-            }
+        if let Some(kind) = define_kind(&content)
+            && !contains_unquoted_char(&content, '{')
+            && !ends_statement(&content)
+        {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind,
+                order: next_order,
+            });
+            indent += 1;
         }
 
         if opens_do_block(&content) && !branch_line {
@@ -331,10 +332,10 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
             | BraceKind::Actor => Some(false),
             BraceKind::Other => None,
         };
-        if let Some(is_signature) = is_signature {
-            if newest.is_none_or(|(order, _)| frame.order > order) {
-                newest = Some((frame.order, is_signature));
-            }
+        if let Some(is_signature) = is_signature
+            && newest.is_none_or(|(order, _)| frame.order > order)
+        {
+            newest = Some((frame.order, is_signature));
         }
     }
 
@@ -367,17 +368,17 @@ fn brace_container_kind(line: &str) -> Option<BraceKind> {
         .split(|c: char| !is_ident_char(c))
         .filter(|word| !word.is_empty())
         .collect();
-    if words.iter().any(|word| *word == "interface") {
+    if words.contains(&"interface") {
         Some(BraceKind::Interface)
-    } else if words.iter().any(|word| *word == "trait") {
+    } else if words.contains(&"trait") {
         Some(BraceKind::Trait)
-    } else if words.iter().any(|word| *word == "class") {
+    } else if words.contains(&"class") {
         Some(BraceKind::Class)
-    } else if words.iter().any(|word| *word == "module") {
+    } else if words.contains(&"module") {
         Some(BraceKind::Module)
-    } else if words.iter().any(|word| *word == "struct") {
+    } else if words.contains(&"struct") {
         Some(BraceKind::Struct)
-    } else if words.iter().any(|word| *word == "actor") {
+    } else if words.contains(&"actor") {
         Some(BraceKind::Actor)
     } else {
         None
@@ -442,10 +443,8 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
         Some((pos, 2))
     } else if let Some(pos) = tail.find("->") {
         Some((pos, 2))
-    } else if let Some(pos) = tail.find(':') {
-        Some((pos, 1))
     } else {
-        None
+        tail.find(':').map(|pos| (pos, 1))
     };
     let Some((sep_pos, sep_len)) = separator else {
         return line.to_string();
