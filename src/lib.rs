@@ -435,7 +435,7 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
         .find('{')
         .or_else(|| line.rfind(';'))
         .unwrap_or(line.len());
-    let Some(close_paren) = line[..body_at].rfind(')') else {
+    let Some(close_paren) = callable_parameter_close(line, body_at) else {
         return line.to_string();
     };
     let tail = &line[close_paren + 1..body_at];
@@ -454,6 +454,47 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
     let before = line[..absolute].trim_end();
     let after = line[absolute + sep_len..].trim_start();
     format!("{before} {desired} {after}")
+}
+
+fn callable_parameter_close(line: &str, limit: usize) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+    let mut depth = 0usize;
+    let mut saw_open = false;
+
+    for (index, ch) in line[..limit].char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => {
+                depth += 1;
+                saw_open = true;
+            }
+            ')' if saw_open => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn opens_do_block(line: &str) -> bool {
