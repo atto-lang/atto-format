@@ -439,18 +439,17 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
         return line.to_string();
     };
     let tail = &line[close_paren + 1..body_at];
-    let separator = if let Some(pos) = tail.find("=>") {
-        Some((pos, 2))
-    } else if let Some(pos) = tail.find("->") {
-        Some((pos, 2))
+    let trimmed = tail.trim_start();
+    let leading_ws = tail.len() - trimmed.len();
+    let sep_len = if trimmed.starts_with("=>") || trimmed.starts_with("->") {
+        2
+    } else if trimmed.starts_with(':') {
+        1
     } else {
-        tail.find(':').map(|pos| (pos, 1))
-    };
-    let Some((sep_pos, sep_len)) = separator else {
         return line.to_string();
     };
 
-    let absolute = close_paren + 1 + sep_pos;
+    let absolute = close_paren + 1 + leading_ws;
     let before = line[..absolute].trim_end();
     let after = line[absolute + sep_len..].trim_start();
     format!("{before} {desired} {after}")
