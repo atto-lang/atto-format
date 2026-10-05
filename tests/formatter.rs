@@ -202,3 +202,28 @@ fnc two() -> int {
 "#;
     assert_eq!(format_source(src).unwrap(), expected);
 }
+
+#[test]
+fn canonicalizes_parenthesized_callable_return_types() {
+    let src = r#"fnc make_callback(): (() => int) {
+return || -> {
+return 1;
+};
+}
+
+define interface Factory
+fnc make_callback() -> (() => int);
+end
+"#;
+    let expected = r#"fnc make_callback() -> (() => int) {
+  return || -> {
+    return 1;
+  };
+}
+
+define interface Factory
+  fnc make_callback() => (() => int);
+end
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
