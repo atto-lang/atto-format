@@ -33,6 +33,58 @@ pub routine main() -> void {
 }
 
 #[test]
+fn expression_body_lambdas_keep_executable_slim_arrow() {
+    let src = r#"fnc demo() => void {
+val Fnc<int, int> one = |value| -> value * 2;
+val Fnc<int, int> two = |value| ->
+value * 2;
+val Fnc<int, int> block = |value| -> {
+return value * 2;
+};
+return;
+}
+"#;
+
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> one = |value| -> value * 2;
+  val Fnc<int, int> two = |value| ->
+  value * 2;
+  val Fnc<int, int> block = |value| -> {
+    return value * 2;
+  };
+  return;
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn expression_body_lambda_inside_call_is_not_rewritten_as_type_arrow() {
+    let src = r#"fnc apply(Fnc<int, int> callback, int value) => int {
+return callback(value);
+}
+
+fnc demo() => int {
+return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    let expected = r#"fnc apply(Fnc<int, int> callback, int value) -> int {
+  return callback(value);
+}
+
+
+fnc demo() -> int {
+  return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn module_owned_class_is_indented_as_a_module_member() {
     let src = r#"define module Accounts as
 define class Account as
