@@ -136,6 +136,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         let mut content = trimmed_end.trim_start().to_string();
         content = canonicalize_conditional_line(&content, lex);
+        content = canonicalize_declaration_line(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -434,19 +435,219 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
         .unwrap_or(false)
 }
 
+fn canonicalize_declaration_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.is_empty() {
+        return line.to_string();
+    }
+
+    canonicalize_class_declaration(line, &words)
+        .or_else(|| canonicalize_callable_declaration(line, &words))
+        .unwrap_or_else(|| line.to_string())
+}
+
+fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<String> {
+    let class_index = words
+        .iter()
+        .position(|span| &line[span.start..span.end] == "class")?;
+    let prefix = &words[..=class_index];
+    if !plain_word_prefix(line, prefix) {
+        return None;
+    }
+
+    let mut saw_define = false;
+    let mut visibility: Option<&str> = None;
+    let mut is_abstract = false;
+    let mut saw_class = false;
+
+    for span in prefix {
+        match &line[span.start..span.end] {
+            "define" if !saw_define => saw_define = true,
+            "pub" | "private" if visibility.is_none() => {
+                visibility = Some(&line[span.start..span.end])
+            }
+            "abstract" if !is_abstract => is_abstract = true,
+            "class" if !saw_class => saw_class = true,
+            _ => return None,
+        }
+    }
+
+    if !saw_define || !saw_class {
+        return None;
+    }
+
+    let mut canonical = vec!["define"];
+    if let Some(visibility) = visibility {
+        canonical.push(visibility);
+    }
+    if is_abstract {
+        canonical.push("abstract");
+    }
+    canonical.push("class");
+
+    Some(rewrite_word_prefix(line, prefix, &canonical))
+}
+
+fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_prefix_word = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "static"
+                | "async"
+                | "generator"
+                | "nlex"
+                | "pure"
+                | "trap"
+                | "structural"
+                | "abstract"
+                | "fnc"
+                | "routine"
+        )
+    };
+
+    let prefix_len = words
+        .iter()
+        .take_while(|span| is_prefix_word(&line[span.start..span.end]))
+        .count();
+    if prefix_len == 0 || prefix_len == words.len() {
+        return None;
+    }
+
+    let prefix = &words[..prefix_len];
+    if !plain_word_prefix(line, prefix) {
+        return None;
+    }
+
+    let mut visibility: Option<&str> = None;
+    let mut is_static = false;
+    let mut is_async = false;
+    let mut is_generator = false;
+    let mut is_nlex = false;
+    let mut is_pure = false;
+    let mut is_trap = false;
+    let mut is_structural = false;
+    let mut is_abstract = false;
+    let mut kind: Option<&str> = None;
+
+    for span in prefix {
+        let word = &line[span.start..span.end];
+        let duplicate = match word {
+            "pub" | "private" => {
+                if visibility.is_some() {
+                    true
+                } else {
+                    visibility = Some(word);
+                    false
+                }
+            }
+            "static" => set_once(&mut is_static),
+            "async" => set_once(&mut is_async),
+            "generator" => set_once(&mut is_generator),
+            "nlex" => set_once(&mut is_nlex),
+            "pure" => set_once(&mut is_pure),
+            "trap" => set_once(&mut is_trap),
+            "structural" => set_once(&mut is_structural),
+            "abstract" => set_once(&mut is_abstract),
+            "fnc" | "routine" => {
+                if kind.is_some() {
+                    true
+                } else {
+                    kind = Some(word);
+                    false
+                }
+            }
+            _ => true,
+        };
+        if duplicate {
+            return None;
+        }
+    }
+
+    let kind = kind?;
+    let mut canonical = Vec::new();
+    if let Some(visibility) = visibility {
+        canonical.push(visibility);
+    }
+    if is_static {
+        canonical.push("static");
+    }
+    if is_async {
+        canonical.push("async");
+    }
+    if is_generator {
+        canonical.push("generator");
+    }
+    if is_nlex {
+        canonical.push("nlex");
+    }
+    if is_pure {
+        canonical.push("pure");
+    }
+    if is_trap {
+        canonical.push("trap");
+    }
+    if is_structural {
+        canonical.push("structural");
+    }
+    if is_abstract {
+        canonical.push("abstract");
+    }
+    canonical.push(kind);
+
+    Some(rewrite_word_prefix(line, prefix, &canonical))
+}
+
+fn set_once(value: &mut bool) -> bool {
+    if *value {
+        true
+    } else {
+        *value = true;
+        false
+    }
+}
+
+fn plain_word_prefix(line: &str, words: &[WordSpan]) -> bool {
+    let Some(first) = words.first() else {
+        return false;
+    };
+    if !line[..first.start].trim().is_empty() {
+        return false;
+    }
+    words
+        .windows(2)
+        .all(|pair| line[pair[0].end..pair[1].start].trim().is_empty())
+}
+
+fn rewrite_word_prefix(line: &str, words: &[WordSpan], canonical: &[&str]) -> String {
+    let first = words.first().expect("non-empty declaration prefix");
+    let last = words.last().expect("non-empty declaration prefix");
+    let mut result = String::with_capacity(line.len());
+    result.push_str(&line[..first.start]);
+    result.push_str(&canonical.join(" "));
+    result.push_str(&line[last.end..]);
+    result
+}
+
 fn define_kind(line: &str) -> Option<DefineKind> {
     let mut words = line.split_whitespace();
     if words.next()? != "define" {
         return None;
     }
-    Some(match words.next()? {
-        "module" => DefineKind::Module,
-        "class" => DefineKind::Class,
-        "interface" => DefineKind::Interface,
-        "trait" => DefineKind::Trait,
-        "struct" => DefineKind::Struct,
-        _ => DefineKind::Other,
-    })
+
+    for word in words {
+        match word {
+            "pub" | "private" | "abstract" => continue,
+            "module" => return Some(DefineKind::Module),
+            "class" => return Some(DefineKind::Class),
+            "interface" => return Some(DefineKind::Interface),
+            "trait" => return Some(DefineKind::Trait),
+            "struct" => return Some(DefineKind::Struct),
+            _ => return Some(DefineKind::Other),
+        }
+    }
+    Some(DefineKind::Other)
 }
 
 fn brace_container_kind(line: &str) -> Option<BraceKind> {
@@ -890,6 +1091,35 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalizes_declaration_modifier_order() {
+        let src = r#"pub define class X as {
+}
+
+pub define class Y as
+end
+
+fnc pub async foo() {
+}
+
+pure nlex async pub fnc bar() {
+}
+
+private define abstract class Z as
+end
+"#;
+
+        let got = format_source(src).unwrap();
+        assert!(got.contains("define pub class X as {"));
+        assert!(got.contains("define pub class Y as"));
+        assert!(got.contains("pub async fnc foo() {"));
+        assert!(got.contains("pub async nlex pure fnc bar() {"));
+        assert!(got.contains("define private abstract class Z as"));
+        assert!(!got.contains("pub define class"));
+        assert!(!got.contains("fnc pub async"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
 
     #[test]
     fn canonicalizes_executable_and_signature_arrows() {
