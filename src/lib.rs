@@ -138,6 +138,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let mut content = trimmed_end.trim_start().to_string();
         content = canonicalize_conditional_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
+        content = canonicalize_bare_for_loop_line(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -681,6 +682,22 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
     result
 }
 
+fn canonicalize_bare_for_loop_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.is_empty() || &line[words[0].start..words[0].end] != "for" {
+        return line.to_string();
+    }
+    // Only the exact infinite-loop alias "for { ... }" is canonicalized.
+    // Preserve for-of, C-style for, quoted text, comments and other headers.
+    let rest = &line[words[0].end..];
+    if !rest.trim_start().starts_with('{') {
+        return line.to_string();
+    }
+    let mut result = line.to_string();
+    result.replace_range(words[0].start..words[0].end, "loop");
+    result
+}
+
 fn canonicalize_rt_cooperate_line(line: &str, initial: LexState) -> String {
     let words = visible_word_spans(line, initial);
     if words.len() < 2 {
@@ -912,6 +929,18 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalizes_only_bare_for_loop_alias() {
+        let src = "pub routine main(): void {\n  for {\n    break;\n  }\n  for const item of items {\n    consume(item);\n  }\n  stdio.stdout.write(\"for {\");\n  // for {\n  loop {\n    break;\n  }\n}\n";
+        let output = format_source(src).unwrap();
+        assert!(output.contains("  loop {\n    break;\n  }"));
+        assert!(output.contains("for const item of items {"));
+        assert!(output.contains("stdio.stdout.write(\"for {\");"));
+        assert!(output.contains("// for {"));
+        assert!(!output.contains("  for {"));
+        assert_eq!(format_source(&output).unwrap(), output);
+    }
 
     #[test]
     fn canonicalizes_rt_yield_without_touching_generator_yield_or_literals() {
