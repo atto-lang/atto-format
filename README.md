@@ -47,7 +47,7 @@ pub async fnc refresh() {
 }
 ```
 
-The nesting engine understands `module`, `class`, `interface`, `trait`,
+The nesting engine understands `module`, `class`, `interface`, `contract`, `trait`,
 `struct`, actor/braced bodies, `end`, `if`/`fi`, and `do`/`done`. In particular,
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
