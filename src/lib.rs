@@ -79,6 +79,12 @@ enum PrevEvent {
     CallableEnd(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeywordTerminator {
+    Fi,
+    Done,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct LexState {
     block_comment: bool,
@@ -103,6 +109,7 @@ struct LexState {
 /// It does not reorder declarations or rewrite tokens whose meaning depends on
 /// the compiler's evolving grammar.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
+    reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
@@ -110,6 +117,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
+    let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
     let mut lex = LexState::default();
     let mut next_order = 0usize;
 
@@ -126,6 +134,47 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let starts_fi = starts_word(&content, "fi");
         let starts_done = starts_word(&content, "done");
         let branch_line = starts_word(&content, "else") || starts_word(&content, "elseif");
+
+        if starts_fi {
+            match keyword_stack.pop() {
+                Some(KeywordTerminator::Fi) => {}
+                Some(KeywordTerminator::Done) => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `fi` where `done` was expected",
+                    ));
+                }
+                None => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `fi` without a matching `if ... do` block",
+                    ));
+                }
+            }
+        } else if starts_done {
+            match keyword_stack.pop() {
+                Some(KeywordTerminator::Done) => {}
+                Some(KeywordTerminator::Fi) => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `done` where `fi` was expected",
+                    ));
+                }
+                None => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `done` without a matching `... do` block",
+                    ));
+                }
+            }
+        }
+
+        if branch_line && !matches!(keyword_stack.last(), Some(KeywordTerminator::Fi)) {
+            return Err(FormatError::new(
+                line_no,
+                "encountered `else`/`elseif` without a matching `if ... do` block",
+            ));
+        }
 
         let leading_closing_braces = leading_closing_braces(&content);
         let keyword_dedent = usize::from(starts_end || starts_fi || starts_done || branch_line);
@@ -230,6 +279,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         if opens_do_block(&content) && !branch_line {
+            keyword_stack.push(if starts_word(&content, "if") {
+                KeywordTerminator::Fi
+            } else {
+                KeywordTerminator::Done
+            });
             indent += 1;
         }
 
@@ -254,6 +308,16 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
             "unterminated define block",
+        ));
+    }
+    if let Some(terminator) = keyword_stack.last() {
+        let message = match terminator {
+            KeywordTerminator::Fi => "unterminated `if ... do` block (expected `fi`)",
+            KeywordTerminator::Done => "unterminated `... do` block (expected `done`)",
+        };
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            message,
         ));
     }
 
@@ -360,10 +424,8 @@ fn define_kind(line: &str) -> Option<DefineKind> {
 }
 
 fn brace_container_kind(line: &str) -> Option<BraceKind> {
-    if !contains_unquoted_char(line, '{') {
-        return None;
-    }
-    let prefix = line.split('{').next().unwrap_or(line);
+    let brace_at = first_visible_char_index(line, '{')?;
+    let prefix = &line[..brace_at];
     let words: Vec<&str> = prefix
         .split(|c: char| !is_ident_char(c))
         .filter(|word| !word.is_empty())
@@ -431,8 +493,7 @@ fn contains_word(line: &str, word: &str) -> bool {
 }
 
 fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
-    let body_at = line
-        .find('{')
+    let body_at = first_visible_char_index(line, '{')
         .or_else(|| line.rfind(';'))
         .unwrap_or(line.len());
     let Some(close_paren) = callable_parameter_close(line, body_at) else {
@@ -531,6 +592,82 @@ fn strip_line_comment(line: &str) -> &str {
         i += 1;
     }
     line
+}
+
+fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut state = LexState::default();
+
+    for (index, line) in lines.iter().enumerate() {
+        let logical = line.strip_suffix('\r').unwrap_or(line);
+        let mut next = state;
+        scan_visible(logical, &mut next);
+
+        if index + 1 < lines.len() && next.quote.is_some() {
+            return Err(FormatError::new(
+                index + 1,
+                "multiline string/template literals are not formatted yet; refusing to change literal bytes",
+            ));
+        }
+
+        state = next;
+    }
+
+    Ok(())
+}
+
+fn first_visible_char_index(line: &str, needle: char) -> Option<usize> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let mut state = LexState::default();
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let (byte_index, c) = chars[i];
+        let next = chars.get(i + 1).map(|(_, c)| *c);
+
+        if state.block_comment {
+            if c == '*' && next == Some('/') {
+                state.block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(q) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if c == '\\' {
+                state.escape = true;
+            } else if c == q {
+                state.quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            return None;
+        }
+        if c == '/' && next == Some('*') {
+            state.block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(c, '"' | '\'' | '`') {
+            state.quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if c == needle {
+            return Some(byte_index);
+        }
+
+        i += 1;
+    }
+
+    None
 }
 
 fn contains_unquoted_char(line: &str, needle: char) -> bool {
