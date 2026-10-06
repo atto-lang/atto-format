@@ -110,8 +110,9 @@ struct LexState {
 /// - `end`, `fi`, `done`, braces, class/interface/trait/struct/module nesting,
 ///   actor bodies, and strings/comments are indentation-aware.
 ///
-/// It does not reorder declarations or rewrite tokens whose meaning depends on
-/// the compiler's evolving grammar.
+/// It canonicalizes recognized declaration-modifier prefixes, but does not
+/// reorder unrelated declarations or unknown grammar whose meaning depends on
+/// the compiler's evolving syntax.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
@@ -1106,6 +1107,9 @@ fnc pub async foo() {
 pure nlex async pub fnc bar() {
 }
 
+fnc nlex pure async pub baz() {
+}
+
 private define abstract class Z as
 end
 "#;
@@ -1115,6 +1119,7 @@ end
         assert!(got.contains("define pub class Y as"));
         assert!(got.contains("pub async fnc foo() {"));
         assert!(got.contains("pub async nlex pure fnc bar() {"));
+        assert!(got.contains("pub async nlex pure fnc baz() {"));
         assert!(got.contains("define private abstract class Z as"));
         assert!(!got.contains("pub define class"));
         assert!(!got.contains("fnc pub async"));
