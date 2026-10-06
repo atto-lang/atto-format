@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+mod select;
+
 const INDENT: &str = "  ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +99,8 @@ struct LexState {
 ///
 /// The current formatter is intentionally configuration-free:
 ///
-/// - two-space indentation;
+/// - two-space indentation, never tabs for indentation;
+/// - braced static select arms, indented one level inside the select;
 /// - LF line endings and exactly one final newline;
 /// - trailing whitespace removed;
 /// - at most one ordinary blank line;
@@ -112,6 +115,7 @@ struct LexState {
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = select::normalize(&normalized)?;
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut pending_blank = false;
@@ -474,7 +478,7 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
     }
     let lower = structural.trim_start();
     for kw in [
-        "if", "for", "while", "switch", "match", "catch", "recover", "defer",
+        "if", "for", "while", "switch", "match", "catch", "recover", "defer", "case", "default",
     ] {
         if starts_word(lower, kw) {
             return false;
