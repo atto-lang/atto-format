@@ -17,16 +17,31 @@ identical behavior.
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`;
-- class headers keep `as` after the complete inheritance/conformance clause:
+- declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
+  - classes: `define [pub|private] [abstract] class Name ... as`;
+  - package/module callables: `[pub|private] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`;
+  - class headers keep `as` after the complete inheritance/conformance clause.
+
+For example:
 
 ```ores
-define class User extends Entity implements Named, Serializable as
+pub define class User extends Entity implements Named, Serializable as
   pub val String name;
-
-  pub render() -> String {
-    return self.name;
-  }
 end
+
+fnc pub async refresh() {
+}
+```
+
+formats as:
+
+```ores
+define pub class User extends Entity implements Named, Serializable as
+  pub val String name;
+end
+
+pub async fnc refresh() {
+}
 ```
 
 The nesting engine understands `module`, `class`, `interface`, `trait`,
@@ -70,8 +85,9 @@ for await const value of events() {
 ```
 
 The formatter is intentionally conservative about grammar that is still
-changing: it does not reorder declarations, imports, traits, interfaces, or
-class conformance lists.
+changing. It reorders only recognized declaration-modifier prefixes; imports,
+traits, interfaces, class conformance lists, and unknown modifier spellings are
+left untouched.
 
 For semantic safety, multiline string/template literals currently fail closed
 instead of being rewritten. This prevents indentation, trailing-whitespace, or
