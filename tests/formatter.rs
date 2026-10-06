@@ -227,3 +227,60 @@ end
 "#;
     assert_eq!(format_source(src).unwrap(), expected);
 }
+
+#[test]
+fn callable_arrow_ignores_braces_inside_default_strings() {
+    let src = r#"fnc render(String marker = "{") => String {
+return marker;
+}
+"#;
+    let expected = r#"fnc render(String marker = "{") -> String {
+  return marker;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn rejects_multiline_templates_instead_of_mutating_literal_bytes() {
+    let src = "fnc template() => String {\n  return `line one\n    line two`;\n}\n";
+    let err = format_source(src).unwrap_err();
+    assert!(
+        err.message()
+            .contains("multiline string/template literals are not formatted yet")
+    );
+}
+
+#[test]
+fn validates_if_fi_and_do_done_terminators() {
+    let valid = r#"fnc work() => void {
+if ready; do
+while busy; do
+tick();
+done
+else
+return;
+fi
+}
+"#;
+    let formatted = format_source(valid).unwrap();
+    assert!(formatted.contains("    while busy; do"));
+    assert!(formatted.contains("    fi"));
+
+    let wrong = "if ready; do\nreturn;\ndone\n";
+    let err = format_source(wrong).unwrap_err();
+    assert!(err.message().contains("`done` where `fi` was expected"));
+
+    let orphan = "else\nreturn;\n";
+    let err = format_source(orphan).unwrap_err();
+    assert!(err.message().contains("without a matching `if ... do` block"));
+}
+
+#[test]
+fn rejects_unterminated_keyword_blocks() {
+    let err = format_source("if ready; do\nreturn;\n").unwrap_err();
+    assert!(err.message().contains("expected `fi`"));
+
+    let err = format_source("while ready; do\ntick();\n").unwrap_err();
+    assert!(err.message().contains("expected `done`"));
+}
