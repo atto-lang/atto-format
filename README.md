@@ -19,7 +19,10 @@ identical behavior.
 - conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
+  - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
+  - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
   - package/module callables: `[pub|private] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`;
+  - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
 For example:
