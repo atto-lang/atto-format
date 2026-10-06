@@ -8,7 +8,9 @@ identical behavior.
 
 ## Canonical style
 
-- two spaces per indentation level;
+- two spaces per indentation level, never tabs for indentation;
+- static `select`, `nb select`, and `try select` arms are indented one level;
+- every `case` and `default` arm has a braced body;
 - LF line endings, no trailing whitespace, one final newline;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
@@ -37,6 +39,35 @@ Conditional compatibility spellings are migrated automatically: deprecated
 single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
 unchanged; the deprecation applies only to using `do` as an if/branch
 introducer.
+
+Static select arms use the same nesting rules as other blocks:
+
+```ores
+nb select {
+  case readch inbox: val value {
+    nb writech replies, value * 10;
+  }
+  default: {
+  }
+}
+```
+
+The formatter adds braces to legacy unbraced select arms, including read arms
+without a binding and write/default arms. Comments and literals retain their
+contents. Dynamic `select from cases` expressions retain their syntax.
+
+Streaming channel writes use ordinary `for ... of ...` loops or
+`for await ... of ...` over an async iterator. Both braced loops and `do`/`done`
+loops use two-space nesting:
+
+```ores
+for const value of values do
+  writech output, value;
+done
+for await const value of events() {
+  await nb writech output, value;
+}
+```
 
 The formatter is intentionally conservative about grammar that is still
 changing: it does not reorder declarations, imports, traits, interfaces, or
