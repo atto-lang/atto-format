@@ -676,3 +676,37 @@ fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     assert!(cast.contains("case writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
 }
+
+
+#[test]
+fn canonicalizes_route_guard_conditionals_to_then_and_elif() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+elseif !pattern.is_valid(); do
+return Err("invalid route pattern");
+else if pattern.size() > self.max_segments_value; then
+return Err("route pattern exceeds max_segments");
+else
+return Ok();
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  elif !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  elif pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  else
+    return Ok();
+  fi
+}
+"#;
+
+    let formatted = format_source(src).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
