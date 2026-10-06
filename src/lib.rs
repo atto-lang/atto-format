@@ -193,8 +193,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let callable_body = is_callable_body_header(&content, structural, signature_context);
-        let callable_signature = is_callable_signature(&content, structural, signature_context);
+        let callable_body = is_callable_body_header(structural, signature_context);
+        let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body {
             content = canonicalize_callable_arrow(&content, "->", lex);
         } else if callable_signature {
@@ -450,7 +450,7 @@ fn brace_container_kind(line: &str) -> Option<BraceKind> {
     }
 }
 
-fn is_callable_body_header(line: &str, structural: &str, signature_context: bool) -> bool {
+fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
     if !structural.contains('{') || !structural.contains('(') {
         return false;
     }
@@ -483,9 +483,9 @@ fn is_callable_body_header(line: &str, structural: &str, signature_context: bool
     !prefix.contains('=') && !prefix.contains('.') && !prefix.ends_with("new")
 }
 
-fn is_callable_signature(line: &str, structural: &str, signature_context: bool) -> bool {
+fn is_callable_signature(structural: &str, signature_context: bool) -> bool {
     signature_context
-        && line.trim_end().ends_with(';')
+        && structural.trim_end().ends_with(';')
         && structural.contains('(')
         && !structural.contains('{')
 }
@@ -586,40 +586,8 @@ fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Opti
 }
 
 fn opens_do_block(line: &str) -> bool {
-    let code = strip_line_comment(line);
-    let t = code.trim_end();
+    let t = line.trim_end();
     (t.ends_with(" do") || t.ends_with("; do")) && !starts_word(t.trim_start(), "done")
-}
-
-fn strip_line_comment(line: &str) -> &str {
-    let bytes = line.as_bytes();
-    let mut quote: Option<u8> = None;
-    let mut escape = false;
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if escape {
-                escape = false;
-            } else if b == b'\\' {
-                escape = true;
-            } else if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
-        }
-        if matches!(b, b'"' | b'\'' | b'`') {
-            quote = Some(b);
-            i += 1;
-            continue;
-        }
-        if b == b'/' && bytes[i + 1] == b'/' {
-            return &line[..i];
-        }
-        i += 1;
-    }
-    line
 }
 
 fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
