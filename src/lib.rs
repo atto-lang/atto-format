@@ -136,6 +136,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         let mut content = trimmed_end.trim_start().to_string();
         content = canonicalize_conditional_line(&content, lex);
+        content = canonicalize_runtime_cooperate(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -679,6 +680,29 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
     result
 }
 
+fn canonicalize_runtime_cooperate(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    let mut replacements: Vec<(usize, usize)> = Vec::new();
+
+    for pair in words.windows(2) {
+        let first = &line[pair[0].start..pair[0].end];
+        let second = &line[pair[1].start..pair[1].end];
+        if first == "rt" && second == "yield" {
+            replacements.push((pair[1].start, pair[1].end));
+        }
+    }
+
+    if replacements.is_empty() {
+        return line.to_string();
+    }
+
+    let mut result = line.to_string();
+    for (start, end) in replacements.into_iter().rev() {
+        result.replace_range(start..end, "cooperate");
+    }
+    result
+}
+
 fn visible_word_spans(line: &str, initial: LexState) -> Vec<WordSpan> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let mut words = Vec::new();
@@ -890,6 +914,43 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalizes_legacy_rt_yield_to_rt_cooperate_without_touching_generator_yield() {
+        let src = r#"fnc gen* values(): Iterator<int> {
+  rt yield;
+  rt yield();
+  yield 1;
+  stdio.stdout.write("rt yield");
+  // rt yield must stay in comments
+  return;
+}
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.contains("rt cooperate;"));
+        assert!(got.contains("rt cooperate();"));
+        assert!(got.contains("yield 1;"));
+        assert!(got.contains("\"rt yield\""));
+        assert!(got.contains("// rt yield must stay in comments"));
+        assert!(!got.contains("  rt yield;"));
+    }
+
+    #[test]
+    fn rt_cooperate_rewrite_is_idempotent_and_comment_aware() {
+        let src = r#"fnc work(): void {
+  rt cooperate;
+  /* rt yield */
+  rt  yield;
+  return;
+}
+"#;
+        let once = format_source(src).unwrap();
+        let twice = format_source(&once).unwrap();
+        assert_eq!(once, twice);
+        assert!(once.contains("rt cooperate;"));
+        assert!(once.contains("rt  cooperate;"));
+        assert!(once.contains("/* rt yield */"));
+    }
 
     #[test]
     fn canonicalizes_executable_and_signature_arrows() {
