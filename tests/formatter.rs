@@ -38,6 +38,8 @@ fn expression_body_lambdas_keep_executable_slim_arrow() {
 val Fnc<int, int> one = |value| -> value * 2;
 val Fnc<int, int> two = |value| ->
 value * 2;
+val Fnc<int, int> typed = (int value) -> value * 3;
+val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
 val Fnc<int, int> block = |value| -> {
 return value * 2;
 };
@@ -49,6 +51,8 @@ return;
   val Fnc<int, int> one = |value| -> value * 2;
   val Fnc<int, int> two = |value| ->
   value * 2;
+  val Fnc<int, int> typed = (int value) -> value * 3;
+  val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
   val Fnc<int, int> block = |value| -> {
     return value * 2;
   };
