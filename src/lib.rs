@@ -587,6 +587,18 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         return None;
     }
 
+    let actor_index = prefix
+        .iter()
+        .position(|span| matches!(&line[span.start..span.end], "actor" | "isoactor"))?;
+    if let Some(kind_index) = prefix
+        .iter()
+        .position(|span| matches!(&line[span.start..span.end], "fnc" | "routine"))
+    {
+        if kind_index < actor_index {
+            return None;
+        }
+    }
+
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
@@ -1370,6 +1382,9 @@ pub private fnc conflict() {
 shared untrusted actor Conflict {
 }
 
+fnc pub actor async WrongOrder() {
+}
+
 define pub private interface Broken {
 }
 "#;
@@ -1378,6 +1393,7 @@ define pub private interface Broken {
         assert!(got.contains("pub /* keep */ define class X as {"));
         assert!(got.contains("pub private fnc conflict() {"));
         assert!(got.contains("shared untrusted actor Conflict {"));
+        assert!(got.contains("fnc pub actor async WrongOrder() {"));
         assert!(got.contains("define pub private interface Broken {"));
     }
 
@@ -1396,6 +1412,59 @@ define contract BraceContract {
         assert!(got.contains("fnc end_sig() => String;"));
         assert!(got.contains("fnc brace_sig() => String;"));
         assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    fn permutations(tokens: &[&str]) -> Vec<Vec<String>> {
+        fn visit(rest: Vec<String>, prefix: Vec<String>, out: &mut Vec<Vec<String>>) {
+            if rest.is_empty() {
+                out.push(prefix);
+                return;
+            }
+            for index in 0..rest.len() {
+                let mut next_rest = rest.clone();
+                let token = next_rest.remove(index);
+                let mut next_prefix = prefix.clone();
+                next_prefix.push(token);
+                visit(next_rest, next_prefix, out);
+            }
+        }
+
+        let mut out = Vec::new();
+        visit(
+            tokens.iter().map(|token| (*token).to_string()).collect(),
+            Vec::new(),
+            &mut out,
+        );
+        out
+    }
+
+    #[test]
+    fn canonicalizes_all_supported_modifier_permutations() {
+        for order in permutations(&["define", "class", "pub", "abstract"]) {
+            let source = format!("{} Box as {{\n}}\n", order.join(" "));
+            let got = format_source(&source).unwrap();
+            assert_eq!(got, "define pub abstract class Box as {\n}\n");
+        }
+
+        for order in permutations(&["pub", "async", "nlex", "fnc"]) {
+            let source = format!("{} work() {{\n}}\n", order.join(" "));
+            let got = format_source(&source).unwrap();
+            assert_eq!(got, "pub async nlex fnc work() {\n}\n");
+        }
+
+        let mut actor_cases = 0;
+        for order in permutations(&["pub", "async", "untrusted", "actor", "fnc"]) {
+            let actor_at = order.iter().position(|token| token == "actor").unwrap();
+            let fnc_at = order.iter().position(|token| token == "fnc").unwrap();
+            if actor_at > fnc_at {
+                continue;
+            }
+            actor_cases += 1;
+            let source = format!("{} worker() {{\n}}\n", order.join(" "));
+            let got = format_source(&source).unwrap();
+            assert_eq!(got, "pub async untrusted actor fnc worker() {\n}\n");
+        }
+        assert_eq!(actor_cases, 60);
     }
 
     #[test]
