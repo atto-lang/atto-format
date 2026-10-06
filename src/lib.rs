@@ -587,18 +587,6 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         return None;
     }
 
-    let actor_index = prefix
-        .iter()
-        .position(|span| matches!(&line[span.start..span.end], "actor" | "isoactor"))?;
-    if let Some(kind_index) = prefix
-        .iter()
-        .position(|span| matches!(&line[span.start..span.end], "fnc" | "routine"))
-    {
-        if kind_index < actor_index {
-            return None;
-        }
-    }
-
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
@@ -1337,6 +1325,12 @@ fnc structural signature() => String;
 actor pub fnc untrusted async worker() {
 }
 
+fnc pub actor untrusted async worker_after_fnc() {
+}
+
+routine shared pub actor async worker_routine_after_kind() {
+}
+
 actor shared pub Account {
 }
 
@@ -1357,6 +1351,8 @@ define contract pub Contract {
         assert!(got.contains("pub static structural fnc helper() {"));
         assert!(got.contains("structural fnc signature() => String;"));
         assert!(got.contains("pub async untrusted actor fnc worker() {"));
+        assert!(got.contains("pub async untrusted actor fnc worker_after_fnc() {"));
+        assert!(got.contains("pub async shared actor routine worker_routine_after_kind() {"));
         assert!(got.contains("pub shared actor Account {"));
         assert!(got.contains("define pub interface Api {"));
         assert!(got.contains("define pub contract Contract {"));
@@ -1382,9 +1378,6 @@ pub private fnc conflict() {
 shared untrusted actor Conflict {
 }
 
-fnc pub actor async WrongOrder() {
-}
-
 define pub private interface Broken {
 }
 "#;
@@ -1393,7 +1386,6 @@ define pub private interface Broken {
         assert!(got.contains("pub /* keep */ define class X as {"));
         assert!(got.contains("pub private fnc conflict() {"));
         assert!(got.contains("shared untrusted actor Conflict {"));
-        assert!(got.contains("fnc pub actor async WrongOrder() {"));
         assert!(got.contains("define pub private interface Broken {"));
     }
 
@@ -1454,17 +1446,21 @@ define contract BraceContract {
 
         let mut actor_cases = 0;
         for order in permutations(&["pub", "async", "untrusted", "actor", "fnc"]) {
-            let actor_at = order.iter().position(|token| token == "actor").unwrap();
-            let fnc_at = order.iter().position(|token| token == "fnc").unwrap();
-            if actor_at > fnc_at {
-                continue;
-            }
             actor_cases += 1;
             let source = format!("{} worker() {{\n}}\n", order.join(" "));
             let got = format_source(&source).unwrap();
             assert_eq!(got, "pub async untrusted actor fnc worker() {\n}\n");
         }
-        assert_eq!(actor_cases, 60);
+        assert_eq!(actor_cases, 120);
+
+        let mut actor_routine_cases = 0;
+        for order in permutations(&["pub", "async", "shared", "actor", "routine"]) {
+            actor_routine_cases += 1;
+            let source = format!("{} worker_routine() {{\n}}\n", order.join(" "));
+            let got = format_source(&source).unwrap();
+            assert_eq!(got, "pub async shared actor routine worker_routine() {\n}\n");
+        }
+        assert_eq!(actor_routine_cases, 120);
     }
 
     #[test]
