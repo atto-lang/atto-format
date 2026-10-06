@@ -401,6 +401,37 @@ fn rejects_unterminated_keyword_blocks() {
 }
 
 #[test]
+fn canonicalizes_route_guard_do_to_then() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) => Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+fi
+if !pattern.is_valid(); do
+return Err("invalid route pattern");
+fi
+if pattern.size() > self.max_segments_value; do
+return Err("route pattern exceeds max_segments");
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  fi
+  if !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  fi
+  if pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  fi
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn multiline_block_comments_cannot_change_structure() {
     let src = r#"define class Box as
 /*
