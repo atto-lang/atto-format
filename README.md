@@ -35,6 +35,11 @@ The formatter is intentionally conservative about grammar that is still
 changing: it does not reorder declarations, imports, traits, interfaces, or
 class conformance lists.
 
+For semantic safety, multiline string/template literals currently fail closed
+instead of being rewritten. This prevents indentation, trailing-whitespace, or
+line-ending normalization from changing literal runtime bytes while parser-backed
+literal preservation is still being completed.
+
 ## CLI
 
 ```bash
@@ -81,6 +86,15 @@ oresfmt --write --ok-to-mod-outside-git /tmp/example.ores
 ```
 
 These flags only relax write-safety checks. They do not change formatting style.
+
+Additional write hardening:
+
+- explicit symlink inputs are refused, and symlinks found during recursive walks
+  are skipped rather than followed;
+- after the full Git preflight, every file is re-read before the first write, so
+  a concurrent editor/generator change aborts the operation instead of being
+  overwritten from a stale formatter snapshot;
+- write-safety override flags are rejected unless `--write` is active.
 
 ## Rust SDK
 

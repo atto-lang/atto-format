@@ -79,6 +79,12 @@ enum PrevEvent {
     CallableEnd(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeywordTerminator {
+    Fi,
+    Done,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct LexState {
     block_comment: bool,
@@ -103,6 +109,7 @@ struct LexState {
 /// It does not reorder declarations or rewrite tokens whose meaning depends on
 /// the compiler's evolving grammar.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
+    reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
@@ -110,6 +117,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
+    let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
     let mut lex = LexState::default();
     let mut next_order = 0usize;
 
@@ -122,12 +130,59 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let mut content = trimmed_end.trim_start().to_string();
-        let starts_end = starts_word(&content, "end");
-        let starts_fi = starts_word(&content, "fi");
-        let starts_done = starts_word(&content, "done");
-        let branch_line = starts_word(&content, "else") || starts_word(&content, "elseif");
+        let mut structural_lex = lex;
+        let structural_content: String = scan_visible(&content, &mut structural_lex)
+            .into_iter()
+            .collect();
+        let structural = structural_content.trim_start();
 
-        let leading_closing_braces = leading_closing_braces(&content);
+        let starts_end = starts_word(structural, "end");
+        let starts_fi = starts_word(structural, "fi");
+        let starts_done = starts_word(structural, "done");
+        let branch_line = starts_word(structural, "else") || starts_word(structural, "elseif");
+
+        if starts_fi {
+            match keyword_stack.pop() {
+                Some(KeywordTerminator::Fi) => {}
+                Some(KeywordTerminator::Done) => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `fi` where `done` was expected",
+                    ));
+                }
+                None => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `fi` without a matching `if ... do` block",
+                    ));
+                }
+            }
+        } else if starts_done {
+            match keyword_stack.pop() {
+                Some(KeywordTerminator::Done) => {}
+                Some(KeywordTerminator::Fi) => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `done` where `fi` was expected",
+                    ));
+                }
+                None => {
+                    return Err(FormatError::new(
+                        line_no,
+                        "encountered `done` without a matching `... do` block",
+                    ));
+                }
+            }
+        }
+
+        if branch_line && !matches!(keyword_stack.last(), Some(KeywordTerminator::Fi)) {
+            return Err(FormatError::new(
+                line_no,
+                "encountered `else`/`elseif` without a matching `if ... do` block",
+            ));
+        }
+
+        let leading_closing_braces = leading_closing_braces(structural);
         let keyword_dedent = usize::from(starts_end || starts_fi || starts_done || branch_line);
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
@@ -139,17 +194,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let callable_body = is_callable_body_header(&content, signature_context);
-        let callable_signature = is_callable_signature(&content, signature_context);
+        let callable_body = is_callable_body_header(structural, signature_context);
+        let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body {
-            content = canonicalize_callable_arrow(&content, "->");
+            content = canonicalize_callable_arrow(&content, "->", lex);
         } else if callable_signature {
-            content = canonicalize_callable_arrow(&content, "=>");
+            content = canonicalize_callable_arrow(&content, "=>", lex);
         }
 
         let current_indent = indent;
-        let annotation_line = content.trim_start().starts_with('@');
-        let desired_blanks = if out.is_empty() || is_closer_line(&content) {
+        let annotation_line = structural.starts_with('@');
+        let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
         } else if (callable_body || annotation_line)
             && matches!(prev_event, PrevEvent::CallableEnd(i) if i == current_indent)
@@ -165,14 +220,16 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         out.push(format!("{}{}", INDENT.repeat(current_indent), content));
 
-        let mut line_lex = lex;
-        let brace_events = scan_braces(&content, &mut line_lex);
-        lex = line_lex;
+        let brace_events: Vec<char> = structural
+            .chars()
+            .filter(|c| matches!(c, '{' | '}'))
+            .collect();
+        lex = structural_lex;
 
         let opens = brace_events.iter().filter(|&&c| c == '{').count();
         let closes = brace_events.iter().filter(|&&c| c == '}').count();
         let mut callable_open_available = callable_body;
-        let mut container_open_available = brace_container_kind(&content);
+        let mut container_open_available = brace_container_kind(structural);
         let mut ended_callable = None;
         for event in brace_events {
             match event {
@@ -217,9 +274,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             indent = indent.saturating_sub(nonleading_closes - opens);
         }
 
-        if let Some(kind) = define_kind(&content)
-            && !contains_unquoted_char(&content, '{')
-            && !ends_statement(&content)
+        if let Some(kind) = define_kind(structural)
+            && !structural.contains('{')
+            && !ends_statement(structural)
         {
             next_order += 1;
             define_stack.push(DefineFrame {
@@ -229,7 +286,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             indent += 1;
         }
 
-        if opens_do_block(&content) && !branch_line {
+        if opens_do_block(structural) && !branch_line {
+            keyword_stack.push(if starts_word(structural, "if") {
+                KeywordTerminator::Fi
+            } else {
+                KeywordTerminator::Done
+            });
             indent += 1;
         }
 
@@ -255,6 +317,13 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             normalized.lines().count().max(1),
             "unterminated define block",
         ));
+    }
+    if let Some(terminator) = keyword_stack.last() {
+        let message = match terminator {
+            KeywordTerminator::Fi => "unterminated `if ... do` block (expected `fi`)",
+            KeywordTerminator::Done => "unterminated `... do` block (expected `done`)",
+        };
+        return Err(FormatError::new(normalized.lines().count().max(1), message));
     }
 
     while out.last().is_some_and(|line| line.is_empty()) {
@@ -360,10 +429,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
 }
 
 fn brace_container_kind(line: &str) -> Option<BraceKind> {
-    if !contains_unquoted_char(line, '{') {
-        return None;
-    }
-    let prefix = line.split('{').next().unwrap_or(line);
+    let prefix = line.split('{').next()?;
     let words: Vec<&str> = prefix
         .split(|c: char| !is_ident_char(c))
         .filter(|word| !word.is_empty())
@@ -385,11 +451,11 @@ fn brace_container_kind(line: &str) -> Option<BraceKind> {
     }
 }
 
-fn is_callable_body_header(line: &str, signature_context: bool) -> bool {
-    if !contains_unquoted_char(line, '{') || !line.contains('(') {
+fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
+    if !structural.contains('{') || !structural.contains('(') {
         return false;
     }
-    let lower = line.trim_start();
+    let lower = structural.trim_start();
     for kw in [
         "if", "for", "while", "switch", "match", "catch", "recover", "defer",
     ] {
@@ -406,10 +472,10 @@ fn is_callable_body_header(line: &str, signature_context: bool) -> bool {
     // Methods omit `fnc`. A braced callable inside interface/trait is a default
     // implementation and therefore still uses executable `->` syntax.
     if signature_context
-        || line.contains("self")
-        || line.contains(") ->")
-        || line.contains("): ")
-        || line.contains(") =>")
+        || structural.contains("self")
+        || structural.contains(") ->")
+        || structural.contains("): ")
+        || structural.contains(") =>")
     {
         return true;
     }
@@ -418,11 +484,11 @@ fn is_callable_body_header(line: &str, signature_context: bool) -> bool {
     !prefix.contains('=') && !prefix.contains('.') && !prefix.ends_with("new")
 }
 
-fn is_callable_signature(line: &str, signature_context: bool) -> bool {
+fn is_callable_signature(structural: &str, signature_context: bool) -> bool {
     signature_context
-        && line.trim_end().ends_with(';')
-        && line.contains('(')
-        && !contains_unquoted_char(line, '{')
+        && structural.trim_end().ends_with(';')
+        && structural.contains('(')
+        && !structural.contains('{')
 }
 
 fn contains_word(line: &str, word: &str) -> bool {
@@ -430,12 +496,11 @@ fn contains_word(line: &str, word: &str) -> bool {
         .any(|part| part == word)
 }
 
-fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
-    let body_at = line
-        .find('{')
+fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> String {
+    let body_at = first_visible_char_index(line, '{', initial)
         .or_else(|| line.rfind(';'))
         .unwrap_or(line.len());
-    let Some(close_paren) = callable_parameter_close(line, body_at) else {
+    let Some(close_paren) = callable_parameter_close(line, body_at, initial) else {
         return line.to_string();
     };
     let tail = &line[close_paren + 1..body_at];
@@ -455,26 +520,50 @@ fn canonicalize_callable_arrow(line: &str, desired: &str) -> String {
     format!("{before} {desired} {after}")
 }
 
-fn callable_parameter_close(line: &str, limit: usize) -> Option<usize> {
-    let mut quote: Option<char> = None;
-    let mut escape = false;
+fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Option<usize> {
+    let chars: Vec<(usize, char)> = line[..limit].char_indices().collect();
+    let mut state = initial;
     let mut depth = 0usize;
     let mut saw_open = false;
+    let mut i = 0usize;
 
-    for (index, ch) in line[..limit].char_indices() {
-        if let Some(q) = quote {
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == q {
-                quote = None;
+    while i < chars.len() {
+        let (index, ch) = chars[i];
+        let next = chars.get(i + 1).map(|(_, c)| *c);
+
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                state.block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
             }
             continue;
         }
 
+        if let Some(q) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if ch == '\\' {
+                state.escape = true;
+            } else if ch == q {
+                state.quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '/' && next == Some('/') {
+            break;
+        }
+        if ch == '/' && next == Some('*') {
+            state.block_comment = true;
+            i += 2;
+            continue;
+        }
         if matches!(ch, '"' | '\'' | '`') {
-            quote = Some(ch);
+            state.quote = Some(ch);
+            i += 1;
             continue;
         }
 
@@ -491,70 +580,47 @@ fn callable_parameter_close(line: &str, limit: usize) -> Option<usize> {
             }
             _ => {}
         }
+        i += 1;
     }
 
     None
 }
 
 fn opens_do_block(line: &str) -> bool {
-    let code = strip_line_comment(line);
-    let t = code.trim_end();
+    let t = line.trim_end();
     (t.ends_with(" do") || t.ends_with("; do")) && !starts_word(t.trim_start(), "done")
 }
 
-fn strip_line_comment(line: &str) -> &str {
-    let bytes = line.as_bytes();
-    let mut quote: Option<u8> = None;
-    let mut escape = false;
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if escape {
-                escape = false;
-            } else if b == b'\\' {
-                escape = true;
-            } else if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
-        }
-        if matches!(b, b'"' | b'\'' | b'`') {
-            quote = Some(b);
-            i += 1;
-            continue;
-        }
-        if b == b'/' && bytes[i + 1] == b'/' {
-            return &line[..i];
-        }
-        i += 1;
-    }
-    line
-}
-
-fn contains_unquoted_char(line: &str, needle: char) -> bool {
+fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
+    let lines: Vec<&str> = source.split('\n').collect();
     let mut state = LexState::default();
-    scan_visible(line, &mut state)
-        .into_iter()
-        .any(|c| c == needle)
+
+    for (index, line) in lines.iter().enumerate() {
+        let logical = line.strip_suffix('\r').unwrap_or(line);
+        let mut next = state;
+        scan_visible(logical, &mut next);
+
+        if index + 1 < lines.len() && next.quote.is_some() {
+            return Err(FormatError::new(
+                index + 1,
+                "multiline string/template literals are not formatted yet; refusing to change literal bytes",
+            ));
+        }
+
+        state = next;
+    }
+
+    Ok(())
 }
 
-fn scan_braces(line: &str, state: &mut LexState) -> Vec<char> {
-    scan_visible(line, state)
-        .into_iter()
-        .filter(|c| matches!(c, '{' | '}'))
-        .collect()
-}
-
-fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
-    let chars: Vec<char> = line.chars().collect();
-    let mut visible = Vec::new();
+fn first_visible_char_index(line: &str, needle: char, initial: LexState) -> Option<usize> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let mut state = initial;
     let mut i = 0usize;
 
     while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
+        let (byte_index, c) = chars[i];
+        let next = chars.get(i + 1).map(|(_, c)| *c);
 
         if state.block_comment {
             if c == '*' && next == Some('/') {
@@ -579,7 +645,7 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
         }
 
         if c == '/' && next == Some('/') {
-            break;
+            return None;
         }
         if c == '/' && next == Some('*') {
             state.block_comment = true;
@@ -587,6 +653,63 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
             continue;
         }
         if matches!(c, '"' | '\'' | '`') {
+            state.quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if c == needle {
+            return Some(byte_index);
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut visible = Vec::new();
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+
+        if state.block_comment {
+            if c == '*' && next == Some('/') {
+                state.block_comment = false;
+                visible.push(' ');
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(q) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if c == '\\' {
+                state.escape = true;
+            } else if c == q {
+                state.quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            break;
+        }
+        if c == '/' && next == Some('*') {
+            visible.push(' ');
+            state.block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(c, '"' | '\'' | '`') {
+            visible.push(' ');
             state.quote = Some(c);
             i += 1;
             continue;

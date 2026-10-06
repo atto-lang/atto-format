@@ -204,3 +204,62 @@ fn write_outside_git_fails_closed_without_override() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn write_safety_overrides_require_write_mode() {
+    let repo = TempRepo::new("override-mode");
+    repo.write("sample.ores", UNFORMATTED);
+
+    let output = repo.run(&["--check", "--ok-to-mod-untracked-files", "sample.ores"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("write-safety override flags require --write")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_symlink_inputs_are_refused() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::new("symlink");
+    let target = repo.write("target.ores", UNFORMATTED);
+    let link = repo.root.join("link.ores");
+    symlink(&target, &link).unwrap();
+
+    let output = repo.run(&["link.ores"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(target).unwrap(), UNFORMATTED);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("refusing explicit symlink input"));
+}
+
+#[cfg(unix)]
+#[test]
+fn recursive_walk_skips_symlinked_ores_files() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::new("walk-symlink");
+    let real = repo.write("real.ores", FORMATTED);
+    let external_root = std::env::temp_dir().join(format!(
+        "oresfmt-external-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&external_root).unwrap();
+    let external = external_root.join("external.ores");
+    fs::write(&external, UNFORMATTED).unwrap();
+    symlink(&external, repo.root.join("linked.ores")).unwrap();
+
+    let output = repo.run(&["."]);
+
+    assert!(output.status.success());
+    assert_eq!(fs::read_to_string(real).unwrap(), FORMATTED);
+    assert_eq!(fs::read_to_string(&external).unwrap(), UNFORMATTED);
+
+    let _ = fs::remove_dir_all(external_root);
+}

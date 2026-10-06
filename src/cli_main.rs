@@ -106,6 +106,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         );
     }
 
+    if mode != Mode::Write
+        && (policy.allow_dirty_tracked || policy.allow_untracked || policy.allow_outside_git)
+    {
+        return Err("write-safety override flags require --write".into());
+    }
+
     let has_stdin = paths
         .iter()
         .any(|path| path.as_os_str() == std::ffi::OsStr::new("-"));
@@ -203,17 +209,31 @@ fn write_files(
         let input = fs::read_to_string(&path)?;
         let formatted = format_source(&input)?;
         if formatted != input {
-            changes.push((path, formatted));
+            changes.push((path, input, formatted));
         }
     }
 
     // Validate the entire write set first. A refusal on the last file must not
     // leave the workspace half-formatted.
-    for (path, _) in &changes {
+    for (path, _, _) in &changes {
         enforce_write_policy(path, policy)?;
     }
 
-    for (path, formatted) in changes {
+    // Re-read the whole write set after Git preflight. This catches editors,
+    // generators, or hooks that changed a file while formatting was being
+    // prepared, instead of overwriting newer bytes with a stale snapshot.
+    for (path, original, _) in &changes {
+        let current = fs::read_to_string(path)?;
+        if current.as_bytes() != original.as_bytes() {
+            return Err(format!(
+                "refusing to overwrite file changed during formatter preflight: {}",
+                path.display()
+            )
+            .into());
+        }
+    }
+
+    for (path, _, formatted) in changes {
         fs::write(&path, formatted)?;
         println!("formatted {}", path.display());
     }
@@ -337,12 +357,22 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
 }
 
 fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
-    if path.is_file() {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("cannot inspect {}: {err}", path.display()))?;
+
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "refusing explicit symlink input: {}; pass the real path instead",
+            path.display()
+        )
+        .into());
+    }
+    if metadata.is_file() {
         out.push(path.to_path_buf());
         return Ok(());
     }
-    if !path.is_dir() {
-        return Err(format!("path does not exist: {}", path.display()).into());
+    if !metadata.is_dir() {
+        return Err(format!("unsupported input path: {}", path.display()).into());
     }
 
     let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
@@ -351,13 +381,20 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
     for entry in entries {
         let child = entry.path();
         let name = entry.file_name();
+        let file_type = entry.file_type()?;
 
-        if child.is_dir() && matches!(name.to_str(), Some(".git" | "target" | ".cache")) {
+        // Never follow symlinks discovered during a recursive walk. Besides
+        // avoiding directory cycles, this prevents a repository-local path
+        // from causing writes to a target outside the requested tree.
+        if file_type.is_symlink() {
             continue;
         }
-        if child.is_dir() {
+        if file_type.is_dir() && matches!(name.to_str(), Some(".git" | "target" | ".cache")) {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if child.extension().is_some_and(|ext| ext == "ores") {
+        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "ores") {
             out.push(child);
         }
     }
