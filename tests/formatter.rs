@@ -915,11 +915,19 @@ const mut editable = make();
 val owned = make();
 let replaceable = make();
 let mut flexible = make();
+val [left, right] = pair();
+let mut [first, second] = pair();
+for val item of values do
+consume(item);
+done
+for let mut item of mutable_values do
+item.foo = 1;
+done
 select {
-case readch input: const job {
+case job = readch(input) -> {
 consume(job);
 }
-case readch output: val job {
+case val job = readch(output) -> {
 job.foo = 1;
 }
 }
@@ -932,6 +940,10 @@ return;
     assert!(output.contains("val owned = make();"));
     assert!(output.contains("let replaceable = make();"));
     assert!(output.contains("let mut flexible = make();"));
-    assert!(output.contains("case readch input: const job {"));
-    assert!(output.contains("case readch output: val job {"));
+    assert!(output.contains("val [left, right] = pair();"));
+    assert!(output.contains("let mut [first, second] = pair();"));
+    assert!(output.contains("for val item of values do"));
+    assert!(output.contains("for let mut item of mutable_values do"));
+    assert!(output.contains("case job = readch(input) -> {"));
+    assert!(output.contains("case val job = readch(output) -> {"));
 }
