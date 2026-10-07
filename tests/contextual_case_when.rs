@@ -86,3 +86,12 @@ fn contextual_words_are_valid_select_channel_and_value_names() {
     assert!(formatted.contains("when writech when, case: {"));
     assert!(is_formatted(&formatted).unwrap());
 }
+
+#[test]
+fn contextual_assignments_in_legacy_unbraced_arms_are_not_arm_boundaries() {
+    let src = "select { case readch input: val case; when = case; consume(when); default: }\n";
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("when = case; consume(when);"));
+    assert!(formatted.contains("when readch input: val case {"));
+    assert!(is_formatted(&formatted).unwrap());
+}
