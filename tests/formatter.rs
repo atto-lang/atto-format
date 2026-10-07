@@ -797,3 +797,110 @@ fi
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
 }
+
+#[test]
+fn canonicalizes_bare_for_forever_aliases_to_loop() {
+    let source = r#"fnc spin() => void {
+for {
+tick();
+break;
+}
+for do
+tick();
+break;
+done
+for (let i = 0; i < 2; i = i + 1) {
+tick();
+}
+for const item of values do
+tick(item);
+done
+}
+"#;
+    let expected = r#"fnc spin() -> void {
+  loop {
+    tick();
+    break;
+  }
+  loop do
+    tick();
+    break;
+  done
+  for (let i = 0; i < 2; i = i + 1) {
+    tick();
+  }
+  for const item of values do
+    tick(item);
+  done
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn formats_pre_test_and_post_test_while_forms() {
+    let source = r#"fnc loops() => void {
+while ready do
+tick();
+done
+while ready {
+tick();
+}
+do {
+tick();
+} while (ready);
+block {
+val local = 1;
+stdio.stdout.write(local);
+}
+}
+"#;
+    let expected = r#"fnc loops() -> void {
+  while ready do
+    tick();
+  done
+  while ready {
+    tick();
+  }
+  do {
+    tick();
+  } while (ready);
+  block {
+    val local = 1;
+    stdio.stdout.write(local);
+  }
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn bare_for_rewrite_is_comment_aware_and_does_not_touch_real_for_headers() {
+    let source = r#"for /* forever */ {
+break;
+}
+for (;;) {
+break;
+}
+for await const item of stream() {
+consume(item);
+}
+"#;
+    let expected = r#"loop /* forever */ {
+  break;
+}
+for (;;) {
+  break;
+}
+for await const item of stream() {
+  consume(item);
+}
+"#;
+    assert_eq!(format_source(source).unwrap(), expected);
+}

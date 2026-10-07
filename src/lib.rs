@@ -108,6 +108,7 @@ struct LexState {
 /// - executable callable return separators are canonicalized to `->`;
 /// - interface/trait callable signatures are canonicalized to `=>`;
 /// - legacy scheduler spelling `rt yield` is canonicalized to `rt cooperate`;
+/// - bare forever-loop aliases `for { ... }` / `for do ... done` are canonicalized to `loop`;
 /// - `end`, `fi`, `done`, braces, class/interface/trait/struct/module nesting,
 ///   actor bodies, and strings/comments are indentation-aware.
 ///
@@ -137,6 +138,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         let mut content = trimmed_end.trim_start().to_string();
         content = canonicalize_conditional_line(&content, lex);
+        content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
@@ -678,6 +680,35 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
     for (start, end, replacement) in replacements.into_iter().rev() {
         result.replace_range(start..end, &replacement);
     }
+    result
+}
+
+fn canonicalize_forever_loop_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    let Some(first) = words.first().copied() else {
+        return line.to_string();
+    };
+    if &line[first.start..first.end] != "for" {
+        return line.to_string();
+    }
+
+    // Decide from visible syntax, not raw bytes, so comments cannot trick the
+    // formatter into rewriting a conventional or iterator for-loop.
+    let mut state = initial;
+    let visible: String = scan_visible(line, &mut state).into_iter().collect();
+    let trimmed = visible.trim_start();
+    if !starts_word(trimmed, "for") {
+        return line.to_string();
+    }
+    let rest = trimmed["for".len()..].trim_start();
+    let bare_braced = rest.starts_with('{');
+    let bare_keyword = starts_word(rest, "do") && rest["do".len()..].trim().is_empty();
+    if !bare_braced && !bare_keyword {
+        return line.to_string();
+    }
+
+    let mut result = line.to_string();
+    result.replace_range(first.start..first.end, "loop");
     result
 }
 
