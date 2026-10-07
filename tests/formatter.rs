@@ -1093,3 +1093,61 @@ return;
     assert!(output.contains("when readch input: const job {"));
     assert!(output.contains("when readch output: val job {"));
 }
+
+
+#[test]
+fn canonicalizes_name_first_parameter_compatibility_to_type_first() {
+    let source = r#"fnc run(job: Job, options: Options): Result {
+return dispatch(job: job, options: options);
+}
+"#;
+    let expected = r#"fnc run(Job job, Options options) -> Result {
+  return dispatch(job: job, options: options);
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn canonicalizes_name_first_parameters_in_methods_and_interface_signatures() {
+    let source = r#"define class Worker as
+pub run(job: Job): Result {
+return process(job);
+}
+end
+
+define interface Runner
+run(job: Job): Result;
+end
+"#;
+    let expected = r#"define class Worker as
+  pub run(Job job) -> Result {
+    return process(job);
+  }
+end
+
+define interface Runner
+  run(Job job) => Result;
+end
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn parameter_order_rewrite_understands_nested_structural_types() {
+    let source = r#"fnc inspect(value: {id: string, active: bool}): string {
+return value.id;
+}
+"#;
+    let expected = r#"fnc inspect({id: string, active: bool} value) -> string {
+  return value.id;
+}
+"#;
+    assert_eq!(format_source(source).unwrap(), expected);
+}
