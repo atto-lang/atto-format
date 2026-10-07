@@ -10,7 +10,7 @@ identical behavior.
 
 - two spaces per indentation level, never tabs for indentation;
 - static `select`, `nb select`, and `try select` arms are indented one level;
-- every `case` and `default` arm has a braced body;
+- every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
 - LF line endings, no trailing whitespace, one final newline;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
@@ -62,7 +62,7 @@ Static select arms use the same nesting rules as other blocks:
 
 ```ores
 nb select {
-  case readch inbox: val value {
+  when readch inbox: val value {
     nb writech replies, value * 10;
   }
   default: {
@@ -70,9 +70,11 @@ nb select {
 }
 ```
 
-The formatter adds braces to legacy unbraced select arms, including read arms
-without a binding and write/default arms. Comments and literals retain their
-contents. Dynamic `select from cases` expressions retain their syntax.
+The formatter accepts both `when` and legacy `case` for static select arms,
+canonicalizes `case` to `when`, and adds braces to legacy unbraced select
+arms, including read arms without a binding and write/default arms. Comments
+and literals retain their contents. Dynamic `select from cases` expressions
+retain their syntax.
 
 Streaming channel writes use ordinary `for ... of ...` loops or
 `for await ... of ...` over an async iterator. Both braced loops and `do`/`done`
