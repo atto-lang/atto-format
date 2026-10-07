@@ -33,6 +33,206 @@ pub routine main() -> void {
 }
 
 #[test]
+fn expression_body_lambdas_keep_executable_slim_arrow() {
+    let src = r#"fnc demo() => void {
+val Fnc<int, int> one = |value| -> value * 2;
+val Fnc<int, int> two = |value| ->
+value * 2;
+val Fnc<int, int> typed = (int value) -> value * 3;
+val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
+val Fnc<int, int> block = |value| -> {
+return value * 2;
+};
+return;
+}
+"#;
+
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> one = |value| -> value * 2;
+  val Fnc<int, int> two = |value| ->
+    value * 2;
+  val Fnc<int, int> typed = (int value) -> value * 3;
+  val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
+  val Fnc<int, int> block = |value| -> {
+    return value * 2;
+  };
+  return;
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn expression_body_lambda_inside_call_is_not_rewritten_as_type_arrow() {
+    let src = r#"fnc apply(Fnc<int, int> callback, int value) => int {
+return callback(value);
+}
+
+fnc demo() => int {
+return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    let expected = r#"fnc apply(Fnc<int, int> callback, int value) -> int {
+  return callback(value);
+}
+
+
+fnc demo() -> int {
+  return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn multiline_expression_lambda_indents_until_its_required_semicolon() {
+    let src = r#"fnc demo() -> void {
+val Fnc<int, int> choose = |value| ->
+value > 0
+? value
+: -value;
+val Fnc<int, int> nested = |value| ->
+apply(|| -> {
+return value;
+});
+return;
+}
+"#;
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> choose = |value| ->
+    value > 0
+    ? value
+    : -value;
+  val Fnc<int, int> nested = |value| ->
+    apply(|| -> {
+      return value;
+    });
+  return;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let err =
+        format_source("fnc bad() -> void {\nval Fnc<int, int> f = |value| ->\nvalue * 2\n}\n")
+            .unwrap_err();
+    assert!(err.message().contains("explicit ';'"));
+}
+
+#[test]
+fn structured_expression_lambda_after_assignment_gets_continuation_indent() {
+    let src = r#"fnc demo() -> void {
+val Fnc<int, {value: int}> wrap =
+|value| -> obj{value: value * 2};
+val wrapped = wrap(4);
+return;
+}
+"#;
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, {value: int}> wrap =
+    |value| -> obj{value: value * 2};
+  val wrapped = wrap(4);
+  return;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn canonicalizes_current_generator_sugar_and_preserves_yield_delegation() {
+    let src = r#"fnc gen* sync_values(): Iterator<int> {
+rt yield;
+yield* inner();
+return;
+}
+
+async fnc generator* async_values(): AsyncIterator<int> {
+rt yield();
+yield* sync_values();
+return;
+}
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+return gen * value;
+}
+"#;
+    let expected = r#"generator fnc sync_values() -> Iterator<int> {
+  rt cooperate;
+  yield* inner();
+  return;
+}
+
+
+async generator fnc async_values() -> AsyncIterator<int> {
+  rt cooperate();
+  yield* sync_values();
+  return;
+}
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+  return gen * value;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn else_followed_by_nested_if_is_not_collapsed_to_elif() {
+    let src = r#"fnc classify(int value) -> int {
+if value < 0; then
+return -1;
+else
+if value == 0; then
+return 0;
+else
+return 1;
+fi
+fi
+}
+"#;
+    let expected = r#"fnc classify(int value) -> int {
+  if value < 0; then
+    return -1;
+  else
+    if value == 0; then
+      return 0;
+    else
+      return 1;
+    fi
+  fi
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn preserves_explicit_receivers_and_native_collection_members() {
+    let src = r#"define class Cursor as
+pub next(self &mut Cursor)() -> int {
+self.index = self.index + 1;
+return self.items.size;
+}
+end
+"#;
+    let expected = r#"define class Cursor as
+  pub next(self &mut Cursor)() -> int {
+    self.index = self.index + 1;
+    return self.items.size;
+  }
+end
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn module_owned_class_is_indented_as_a_module_member() {
     let src = r#"define module Accounts as
 define class Account as
@@ -401,6 +601,37 @@ fn rejects_unterminated_keyword_blocks() {
 }
 
 #[test]
+fn canonicalizes_route_guard_do_to_then() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) => Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+fi
+if !pattern.is_valid(); do
+return Err("invalid route pattern");
+fi
+if pattern.size() > self.max_segments_value; do
+return Err("route pattern exceeds max_segments");
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  fi
+  if !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  fi
+  if pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  fi
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn multiline_block_comments_cannot_change_structure() {
     let src = r#"define class Box as
 /*
@@ -580,13 +811,27 @@ fn select_cases_use_spaces_and_braced_bodies_in_every_wait_mode() {
             "actor fnc relay() -> void {{\n\t{mode}select first {{\n\tcase readch inbox: val value\n\t\tnb writech replies, value * 10;\n\tcase writech replies, 0:\n\t\treturn;\n\tdefault:\n\t\treturn;\n\t}}\n}}\n"
         );
         let expected = format!(
-            "actor fnc relay() -> void {{\n  {mode}select first {{\n    case readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    case writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
+            "actor fnc relay() -> void {{\n  {mode}select first {{\n    when readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    when writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
         );
         let formatted = format_source(&source).unwrap();
         assert_eq!(formatted, expected);
         assert!(!formatted.contains('\t'));
         assert!(is_formatted(&formatted).unwrap());
     }
+}
+
+#[test]
+fn select_case_is_accepted_but_canonicalized_to_when() {
+    let source = "do nb select { case readch messages: val msg { stdio.println(msg); } }\n";
+    let expected =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let already_canonical =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    assert_eq!(format_source(already_canonical).unwrap(), already_canonical);
 }
 
 #[test]
@@ -599,9 +844,9 @@ return;
 } } default: {} }
 "#;
     let expected = r#"select {
-  case readch inbox: val value {
+  when readch inbox: val value {
     nb select {
-      case writech replies, value: { // sent
+      when writech replies, value: { // sent
         stdio.println("case default: { } λ");
       }
       default: { /* skipped */
@@ -621,7 +866,7 @@ return;
 #[test]
 fn select_migration_handles_inline_legacy_arms_nested_expressions_and_empty_arms() {
     let source = "select random { case writech output, make(\"x:y\", [1, 2]): send(); case readch input: const x; default: }\n";
-    let expected = "select random {\n  case writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  case readch input: const x {\n  }\n  default: {\n  }\n}\n";
+    let expected = "select random {\n  when writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  when readch input: const x {\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -650,7 +895,7 @@ fn malformed_static_select_fails_closed() {
 #[test]
 fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
     let source = "select { /* choose */ case readch inbox: val value { /* body */ send(value); } /* next */ default: { /* empty */ } }\n";
-    let expected = "select { /* choose */\n  case readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
+    let expected = "select { /* choose */\n  when readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -659,7 +904,7 @@ fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
 #[test]
 fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
     let source = "select {\ncase readch input: val x\nfor const value of [x] do\nnb select {\ncase writech output, value:\nreturn;\n}\ndone\ndefault:\n}\n";
-    let expected = "select {\n  case readch input: val x {\n    for const value of [x] do\n      nb select {\n        case writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
+    let expected = "select {\n  when readch input: val x {\n    for const value of [x] do\n      nb select {\n        when writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -669,10 +914,182 @@ fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
 fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     let source = "select { case readch ready ? inbox : other: val x {} case writech output, ready ? 1 : otherReady ? 2 : 3: {} default: {} }\n";
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("case readch ready ? inbox : other: val x {\n"));
-    assert!(formatted.contains("case writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
+    assert!(formatted.contains("when readch ready ? inbox : other: val x {\n"));
+    assert!(formatted.contains("when writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
     assert!(is_formatted(&formatted).unwrap());
     let cast = format_source("select { case writech output, value as? int: {} }\n").unwrap();
-    assert!(cast.contains("case writech output, value as? int: {\n"));
+    assert!(cast.contains("when writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
+}
+
+#[test]
+fn canonicalizes_route_guard_conditionals_to_then_and_elif() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+elseif !pattern.is_valid(); do
+return Err("invalid route pattern");
+else if pattern.size() > self.max_segments_value; then
+return Err("route pattern exceeds max_segments");
+else
+return Ok();
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  elif !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  elif pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  else
+    return Ok();
+  fi
+}
+"#;
+
+    let formatted = format_source(src).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn canonicalizes_bare_for_forever_aliases_to_loop() {
+    let source = r#"fnc spin() => void {
+for {
+tick();
+break;
+}
+for do
+tick();
+break;
+done
+for (let i = 0; i < 2; i = i + 1) {
+tick();
+}
+for const item of values do
+tick(item);
+done
+}
+"#;
+    let expected = r#"fnc spin() -> void {
+  loop {
+    tick();
+    break;
+  }
+  loop do
+    tick();
+    break;
+  done
+  for (let i = 0; i < 2; i = i + 1) {
+    tick();
+  }
+  for const item of values do
+    tick(item);
+  done
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn formats_pre_test_and_post_test_while_forms() {
+    let source = r#"fnc loops() => void {
+while ready do
+tick();
+done
+while ready {
+tick();
+}
+do {
+tick();
+} while (ready);
+block {
+val local = 1;
+stdio.stdout.write(local);
+}
+}
+"#;
+    let expected = r#"fnc loops() -> void {
+  while ready do
+    tick();
+  done
+  while ready {
+    tick();
+  }
+  do {
+    tick();
+  } while (ready);
+  block {
+    val local = 1;
+    stdio.stdout.write(local);
+  }
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn bare_for_rewrite_is_comment_aware_and_does_not_touch_real_for_headers() {
+    let source = r#"for /* forever */ {
+break;
+}
+for (;;) {
+break;
+}
+for await const item of stream() {
+consume(item);
+}
+"#;
+    let expected = r#"loop /* forever */ {
+  break;
+}
+for (;;) {
+  break;
+}
+for await const item of stream() {
+  consume(item);
+}
+"#;
+    assert_eq!(format_source(source).unwrap(), expected);
+}
+
+#[test]
+fn preserves_orthogonal_binding_and_select_case_qualifiers() {
+    // Compiler contract: const = fixed/read-only, val = const mut,
+    // let = rebindable/read-only, let mut = rebindable/mutable.
+    // The formatter must never drop or reorder mutability qualifiers.
+    let source = r#"fnc example(): void {
+const item = make();
+const mut editable = make();
+val owned = make();
+let replaceable = make();
+let mut flexible = make();
+select {
+case readch input: const job {
+consume(job);
+}
+case readch output: val job {
+job.foo = 1;
+}
+}
+return;
+}
+"#;
+    let output = format_source(source).unwrap();
+    assert!(output.contains("const item = make();"));
+    assert!(output.contains("const mut editable = make();"));
+    assert!(output.contains("val owned = make();"));
+    assert!(output.contains("let replaceable = make();"));
+    assert!(output.contains("let mut flexible = make();"));
+    assert!(output.contains("when readch input: const job {"));
+    assert!(output.contains("when readch output: val job {"));
 }
