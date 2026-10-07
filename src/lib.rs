@@ -130,6 +130,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
     let mut lex = LexState::default();
     let mut next_order = 0usize;
+    // Expression-bodied pipe lambdas require an explicit statement semicolon.
+    // While a body spans lines, indent it one continuation level without
+    // changing the structural brace/keyword nesting used by the language.
+    let mut lambda_expr_continuation: Option<usize> = None;
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
@@ -143,6 +147,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_conditional_line(&content, lex);
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
+        content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
@@ -228,7 +233,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             content = canonicalize_callable_arrow(&content, "=>", lex);
         }
 
-        let current_indent = indent;
+        let brace_depth_before_line = brace_stack.len();
+        let current_indent = indent + usize::from(lambda_expr_continuation.is_some());
         let annotation_line = structural.starts_with('@');
         let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
@@ -324,6 +330,23 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         if branch_line && branch_keyword_indented {
             indent += 1;
         }
+
+        if let Some(base_brace_depth) = lambda_expr_continuation {
+            // A semicolon inside a nested block lambda/object literal is not
+            // the terminator for the outer expression-bodied lambda statement.
+            if ends_statement(structural) && brace_stack.len() <= base_brace_depth {
+                lambda_expr_continuation = None;
+            }
+        } else if opens_multiline_expression_body_pipe_lambda(structural) {
+            lambda_expr_continuation = Some(brace_depth_before_line);
+        }
+    }
+
+    if lambda_expr_continuation.is_some() {
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            "unterminated expression-bodied lambda statement (expected explicit ';')",
+        ));
     }
 
     if lex.block_comment || lex.quote.is_some() {
@@ -1130,6 +1153,101 @@ fn canonicalize_forever_loop_line(line: &str, initial: LexState) -> String {
     let mut result = line.to_string();
     result.replace_range(first.start..first.end, "loop");
     result
+}
+
+fn canonicalize_generator_sugar_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.len() < 2 {
+        return line.to_string();
+    }
+
+    let is_modifier_word = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "static"
+                | "async"
+                | "generator"
+                | "gen"
+                | "nlex"
+                | "pure"
+                | "trap"
+                | "structural"
+                | "abstract"
+                | "quantum"
+                | "fnc"
+                | "routine"
+        )
+    };
+    let is_callable_kind = |word: &str| matches!(word, "fnc" | "routine");
+
+    for (index, span) in words.iter().enumerate() {
+        let word = &line[span.start..span.end];
+        if !matches!(word, "gen" | "generator") {
+            continue;
+        }
+        if !words[..=index]
+            .iter()
+            .all(|part| is_modifier_word(&line[part.start..part.end]))
+        {
+            continue;
+        }
+
+        let kind_before = words[..index]
+            .iter()
+            .any(|part| is_callable_kind(&line[part.start..part.end]));
+        let mut kind_after = false;
+        for part in words.iter().skip(index + 1) {
+            let next_word = &line[part.start..part.end];
+            if !is_modifier_word(next_word) {
+                break;
+            }
+            if is_callable_kind(next_word) {
+                kind_after = true;
+                break;
+            }
+        }
+        if !kind_before && !kind_after {
+            continue;
+        }
+
+        let next_start = words.get(index + 1).map_or(line.len(), |part| part.start);
+        let gap = &line[span.end..next_start];
+        let Some(star_offset) = gap.find('*') else {
+            continue;
+        };
+        if gap[..star_offset].chars().any(|c| !c.is_whitespace())
+            || gap[star_offset + 1..].chars().any(|c| !c.is_whitespace())
+        {
+            continue;
+        }
+
+        let mut result = line.to_string();
+        result.replace_range(span.start..span.end + star_offset + 1, "generator");
+        return result;
+    }
+
+    line.to_string()
+}
+
+fn opens_multiline_expression_body_pipe_lambda(line: &str) -> bool {
+    if ends_statement(line) {
+        return false;
+    }
+    let Some(arrow) = line.rfind("->") else {
+        return false;
+    };
+    let before = &line[..arrow];
+    if before.chars().filter(|c| *c == '|').count() < 2 {
+        return false;
+    }
+
+    // The compiler's lexical rule is exact: only an immediate expression-level
+    // '{' after the arrow selects the statement-block lambda form. Everything
+    // else is an expression body and therefore needs the outer statement's
+    // explicit semicolon.
+    !line[arrow + 2..].trim_start().starts_with('{')
 }
 
 fn canonicalize_rt_cooperate_line(line: &str, initial: LexState) -> String {
