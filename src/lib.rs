@@ -1046,10 +1046,7 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     };
 
     let parameters = &line[open + 1..close];
-    if parameters.trim().is_empty()
-        || parameters.contains("//")
-        || parameters.contains("/*")
-    {
+    if parameters.trim().is_empty() || parameters.contains("//") || parameters.contains("/*") {
         return line.to_string();
     }
 
@@ -1267,10 +1264,6 @@ fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Opti
     callable_parameter_bounds(line, limit, initial).map(|(_, close)| close)
 }
 
-/*
- * Historical scanner retained below in git history; callable_parameter_bounds
- * is now shared by arrow and parameter-order canonicalization.
- */
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WordSpan {
     start: usize,
