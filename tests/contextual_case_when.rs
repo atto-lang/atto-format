@@ -58,7 +58,8 @@ fn switch_case_keyword_and_case_subject_identifier_are_not_rewritten() {
 
 #[test]
 fn nested_switches_keep_their_own_end_and_are_idempotent() {
-    let src = "define module M as\nswitch 1;\ncase 1 -> {\nswitch 2\ncase 2 -> {}\nend\n}\nend\nend\n";
+    let src =
+        "define module M as\nswitch 1;\ncase 1 -> {\nswitch 2\ncase 2 -> {}\nend\n}\nend\nend\n";
     let expected = "define module M as\n  switch 1;\n    case 1 -> {\n      switch 2\n        case 2 -> {}\n      end\n    }\n  end\nend\n";
     assert_eq!(format_source(src).unwrap(), expected);
     assert!(is_formatted(expected).unwrap());
@@ -75,4 +76,13 @@ fn switch_closers_cannot_cross_unclosed_braces() {
 fn switch_text_in_comments_and_literals_does_not_open_a_block() {
     let src = "// switch case;\nconst message = \"switch when;\";\n/* switch 1; */\n";
     assert_eq!(format_source(src).unwrap(), src);
+}
+
+#[test]
+fn contextual_words_are_valid_select_channel_and_value_names() {
+    let src = "select { case readch case: val when {} case writech when, case: {} }\n";
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("when readch case: val when {"));
+    assert!(formatted.contains("when writech when, case: {"));
+    assert!(is_formatted(&formatted).unwrap());
 }

@@ -224,10 +224,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         if starts_end {
             let frame = define_stack.last().ok_or_else(|| {
-                FormatError::new(line_no, "encountered `end` without a matching define or switch block")
+                FormatError::new(
+                    line_no,
+                    "encountered `end` without a matching define or switch block",
+                )
             })?;
-            if brace_stack.len() != frame.brace_depth
-                || keyword_stack.len() != frame.keyword_depth
+            if brace_stack.len() != frame.brace_depth || keyword_stack.len() != frame.keyword_depth
             {
                 return Err(FormatError::new(
                     line_no,

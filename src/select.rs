@@ -179,7 +179,6 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     ")" | "]" | "}" => {
                         nesting.pop();
                     }
-                    "when" | "case" | "default" if nesting.is_empty() => break,
                     _ => {}
                 }
                 header += 1;
