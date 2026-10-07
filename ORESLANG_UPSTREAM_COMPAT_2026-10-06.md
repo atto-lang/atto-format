@@ -34,3 +34,31 @@ If source-org Actions cannot allocate a runner, mirror the exact source Git tree
 - Keep Oreslang pointer-free and use runtime ownership operations rather than `&` / `*`.
 - Actor-mailbox data is serialized; local task channels may carry only what their local contract permits.
 - #416 is same-process immutable code-data sharing, not cross-process or JIT-machine-code sharing.
+
+
+## Main-branch recent-commit audit
+
+The formatter is also checked against the latest main-branch language-bearing
+commits through `f1866a7589259f6d000f71d8545c0afdbf68cbc8`.
+
+Relevant merged contracts include:
+
+- #395 / `67d0a7df...`: expression-bodied lambdas, explicit statement semicolons,
+  nested closure/delimiter hardening, and slim-arrow executable syntax.
+- #389 / `622c4cd9...`: `gen*` / `generator*` sugar, `yield*` delegation,
+  and canonical `rt cooperate` with `rt yield` retained only as compatibility input.
+- #380 / `5040b348...`: same-line `else if` disambiguation and explicit mutable
+  method receivers alongside native Array/List member execution.
+- #372 / `18a8c69a...`: callable channel payload rejection is semantic; the
+  formatter preserves such source so the compiler remains the authority.
+
+Formatter policy for these merged changes:
+
+1. Canonicalize `gen*` / `generator*` declaration sugar to `generator`.
+2. Preserve generator `yield` / `yield*`; rewrite only runtime `rt yield`
+   to `rt cooperate`.
+3. Treat a multiline pipe-lambda expression body as a continuation until the
+   containing statement's explicit semicolon.
+4. Do not collapse an `else` followed by a nested `if` on the next line into
+   `elif`; only same-line `else if` is the branch alias.
+5. Preserve explicit mutable receiver syntax and native collection member access.
