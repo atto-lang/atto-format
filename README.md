@@ -87,6 +87,18 @@ for await const value of events() {
 }
 ```
 
+Expression-bodied lambdas follow the compiler's lexical split: an immediate
+`{` after `->` is the block form; otherwise the body is an expression. For a
+multiline expression body, the formatter adds one continuation indent and
+fails closed if the containing statement never reaches its required explicit
+semicolon. Block lambdas keep explicit `return` statements.
+
+Generator declaration aliases accepted by the compiler are normalized:
+`fnc gen* values()` and `fnc generator* values()` become
+`generator fnc values()`. Delegating `yield* source;` is preserved, and only
+the scheduler compatibility spelling `rt yield` is rewritten to
+`rt cooperate`.
+
 The formatter is intentionally conservative about grammar that is still
 changing. It reorders only recognized declaration-modifier prefixes; imports,
 traits, interfaces, class conformance lists, and unknown modifier spellings are
