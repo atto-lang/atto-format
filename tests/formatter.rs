@@ -33,6 +33,62 @@ pub routine main() -> void {
 }
 
 #[test]
+fn expression_body_lambdas_keep_executable_slim_arrow() {
+    let src = r#"fnc demo() => void {
+val Fnc<int, int> one = |value| -> value * 2;
+val Fnc<int, int> two = |value| ->
+value * 2;
+val Fnc<int, int> typed = (int value) -> value * 3;
+val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
+val Fnc<int, int> block = |value| -> {
+return value * 2;
+};
+return;
+}
+"#;
+
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> one = |value| -> value * 2;
+  val Fnc<int, int> two = |value| ->
+  value * 2;
+  val Fnc<int, int> typed = (int value) -> value * 3;
+  val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
+  val Fnc<int, int> block = |value| -> {
+    return value * 2;
+  };
+  return;
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn expression_body_lambda_inside_call_is_not_rewritten_as_type_arrow() {
+    let src = r#"fnc apply(Fnc<int, int> callback, int value) => int {
+return callback(value);
+}
+
+fnc demo() => int {
+return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    let expected = r#"fnc apply(Fnc<int, int> callback, int value) -> int {
+  return callback(value);
+}
+
+
+fnc demo() -> int {
+  return apply(|value| -> value * 2, 5);
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn module_owned_class_is_indented_as_a_module_member() {
     let src = r#"define module Accounts as
 define class Account as
@@ -401,6 +457,37 @@ fn rejects_unterminated_keyword_blocks() {
 }
 
 #[test]
+fn canonicalizes_route_guard_do_to_then() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) => Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+fi
+if !pattern.is_valid(); do
+return Err("invalid route pattern");
+fi
+if pattern.size() > self.max_segments_value; do
+return Err("route pattern exceeds max_segments");
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  fi
+  if !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  fi
+  if pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  fi
+}
+"#;
+
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
 fn multiline_block_comments_cannot_change_structure() {
     let src = r#"define class Box as
 /*
@@ -675,6 +762,147 @@ fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     let cast = format_source("select { case writech output, value as? int: {} }\n").unwrap();
     assert!(cast.contains("case writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
+}
+
+
+#[test]
+fn canonicalizes_route_guard_conditionals_to_then_and_elif() {
+    let src = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+if handler_id < 0; do
+return Err("handler_id must be non-negative");
+elseif !pattern.is_valid(); do
+return Err("invalid route pattern");
+else if pattern.size() > self.max_segments_value; then
+return Err("route pattern exceeds max_segments");
+else
+return Ok();
+fi
+}
+"#;
+
+    let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
+  if handler_id < 0; then
+    return Err("handler_id must be non-negative");
+  elif !pattern.is_valid(); then
+    return Err("invalid route pattern");
+  elif pattern.size() > self.max_segments_value; then
+    return Err("route pattern exceeds max_segments");
+  else
+    return Ok();
+  fi
+}
+"#;
+
+    let formatted = format_source(src).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn canonicalizes_bare_for_forever_aliases_to_loop() {
+    let source = r#"fnc spin() => void {
+for {
+tick();
+break;
+}
+for do
+tick();
+break;
+done
+for (let i = 0; i < 2; i = i + 1) {
+tick();
+}
+for const item of values do
+tick(item);
+done
+}
+"#;
+    let expected = r#"fnc spin() -> void {
+  loop {
+    tick();
+    break;
+  }
+  loop do
+    tick();
+    break;
+  done
+  for (let i = 0; i < 2; i = i + 1) {
+    tick();
+  }
+  for const item of values do
+    tick(item);
+  done
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn formats_pre_test_and_post_test_while_forms() {
+    let source = r#"fnc loops() => void {
+while ready do
+tick();
+done
+while ready {
+tick();
+}
+do {
+tick();
+} while (ready);
+block {
+val local = 1;
+stdio.stdout.write(local);
+}
+}
+"#;
+    let expected = r#"fnc loops() -> void {
+  while ready do
+    tick();
+  done
+  while ready {
+    tick();
+  }
+  do {
+    tick();
+  } while (ready);
+  block {
+    val local = 1;
+    stdio.stdout.write(local);
+  }
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn bare_for_rewrite_is_comment_aware_and_does_not_touch_real_for_headers() {
+    let source = r#"for /* forever */ {
+break;
+}
+for (;;) {
+break;
+}
+for await const item of stream() {
+consume(item);
+}
+"#;
+    let expected = r#"loop /* forever */ {
+  break;
+}
+for (;;) {
+  break;
+}
+for await const item of stream() {
+  consume(item);
+}
+"#;
+    assert_eq!(format_source(source).unwrap(), expected);
 }
 
 

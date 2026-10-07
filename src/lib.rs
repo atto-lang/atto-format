@@ -109,6 +109,8 @@ struct LexState {
 /// - exactly two blank lines between sibling executable callable bodies;
 /// - executable callable return separators are canonicalized to `->`;
 /// - interface/trait callable signatures are canonicalized to `=>`;
+/// - legacy scheduler spelling `rt yield` is canonicalized to `rt cooperate`;
+/// - bare forever-loop aliases `for { ... }` / `for do ... done` are canonicalized to `loop`;
 /// - `end`, `fi`, `done`, braces, class/interface/contract/trait/struct/module nesting,
 ///   actor bodies, and strings/comments are indentation-aware.
 ///
@@ -139,6 +141,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         let mut content = trimmed_end.trim_start().to_string();
         content = canonicalize_conditional_line(&content, lex);
+        content = canonicalize_forever_loop_line(&content, lex);
+        content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_declaration_line(&content, lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
@@ -1099,6 +1103,55 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
     result
 }
 
+fn canonicalize_forever_loop_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    let Some(first) = words.first().copied() else {
+        return line.to_string();
+    };
+    if &line[first.start..first.end] != "for" {
+        return line.to_string();
+    }
+
+    // Decide from visible syntax, not raw bytes, so comments cannot trick the
+    // formatter into rewriting a conventional or iterator for-loop.
+    let mut state = initial;
+    let visible: String = scan_visible(line, &mut state).into_iter().collect();
+    let trimmed = visible.trim_start();
+    if !starts_word(trimmed, "for") {
+        return line.to_string();
+    }
+    let rest = trimmed["for".len()..].trim_start();
+    let bare_braced = rest.starts_with('{');
+    let bare_keyword = starts_word(rest, "do") && rest["do".len()..].trim().is_empty();
+    if !bare_braced && !bare_keyword {
+        return line.to_string();
+    }
+
+    let mut result = line.to_string();
+    result.replace_range(first.start..first.end, "loop");
+    result
+}
+
+fn canonicalize_rt_cooperate_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.len() < 2 {
+        return line.to_string();
+    }
+
+    let first = &line[words[0].start..words[0].end];
+    let second = &line[words[1].start..words[1].end];
+    if first != "rt" || second != "yield" {
+        return line.to_string();
+    }
+
+    // Rewrite only the runtime namespace operation token. Generator
+    // `yield value` remains untouched, as do strings/comments containing
+    // the compatibility spelling.
+    let mut result = line.to_string();
+    result.replace_range(words[1].start..words[1].end, "cooperate");
+    result
+}
+
 fn visible_word_spans(line: &str, initial: LexState) -> Vec<WordSpan> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let mut words = Vec::new();
@@ -1310,6 +1363,30 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalizes_rt_yield_without_touching_generator_yield_or_literals() {
+        let src = r#"fnc generator* values(): Iterator<int> {
+  rt yield;
+  rt yield();
+  yield 1;
+  yield* values();
+  stdio.stdout.write("rt yield");
+  // rt yield
+  return;
+}
+"#;
+
+        let got = format_source(src).unwrap();
+        assert!(got.contains("rt cooperate;"));
+        assert!(got.contains("rt cooperate();"));
+        assert!(got.contains("yield 1;"));
+        assert!(got.contains("yield* values();"));
+        assert!(got.contains("\"rt yield\""));
+        assert!(got.contains("// rt yield"));
+        assert!(!got.contains("  rt yield;"));
+        assert!(!got.contains("  rt yield();"));
+    }
 
     #[test]
     fn canonicalizes_declaration_modifier_order() {
