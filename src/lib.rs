@@ -42,6 +42,7 @@ impl std::error::Error for FormatError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
+    Switch,
     Module,
     Class,
     Interface,
@@ -75,6 +76,8 @@ struct BraceFrame {
 struct DefineFrame {
     kind: DefineKind,
     order: usize,
+    brace_depth: usize,
+    keyword_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,9 +223,20 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         indent = indent.saturating_sub(pre_dedent);
 
         if starts_end {
-            define_stack.pop().ok_or_else(|| {
-                FormatError::new(line_no, "encountered `end` without a matching define block")
+            let frame = define_stack.last().ok_or_else(|| {
+                FormatError::new(
+                    line_no,
+                    "encountered `end` without a matching define or switch block",
+                )
             })?;
+            if brace_stack.len() != frame.brace_depth || keyword_stack.len() != frame.keyword_depth
+            {
+                return Err(FormatError::new(
+                    line_no,
+                    "encountered `end` before closing a nested block",
+                ));
+            }
+            define_stack.pop();
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
@@ -287,6 +301,15 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     });
                 }
                 '}' => {
+                    if define_stack
+                        .last()
+                        .is_some_and(|frame| frame.brace_depth >= brace_stack.len())
+                    {
+                        return Err(FormatError::new(
+                            line_no,
+                            "encountered `}` before closing an end-delimited block",
+                        ));
+                    }
                     let frame = brace_stack.pop().ok_or_else(|| {
                         FormatError::new(line_no, "encountered `}` without a matching `{`")
                     })?;
@@ -317,9 +340,24 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                 define_stack.push(DefineFrame {
                     kind,
                     order: next_order,
+                    brace_depth: brace_stack.len(),
+                    keyword_depth: keyword_stack.len(),
                 });
                 indent += 1;
             }
+        }
+
+        // Switch subjects may end with an optional semicolon, but the block
+        // itself always closes with end, independently of its braced arms.
+        if starts_word(structural, "switch") {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Switch,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
         }
 
         if opens_conditional_block(structural) && !branch_line {
@@ -371,7 +409,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     if !define_stack.is_empty() {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
-            "unterminated define block",
+            "unterminated define or switch block (expected `end`)",
         ));
     }
     if let Some(terminator) = keyword_stack.last() {

@@ -110,6 +110,16 @@ fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
     None
 }
 
+fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
+    match tokens[index].text {
+        "when" | "case" => tokens
+            .get(index + 1)
+            .is_some_and(|token| matches!(token.text, "readch" | "writech")),
+        "default" => tokens.get(index + 1).is_some_and(|token| token.text == ":"),
+        _ => false,
+    }
+}
+
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
     let tokens = tokens(source);
     let mut edits = BTreeMap::<usize, String>::new();
@@ -179,7 +189,6 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     ")" | "]" | "}" => {
                         nesting.pop();
                     }
-                    "when" | "case" | "default" if nesting.is_empty() => break,
                     _ => {}
                 }
                 header += 1;
@@ -230,14 +239,16 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             } else {
                 edits.entry(header_end).or_default().push_str(" {");
                 break_after(source, header_end, &mut edits);
-                if body < close && !matches!(tokens[body].text, "when" | "case" | "default") {
+                if body < close && !is_arm_start(&tokens, body) {
                     break_before(source, tokens[body].start, &mut edits);
                 }
                 let mut end = body;
                 let mut depth = 0usize;
                 while end < close {
+                    if depth == 0 && is_arm_start(&tokens, end) {
+                        break;
+                    }
                     match tokens[end].text {
-                        "when" | "case" | "default" if depth == 0 => break,
                         "{" => depth += 1,
                         "}" => depth = depth.saturating_sub(1),
                         _ => {}
