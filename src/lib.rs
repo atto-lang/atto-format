@@ -413,7 +413,10 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
     let mut newest: Option<(usize, bool)> = None;
 
     for frame in defines {
-        let is_signature = matches!(frame.kind, DefineKind::Interface | DefineKind::Contract | DefineKind::Trait);
+        let is_signature = matches!(
+            frame.kind,
+            DefineKind::Interface | DefineKind::Contract | DefineKind::Trait
+        );
         if newest.is_none_or(|(order, _)| frame.order > order) {
             newest = Some((frame.order, is_signature));
         }
@@ -455,9 +458,8 @@ fn canonicalize_declaration_line(line: &str, initial: LexState) -> String {
 }
 
 fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<String> {
-    let is_prefix_word = |word: &str| {
-        matches!(word, "define" | "class" | "pub" | "private" | "abstract")
-    };
+    let is_prefix_word =
+        |word: &str| matches!(word, "define" | "class" | "pub" | "private" | "abstract");
     let prefix_len = words
         .iter()
         .take_while(|span| is_prefix_word(&line[span.start..span.end]))
@@ -504,12 +506,12 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
-fn canonicalize_defined_interface_or_contract(
-    line: &str,
-    words: &[WordSpan],
-) -> Option<String> {
+fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_prefix_word = |word: &str| {
-        matches!(word, "define" | "interface" | "contract" | "pub" | "private")
+        matches!(
+            word,
+            "define" | "interface" | "contract" | "pub" | "private"
+        )
     };
     let prefix_len = words
         .iter()
@@ -534,9 +536,7 @@ fn canonicalize_defined_interface_or_contract(
             "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
-            "interface" | "contract" if kind.is_none() => {
-                kind = Some(&line[span.start..span.end])
-            }
+            "interface" | "contract" if kind.is_none() => kind = Some(&line[span.start..span.end]),
             _ => return None,
         }
     }
@@ -1572,7 +1572,10 @@ define contract BraceContract {
             actor_routine_cases += 1;
             let source = format!("{} worker_routine() {{\n}}\n", order.join(" "));
             let got = format_source(&source).unwrap();
-            assert_eq!(got, "pub async shared actor routine worker_routine() {\n}\n");
+            assert_eq!(
+                got,
+                "pub async shared actor routine worker_routine() {\n}\n"
+            );
         }
         assert_eq!(actor_routine_cases, 120);
 
