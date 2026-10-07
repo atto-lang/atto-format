@@ -112,9 +112,12 @@ fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
 
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
-        "when" | "case" => tokens
-            .get(index + 1)
-            .is_some_and(|token| matches!(token.text, "readch" | "writech")),
+        "when" | "case" => tokens.get(index + 1).is_some_and(|token| {
+            matches!(
+                token.text,
+                "readch" | "writech" | "await" | "timeout" | "cancelled"
+            )
+        }),
         "default" => tokens.get(index + 1).is_some_and(|token| token.text == ":"),
         _ => false,
     }
@@ -164,66 +167,112 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     removed.insert(tokens[arm].start + offset);
                 }
             }
-            let read = tokens.get(arm + 1).is_some_and(|t| t.text == "readch");
+            let operation = tokens.get(arm + 1).map(|t| t.text);
+            let read = operation == Some("readch");
+            let await_future = operation == Some("await");
+            let readiness_without_colon =
+                matches!(operation, Some("timeout" | "cancelled"));
             if matches!(arm_keyword, "when" | "case")
-                && !read
-                && tokens.get(arm + 1).is_none_or(|t| t.text != "writech")
+                && !matches!(
+                    operation,
+                    Some("readch" | "writech" | "await" | "timeout" | "cancelled")
+                )
             {
                 return Err(error(
                     tokens[arm].start,
-                    "select arm must start with readch or writech",
+                    "select arm must start with readch, writech, await, timeout, or cancelled",
                 ));
             }
-            // Find the header separator, skipping nested expressions.
-            let mut header = arm + 1;
-            let mut nesting = Vec::new();
-            let mut ternaries = 0usize;
-            while header < close {
-                match tokens[header].text {
-                    "?" if nesting.is_empty() && tokens[header - 1].text != "as" => {
-                        ternaries += 1;
+
+            let (mut body, header_end) = if readiness_without_colon {
+                // timeout/cancelled have no ':' separator and the compiler
+                // requires a braced body. Fail closed rather than guessing
+                // where an unbraced cancellation expression ends.
+                let mut cursor = arm + 2;
+                let mut nesting = Vec::new();
+                while cursor < close {
+                    match tokens[cursor].text {
+                        "{" if nesting.is_empty() => break,
+                        "(" | "[" => nesting.push(tokens[cursor].text),
+                        ")" | "]" => {
+                            nesting.pop();
+                        }
+                        _ => {}
                     }
-                    ":" if nesting.is_empty() && ternaries > 0 => ternaries -= 1,
-                    ":" if nesting.is_empty() => break,
-                    "(" | "[" | "{" => nesting.push(tokens[header].text),
-                    ")" | "]" | "}" => {
-                        nesting.pop();
-                    }
-                    _ => {}
+                    cursor += 1;
                 }
-                header += 1;
-            }
-            if header == close || tokens[header].text != ":" {
-                return Err(error(tokens[arm].start, "select arm requires ':'"));
-            }
-            let mut body = header + 1;
-            if read
-                && tokens
-                    .get(body)
-                    .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
-            {
-                if !tokens.get(body + 1).is_some_and(|t| {
-                    t.text
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_alphabetic() || c == '_')
-                        && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
-                }) {
+                if cursor == close || tokens[cursor].text != "{" {
                     return Err(error(
                         tokens[arm].start,
-                        "readch select arm binding requires a name",
+                        "timeout/cancelled select arms require a braced body",
                     ));
                 }
-                body += 2; // binding kind and name
-                if tokens.get(body).is_some_and(|t| t.text == ";") {
-                    removed.insert(tokens[body].start);
-                    body += 1;
+                if cursor <= arm + 2 {
+                    return Err(error(
+                        tokens[arm].start,
+                        "timeout/cancelled select arm requires an operand",
+                    ));
                 }
-            }
-            let header_end = if body > 0 && tokens[body - 1].text == ";" {
-                tokens[body - 2].end
+                (cursor, tokens[cursor - 1].end)
             } else {
-                tokens[body - 1].end
+                // readch/writech/await/default use ':' between the readiness
+                // expression and arm body. Skip ternary colons and nested
+                // expressions while locating that separator.
+                let mut header = arm + 1;
+                let mut nesting = Vec::new();
+                let mut ternaries = 0usize;
+                while header < close {
+                    match tokens[header].text {
+                        "?" if nesting.is_empty() && tokens[header - 1].text != "as" => {
+                            ternaries += 1;
+                        }
+                        ":" if nesting.is_empty() && ternaries > 0 => ternaries -= 1,
+                        ":" if nesting.is_empty() => break,
+                        "(" | "[" | "{" => nesting.push(tokens[header].text),
+                        ")" | "]" | "}" => {
+                            nesting.pop();
+                        }
+                        _ => {}
+                    }
+                    header += 1;
+                }
+                if header == close || tokens[header].text != ":" {
+                    return Err(error(tokens[arm].start, "select arm requires ':'"));
+                }
+                let mut body = header + 1;
+                if (read || await_future)
+                    && tokens
+                        .get(body)
+                        .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
+                {
+                    if !tokens.get(body + 1).is_some_and(|t| {
+                        t.text
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_alphabetic() || c == '_')
+                            && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    }) {
+                        return Err(error(
+                            tokens[arm].start,
+                            if read {
+                                "readch select arm binding requires a name"
+                            } else {
+                                "await select arm binding requires a name"
+                            },
+                        ));
+                    }
+                    body += 2; // binding kind and name
+                    if tokens.get(body).is_some_and(|t| t.text == ";") {
+                        removed.insert(tokens[body].start);
+                        body += 1;
+                    }
+                }
+                let header_end = if body > 0 && tokens[body - 1].text == ";" {
+                    tokens[body - 2].end
+                } else {
+                    tokens[body - 1].end
+                };
+                (body, header_end)
             };
             if body < close && tokens[body].text == "{" {
                 let end = matching_brace(&tokens, body)
