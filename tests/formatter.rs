@@ -764,7 +764,6 @@ fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     assert!(is_formatted(&cast).unwrap());
 }
 
-
 #[test]
 fn canonicalizes_route_guard_conditionals_to_then_and_elif() {
     let src = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
@@ -904,7 +903,6 @@ for await const item of stream() {
 "#;
     assert_eq!(format_source(source).unwrap(), expected);
 }
-
 
 #[test]
 fn preserves_orthogonal_binding_and_select_case_qualifiers() {
