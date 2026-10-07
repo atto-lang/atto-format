@@ -125,7 +125,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         {
             open += 1;
         }
-        if !tokens.get(open).is_some_and(|t| t.text == "{") {
+        if tokens.get(open).is_none_or(|t| t.text != "{") {
             continue;
         }
         let error = |pos: usize, message: &str| {
@@ -150,7 +150,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             let read = tokens.get(arm + 1).is_some_and(|t| t.text == "readch");
             if tokens[arm].text == "case"
                 && !read
-                && !tokens.get(arm + 1).is_some_and(|t| t.text == "writech")
+                && tokens.get(arm + 1).is_none_or(|t| t.text != "writech")
             {
                 return Err(error(
                     tokens[arm].start,
