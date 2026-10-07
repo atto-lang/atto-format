@@ -17,19 +17,37 @@ identical behavior.
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`;
-- class headers keep `as` after the complete inheritance/conformance clause:
+- declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
+  - classes: `define [pub|private] [abstract] class Name ... as`;
+  - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
+  - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
+  - package/module callables: `[pub|private] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
+  - class headers keep `as` after the complete inheritance/conformance clause.
+
+For example:
 
 ```ores
-define class User extends Entity implements Named, Serializable as
+pub define class User extends Entity implements Named, Serializable as
   pub val String name;
-
-  pub render() -> String {
-    return self.name;
-  }
 end
+
+fnc pub async refresh() {
+}
 ```
 
-The nesting engine understands `module`, `class`, `interface`, `trait`,
+formats as:
+
+```ores
+define pub class User extends Entity implements Named, Serializable as
+  pub val String name;
+end
+
+pub async fnc refresh() {
+}
+```
+
+The nesting engine understands `module`, `class`, `interface`, `contract`, `trait`,
 `struct`, actor/braced bodies, `end`, `if`/`fi`, and `do`/`done`. In particular,
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
@@ -70,8 +88,9 @@ for await const value of events() {
 ```
 
 The formatter is intentionally conservative about grammar that is still
-changing: it does not reorder declarations, imports, traits, interfaces, or
-class conformance lists.
+changing. It reorders only recognized declaration-modifier prefixes; imports,
+traits, interfaces, class conformance lists, and unknown modifier spellings are
+left untouched.
 
 For semantic safety, multiline string/template literals currently fail closed
 instead of being rewritten. This prevents indentation, trailing-whitespace, or

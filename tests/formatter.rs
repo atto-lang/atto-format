@@ -764,7 +764,6 @@ fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     assert!(is_formatted(&cast).unwrap());
 }
 
-
 #[test]
 fn canonicalizes_route_guard_conditionals_to_then_and_elif() {
     let src = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
@@ -903,4 +902,36 @@ for await const item of stream() {
 }
 "#;
     assert_eq!(format_source(source).unwrap(), expected);
+}
+
+#[test]
+fn preserves_orthogonal_binding_and_select_case_qualifiers() {
+    // Compiler contract: const = fixed/read-only, val = const mut,
+    // let = rebindable/read-only, let mut = rebindable/mutable.
+    // The formatter must never drop or reorder mutability qualifiers.
+    let source = r#"fnc example(): void {
+const item = make();
+const mut editable = make();
+val owned = make();
+let replaceable = make();
+let mut flexible = make();
+select {
+case readch input: const job {
+consume(job);
+}
+case readch output: val job {
+job.foo = 1;
+}
+}
+return;
+}
+"#;
+    let output = format_source(source).unwrap();
+    assert!(output.contains("const item = make();"));
+    assert!(output.contains("const mut editable = make();"));
+    assert!(output.contains("val owned = make();"));
+    assert!(output.contains("let replaceable = make();"));
+    assert!(output.contains("let mut flexible = make();"));
+    assert!(output.contains("case readch input: const job {"));
+    assert!(output.contains("case readch output: val job {"));
 }
