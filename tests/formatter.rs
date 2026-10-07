@@ -916,10 +916,10 @@ val owned = make();
 let replaceable = make();
 let mut flexible = make();
 select {
-case job = readch(input) -> {
+case readch input: const job {
 consume(job);
 }
-case val job = readch(output) -> {
+case readch output: val job {
 job.foo = 1;
 }
 }
@@ -932,6 +932,6 @@ return;
     assert!(output.contains("val owned = make();"));
     assert!(output.contains("let replaceable = make();"));
     assert!(output.contains("let mut flexible = make();"));
-    assert!(output.contains("case job = readch(input) -> {"));
-    assert!(output.contains("case val job = readch(output) -> {"));
+    assert!(output.contains("case readch input: const job {"));
+    assert!(output.contains("case readch output: val job {"));
 }
