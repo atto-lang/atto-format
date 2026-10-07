@@ -935,3 +935,25 @@ return;
     assert!(output.contains("case readch input: const job {"));
     assert!(output.contains("case readch output: val job {"));
 }
+
+#[test]
+fn new_select_arrow_binding_arms_keep_ownership_qualifiers() {
+    let source = "do select { case val job = readch(jobs) -> { execute(job); } case mut reply = readch(replies) -> { reply = prepare(reply); } default -> {} }\n";
+    let formatted = format_source(source).expect("new style select must format");
+    assert!(formatted.contains("case val job = readch(jobs) -> {"));
+    assert!(formatted.contains("case mut reply = readch(replies) -> {"));
+    assert!(formatted.contains("default -> {"));
+    assert!(formatted.contains("    reply = prepare(reply);"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn do_nb_select_arrow_braces_preserve_legacy_colon_support() {
+    let latest = "do nb select { case job = readch(queue) -> { consume(job); } }\n";
+    let formatted = format_source(latest).unwrap();
+    assert!(formatted.starts_with("do nb select {"));
+    assert!(formatted.contains("case job = readch(queue) -> {"));
+    assert!(is_formatted(&formatted).unwrap());
+    let legacy = format_source("select { case readch input: val x {} }\n").unwrap();
+    assert!(legacy.contains("case readch input: val x {"));
+}
