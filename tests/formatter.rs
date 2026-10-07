@@ -811,13 +811,26 @@ fn select_cases_use_spaces_and_braced_bodies_in_every_wait_mode() {
             "actor fnc relay() -> void {{\n\t{mode}select first {{\n\tcase readch inbox: val value\n\t\tnb writech replies, value * 10;\n\tcase writech replies, 0:\n\t\treturn;\n\tdefault:\n\t\treturn;\n\t}}\n}}\n"
         );
         let expected = format!(
-            "actor fnc relay() -> void {{\n  {mode}select first {{\n    case readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    case writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
+            "actor fnc relay() -> void {{\n  {mode}select first {{\n    when readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    when writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
         );
         let formatted = format_source(&source).unwrap();
         assert_eq!(formatted, expected);
         assert!(!formatted.contains('\t'));
         assert!(is_formatted(&formatted).unwrap());
     }
+}
+
+#[test]
+fn select_case_is_accepted_but_canonicalized_to_when() {
+    let source = "do nb select { case readch messages: val msg { stdio.println(msg); } }\n";
+    let expected = "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let already_canonical =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    assert_eq!(format_source(already_canonical).unwrap(), already_canonical);
 }
 
 #[test]
@@ -830,9 +843,9 @@ return;
 } } default: {} }
 "#;
     let expected = r#"select {
-  case readch inbox: val value {
+  when readch inbox: val value {
     nb select {
-      case writech replies, value: { // sent
+      when writech replies, value: { // sent
         stdio.println("case default: { } λ");
       }
       default: { /* skipped */
@@ -852,7 +865,7 @@ return;
 #[test]
 fn select_migration_handles_inline_legacy_arms_nested_expressions_and_empty_arms() {
     let source = "select random { case writech output, make(\"x:y\", [1, 2]): send(); case readch input: const x; default: }\n";
-    let expected = "select random {\n  case writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  case readch input: const x {\n  }\n  default: {\n  }\n}\n";
+    let expected = "select random {\n  when writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  when readch input: const x {\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -881,7 +894,7 @@ fn malformed_static_select_fails_closed() {
 #[test]
 fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
     let source = "select { /* choose */ case readch inbox: val value { /* body */ send(value); } /* next */ default: { /* empty */ } }\n";
-    let expected = "select { /* choose */\n  case readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
+    let expected = "select { /* choose */\n  when readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -890,7 +903,7 @@ fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
 #[test]
 fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
     let source = "select {\ncase readch input: val x\nfor const value of [x] do\nnb select {\ncase writech output, value:\nreturn;\n}\ndone\ndefault:\n}\n";
-    let expected = "select {\n  case readch input: val x {\n    for const value of [x] do\n      nb select {\n        case writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
+    let expected = "select {\n  when readch input: val x {\n    for const value of [x] do\n      nb select {\n        when writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -900,11 +913,11 @@ fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
 fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     let source = "select { case readch ready ? inbox : other: val x {} case writech output, ready ? 1 : otherReady ? 2 : 3: {} default: {} }\n";
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("case readch ready ? inbox : other: val x {\n"));
-    assert!(formatted.contains("case writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
+    assert!(formatted.contains("when readch ready ? inbox : other: val x {\n"));
+    assert!(formatted.contains("when writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
     assert!(is_formatted(&formatted).unwrap());
     let cast = format_source("select { case writech output, value as? int: {} }\n").unwrap();
-    assert!(cast.contains("case writech output, value as? int: {\n"));
+    assert!(cast.contains("when writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
 }
 
@@ -1076,6 +1089,6 @@ return;
     assert!(output.contains("val owned = make();"));
     assert!(output.contains("let replaceable = make();"));
     assert!(output.contains("let mut flexible = make();"));
-    assert!(output.contains("case readch input: const job {"));
-    assert!(output.contains("case readch output: val job {"));
+    assert!(output.contains("when readch input: const job {"));
+    assert!(output.contains("when readch output: val job {"));
 }
