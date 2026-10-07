@@ -932,7 +932,8 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
     }
     let lower = structural.trim_start();
     for kw in [
-        "if", "for", "while", "switch", "match", "catch", "recover", "defer", "case", "default",
+        "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
+        "default",
     ] {
         if starts_word(lower, kw) {
             return false;

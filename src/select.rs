@@ -140,21 +140,28 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         break_before(source, tokens[close].start, &mut edits);
         let mut arm = open + 1;
         while arm < close {
-            if !matches!(tokens[arm].text, "case" | "default") {
+            if !matches!(tokens[arm].text, "when" | "case" | "default") {
                 return Err(error(
                     tokens[arm].start,
-                    "expected case/default inside select",
+                    "expected when/case/default inside select",
                 ));
             }
             break_before(source, tokens[arm].start, &mut edits);
+            let arm_keyword = tokens[arm].text;
+            if arm_keyword == "case" {
+                edits.entry(tokens[arm].start).or_default().push_str("when");
+                for (offset, _) in source[tokens[arm].start..tokens[arm].end].char_indices() {
+                    removed.insert(tokens[arm].start + offset);
+                }
+            }
             let read = tokens.get(arm + 1).is_some_and(|t| t.text == "readch");
-            if tokens[arm].text == "case"
+            if matches!(arm_keyword, "when" | "case")
                 && !read
                 && tokens.get(arm + 1).is_none_or(|t| t.text != "writech")
             {
                 return Err(error(
                     tokens[arm].start,
-                    "select case must start with readch or writech",
+                    "select arm must start with readch or writech",
                 ));
             }
             // Find the header separator, skipping nested expressions.
@@ -172,7 +179,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     ")" | "]" | "}" => {
                         nesting.pop();
                     }
-                    "case" | "default" if nesting.is_empty() => break,
+                    "when" | "case" | "default" if nesting.is_empty() => break,
                     _ => {}
                 }
                 header += 1;
@@ -195,7 +202,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 }) {
                     return Err(error(
                         tokens[arm].start,
-                        "readch case binding requires a name",
+                        "readch select arm binding requires a name",
                     ));
                 }
                 body += 2; // binding kind and name
@@ -223,14 +230,14 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             } else {
                 edits.entry(header_end).or_default().push_str(" {");
                 break_after(source, header_end, &mut edits);
-                if body < close && !matches!(tokens[body].text, "case" | "default") {
+                if body < close && !matches!(tokens[body].text, "when" | "case" | "default") {
                     break_before(source, tokens[body].start, &mut edits);
                 }
                 let mut end = body;
                 let mut depth = 0usize;
                 while end < close {
                     match tokens[end].text {
-                        "case" | "default" if depth == 0 => break,
+                        "when" | "case" | "default" if depth == 0 => break,
                         "{" => depth += 1,
                         "}" => depth = depth.saturating_sub(1),
                         _ => {}
