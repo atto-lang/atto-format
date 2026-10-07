@@ -50,7 +50,7 @@ return;
     let expected = r#"fnc demo() -> void {
   val Fnc<int, int> one = |value| -> value * 2;
   val Fnc<int, int> two = |value| ->
-  value * 2;
+    value * 2;
   val Fnc<int, int> typed = (int value) -> value * 3;
   val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
   val Fnc<int, int> block = |value| -> {
@@ -87,6 +87,134 @@ fnc demo() -> int {
 
     assert_eq!(format_source(src).unwrap(), expected);
 }
+
+
+#[test]
+fn multiline_expression_lambda_indents_until_its_required_semicolon() {
+    let src = r#"fnc demo() -> void {
+val Fnc<int, int> choose = |value| ->
+value > 0
+? value
+: -value;
+val Fnc<int, int> nested = |value| ->
+apply(|| -> {
+return value;
+});
+return;
+}
+"#;
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> choose = |value| ->
+    value > 0
+    ? value
+    : -value;
+  val Fnc<int, int> nested = |value| ->
+    apply(|| -> {
+      return value;
+    });
+  return;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let err = format_source(
+        "fnc bad() -> void {\nval Fnc<int, int> f = |value| ->\nvalue * 2\n}\n",
+    )
+    .unwrap_err();
+    assert!(err.message().contains("explicit ';'"));
+}
+
+#[test]
+fn canonicalizes_current_generator_sugar_and_preserves_yield_delegation() {
+    let src = r#"fnc gen* sync_values(): Iterator<int> {
+rt yield;
+yield* inner();
+return;
+}
+
+async fnc generator* async_values(): AsyncIterator<int> {
+rt yield();
+yield* sync_values();
+return;
+}
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+return gen * value;
+}
+"#;
+    let expected = r#"generator fnc sync_values(): Iterator<int> {
+  rt cooperate;
+  yield* inner();
+  return;
+}
+
+
+async generator fnc async_values(): AsyncIterator<int> {
+  rt cooperate();
+  yield* sync_values();
+  return;
+}
+
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+  return gen * value;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn else_followed_by_nested_if_is_not_collapsed_to_elif() {
+    let src = r#"fnc classify(int value) -> int {
+if value < 0; then
+return -1;
+else
+if value == 0; then
+return 0;
+else
+return 1;
+fi
+fi
+}
+"#;
+    let expected = r#"fnc classify(int value) -> int {
+  if value < 0; then
+    return -1;
+  else
+    if value == 0; then
+      return 0;
+    else
+      return 1;
+    fi
+  fi
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn preserves_explicit_mutable_receivers_and_native_collection_members() {
+    let src = r#"define class Cursor as
+pub next(mut self)() -> int {
+self.index = self.index + 1;
+return self.items.length;
+}
+end
+"#;
+    let expected = r#"define class Cursor as
+  pub next(mut self)() -> int {
+    self.index = self.index + 1;
+    return self.items.length;
+  }
+end
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
 
 #[test]
 fn module_owned_class_is_indented_as_a_module_member() {
