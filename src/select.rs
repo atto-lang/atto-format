@@ -148,15 +148,6 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             }
             break_before(source, tokens[arm].start, &mut edits);
             let read = tokens.get(arm + 1).is_some_and(|t| t.text == "readch");
-            if tokens[arm].text == "case"
-                && !read
-                && tokens.get(arm + 1).is_none_or(|t| t.text != "writech")
-            {
-                return Err(error(
-                    tokens[arm].start,
-                    "select case must start with readch or writech",
-                ));
-            }
             // Find the header separator, skipping nested expressions.
             let mut header = arm + 1;
             let mut nesting = Vec::new();
@@ -168,6 +159,8 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     ":" if nesting.is_empty() && ternaries > 0 => ternaries -= 1,
                     ":" if nesting.is_empty() => break,
+                    "-" if nesting.is_empty()
+                        && tokens.get(header + 1).is_some_and(|t| t.text == ">") => break,
                     "(" | "[" | "{" => nesting.push(tokens[header].text),
                     ")" | "]" | "}" => {
                         nesting.pop();
@@ -177,11 +170,23 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 }
                 header += 1;
             }
-            if header == close || tokens[header].text != ":" {
-                return Err(error(tokens[arm].start, "select arm requires ':'"));
+            let arrow = header < close
+                && tokens[header].text == "-"
+                && tokens.get(header + 1).is_some_and(|t| t.text == ">");
+            if header == close || (!arrow && tokens[header].text != ":") {
+                return Err(error(tokens[arm].start, "select arm requires ':' or '->'"));
             }
-            let mut body = header + 1;
-            if read
+            // Legacy colon arms keep their original readch/writech constraints.
+            // In the new arrow form, a named binding precedes readch(...).
+            if !arrow
+                && tokens[arm].text == "case"
+                && !read
+                && tokens.get(arm + 1).is_none_or(|t| t.text != "writech")
+            {
+                return Err(error(tokens[arm].start, "select case must start with readch or writech"));
+            }
+            let mut body = header + if arrow { 2 } else { 1 };
+            if !arrow && read
                 && tokens
                     .get(body)
                     .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
@@ -204,7 +209,9 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     body += 1;
                 }
             }
-            let header_end = if body > 0 && tokens[body - 1].text == ";" {
+            let header_end = if arrow {
+                tokens[header + 1].end
+            } else if body > 0 && tokens[body - 1].text == ";" {
                 tokens[body - 2].end
             } else {
                 tokens[body - 1].end
