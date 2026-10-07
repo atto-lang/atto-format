@@ -676,3 +676,36 @@ fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     assert!(cast.contains("case writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
 }
+
+
+#[test]
+fn preserves_orthogonal_binding_and_select_case_qualifiers() {
+    // Compiler contract: const = fixed/read-only, val = const mut,
+    // let = rebindable/read-only, let mut = rebindable/mutable.
+    // The formatter must never drop or reorder mutability qualifiers.
+    let source = r#"fnc example(): void {
+const item = make();
+const mut editable = make();
+val owned = make();
+let replaceable = make();
+let mut flexible = make();
+select {
+case job = readch(input) -> {
+consume(job);
+}
+case val job = readch(output) -> {
+job.foo = 1;
+}
+}
+return;
+}
+"#;
+    let output = format_source(source).unwrap();
+    assert!(output.contains("const item = make();"));
+    assert!(output.contains("const mut editable = make();"));
+    assert!(output.contains("val owned = make();"));
+    assert!(output.contains("let replaceable = make();"));
+    assert!(output.contains("let mut flexible = make();"));
+    assert!(output.contains("case job = readch(input) -> {"));
+    assert!(output.contains("case val job = readch(output) -> {"));
+}
