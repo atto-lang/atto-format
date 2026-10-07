@@ -171,3 +171,7 @@ same bytes.
 Oreslang should have one mechanically enforceable source style. This avoids
 project-specific formatter drift and gives compiler diagnostics, generated
 code, examples, editor integrations, and code review the same layout contract.
+
+### Compiler PR compatibility (2026-10-06)
+
+The formatter accepts both legacy colon-style select arms and the new arrow-style bindings proposed in [compiler #411](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/411), including `do select` and `do nb select`. These compiler PRs are still open; formatting a construct does not imply the currently pinned compiler can execute it. See [docs/compiler-pr-sync.md](docs/compiler-pr-sync.md).
