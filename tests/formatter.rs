@@ -823,7 +823,8 @@ fn select_cases_use_spaces_and_braced_bodies_in_every_wait_mode() {
 #[test]
 fn select_case_is_accepted_but_canonicalized_to_when() {
     let source = "do nb select { case readch messages: val msg { stdio.println(msg); } }\n";
-    let expected = "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    let expected =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(expected).unwrap());
