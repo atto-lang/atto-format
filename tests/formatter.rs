@@ -1094,7 +1094,6 @@ return;
     assert!(output.contains("when readch output: val job {"));
 }
 
-
 #[test]
 fn canonicalizes_name_first_parameter_compatibility_to_type_first() {
     let source = r#"fnc run(job: Job, options: Options): Result {
