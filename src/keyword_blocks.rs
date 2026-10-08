@@ -1,0 +1,342 @@
+//! Expand single-line keyword conditionals before the indentation pass.
+//! Comments, strings, and template literals remain opaque.
+
+use crate::{LexState, is_ident_char};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Header,
+    Body,
+}
+
+#[derive(Clone, Copy)]
+struct Token<'a> {
+    text: &'a str,
+    start: usize,
+    end: usize,
+}
+
+struct Lexed<'a> {
+    tokens: Vec<Token<'a>>,
+    line_comment: Option<usize>,
+    block_comment_seen: bool,
+}
+
+fn lex_line<'a>(line: &'a str, state: &mut LexState) -> Lexed<'a> {
+    let mut tokens = Vec::new();
+    let mut chars = line.char_indices().peekable();
+    let mut line_comment = None;
+    let mut block_comment_seen = state.block_comment;
+
+    while let Some((start, ch)) = chars.next() {
+        let next = chars.peek().map(|&(_, ch)| ch);
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                chars.next();
+                state.block_comment = false;
+            }
+            continue;
+        }
+        if ch == '/' && next == Some('/') {
+            line_comment = Some(start);
+            break;
+        }
+        if ch == '/' && next == Some('*') {
+            chars.next();
+            state.block_comment = true;
+            block_comment_seen = true;
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '\x60') {
+            let mut escape = false;
+            let mut end = start + ch.len_utf8();
+            state.quote = Some(ch);
+            for (pos, next) in chars.by_ref() {
+                end = pos + next.len_utf8();
+                if escape {
+                    escape = false;
+                } else if next == '\\' {
+                    escape = true;
+                } else if next == ch {
+                    state.quote = None;
+                    break;
+                }
+            }
+            tokens.push(Token {
+                text: &line[start..end],
+                start,
+                end,
+            });
+            continue;
+        }
+        if ch.is_whitespace() {
+            continue;
+        }
+        if is_ident_char(ch) {
+            let mut end = start + ch.len_utf8();
+            while let Some(&(pos, c)) = chars.peek() {
+                if !is_ident_char(c) {
+                    break;
+                }
+                chars.next();
+                end = pos + c.len_utf8();
+            }
+            tokens.push(Token {
+                text: &line[start..end],
+                start,
+                end,
+            });
+        } else {
+            tokens.push(Token {
+                text: &line[start..start + ch.len_utf8()],
+                start,
+                end: start + ch.len_utf8(),
+            });
+        }
+    }
+
+    Lexed {
+        tokens,
+        line_comment,
+        block_comment_seen,
+    }
+}
+
+fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
+    index == 0
+        || matches!(
+            tokens[index - 1].text,
+            ";" | "{" | "}" | "then" | "else" | "fi"
+        )
+}
+
+fn split_keyword_blocks(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+    let mut frames: Vec<Phase> = Vec::new();
+
+    for (line_number, line) in source.split('\n').enumerate() {
+        if line_number != 0 {
+            output.push('\n');
+        }
+        let scanned = lex_line(line, &mut lex);
+        let tokens = scanned.tokens;
+        let mut cuts: Vec<usize> = Vec::new();
+        let mut saw_keyword_arm = false;
+        let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
+
+        for (index, token) in tokens.iter().enumerate() {
+            match token.text {
+                "(" => parens += 1,
+                ")" => parens = parens.saturating_sub(1),
+                "[" => brackets += 1,
+                "]" => brackets = brackets.saturating_sub(1),
+                "{" => braces += 1,
+                "}" => braces = braces.saturating_sub(1),
+                _ => {}
+            }
+            if parens != 0 || brackets != 0 || braces != 0 {
+                continue;
+            }
+
+            match token.text {
+                "if" if statement_boundary(&tokens, index) => {
+                    // Braced if/elif arms are a separate grammatical form.
+                    // Require an actual keyword header terminator to opt in.
+                    let has_keyword_header = tokens[index + 1..]
+                        .iter()
+                        .take_while(|token| token.text != "{")
+                        .any(|token| matches!(token.text, "then" | "do"));
+                    if has_keyword_header && (index == 0 || tokens[index - 1].text != "else") {
+                        frames.push(Phase::Header);
+                        if index > 0 {
+                            cuts.push(token.start);
+                        }
+                    }
+                }
+                "then" | "do"
+                    if frames.last() == Some(&Phase::Header)
+                        && index > 0
+                        && tokens[index - 1].text != "." =>
+                {
+                    if let Some(frame) = frames.last_mut() {
+                        *frame = Phase::Body;
+                    }
+                    saw_keyword_arm = true;
+                    if index + 1 < tokens.len() {
+                        cuts.push(token.end);
+                    }
+                }
+                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                    saw_keyword_arm = true;
+                    cuts.push(token.start);
+                    if let Some(frame) = frames.last_mut() {
+                        *frame = Phase::Header;
+                    }
+                }
+                "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                    saw_keyword_arm = true;
+                    cuts.push(token.start);
+                    if let Some(frame) = frames.last_mut() {
+                        *frame = if tokens.get(index + 1).is_some_and(|t| t.text == "if") {
+                            Phase::Header
+                        } else {
+                            Phase::Body
+                        };
+                    }
+                    if frames.last() == Some(&Phase::Body) && index + 1 < tokens.len() {
+                        cuts.push(token.end);
+                    }
+                }
+                "fi" if frames.last() == Some(&Phase::Body)
+                    && (statement_boundary(&tokens, index)
+                        || tokens
+                            .get(index.wrapping_sub(1))
+                            .is_some_and(|t| t.text == ")")) =>
+                {
+                    saw_keyword_arm = true;
+                    cuts.push(token.start);
+                    frames.pop();
+                    if index + 1 < tokens.len() && tokens[index + 1].text != ";" {
+                        cuts.push(token.end);
+                    }
+                }
+                ";" if saw_keyword_arm
+                    && frames.last() == Some(&Phase::Body)
+                    && index + 1 < tokens.len()
+                    && !matches!(tokens[index + 1].text, "do" | "then") =>
+                {
+                    cuts.push(token.end);
+                }
+                _ => {}
+            }
+        }
+
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut last = 0;
+        for cut in cuts {
+            if line[cut..].trim().is_empty() {
+                continue;
+            }
+            if line[last..cut].trim().is_empty() {
+                // A preceding semicolon already inserted the newline.
+                // Discard the whitespace between that terminator and fi.
+                last = cut;
+                continue;
+            }
+            output.push_str(line[last..cut].trim_end());
+            output.push('\n');
+            last = cut;
+        }
+        output.push_str(&line[last..]);
+    }
+    output
+}
+
+fn terminate_simple_returns(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+    let lines: Vec<&str> = source.split('\n').collect();
+
+    for (index, line) in lines.iter().enumerate() {
+        if index != 0 {
+            output.push('\n');
+        }
+        let initial = lex;
+        let scanned = lex_line(line, &mut lex);
+        let tokens = &scanned.tokens;
+        let code_end = scanned.line_comment.unwrap_or(line.len());
+        let code = line[..code_end].trim_end();
+
+        // Only add a terminator when the complete return expression fits on
+        // one line. Refuse to guess about block literals or continuations.
+        let is_simple_return = !initial.block_comment
+            && !scanned.block_comment_seen
+            && tokens.first().is_some_and(|token| token.text == "return")
+            && tokens.len() >= 2
+            && !code.ends_with(';')
+            && !code.ends_with('{')
+            && !code.ends_with('}')
+            && !code.ends_with(',')
+            && !code.ends_with('.')
+            && !code.ends_with(':')
+            && !code.ends_with('?')
+            && !code.ends_with('+')
+            && !code.ends_with('-')
+            && !code.ends_with('*')
+            && !code.ends_with('/')
+            && !code.ends_with('=')
+            && !code.ends_with('>')
+            && !code.ends_with('<')
+            && !code.ends_with('|')
+            && !code.ends_with('&')
+            && !code.contains("->")
+            && !code.contains("=>")
+            && !tokens
+                .iter()
+                .any(|token| token.text == "{" || token.text == "}");
+
+        let (mut parens, mut brackets) = (0isize, 0isize);
+        let mut invalid = false;
+        for token in tokens {
+            match token.text {
+                "(" => parens += 1,
+                ")" => parens -= 1,
+                "[" => brackets += 1,
+                "]" => brackets -= 1,
+                _ => {}
+            }
+            invalid |= parens < 0 || brackets < 0;
+        }
+        let next = lines.get(index + 1).map_or("", |line| line.trim_start());
+        let next_continues = [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
+            .iter()
+            .any(|prefix| next.starts_with(prefix));
+
+        if is_simple_return && !invalid && parens == 0 && brackets == 0 && !next_continues {
+            let at = code.len();
+            output.push_str(&line[..at]);
+            output.push(';');
+            output.push_str(&line[at..]);
+        } else {
+            output.push_str(line);
+        }
+    }
+    output
+}
+
+/// Break compact conditional arms and safely terminate full-line returns.
+pub(crate) fn normalize(source: &str) -> String {
+    terminate_simple_returns(&split_keyword_blocks(source))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize;
+
+    #[test]
+    fn expands_keyword_if_with_terminator() {
+        assert_eq!(
+            normalize("if self.built; then return Err(\"builder already consumed\"); fi"),
+            "if self.built; then\n return Err(\"builder already consumed\");\nfi"
+        );
+    }
+
+    #[test]
+    fn inserts_return_terminator() {
+        assert_eq!(
+            normalize("if done then return Err(\"not ready\") fi"),
+            "if done then\n return Err(\"not ready\");\nfi"
+        );
+    }
+
+    #[test]
+    fn comments_and_literals_remain_opaque() {
+        let line = "if ready; then return \"else; fi; then\"; fi // then fi";
+        assert_eq!(
+            normalize(line),
+            "if ready; then\n return \"else; fi; then\";\nfi // then fi"
+        );
+    }
+}

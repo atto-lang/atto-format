@@ -6,6 +6,7 @@
 use std::fmt;
 
 mod inline_blocks;
+mod keyword_blocks;
 mod select;
 
 const INDENT: &str = "  ";
@@ -108,6 +109,8 @@ struct LexState {
 /// - two-space indentation, never tabs for indentation;
 /// - braced static select arms, indented one level inside the select;
 /// - compact callable bodies expanded to one statement per line;
+/// - inline keyword conditionals expanded into indented then/else/fi lines;
+/// - safe single-line return expressions receive explicit semicolon terminators;
 /// - LF line endings and exactly one final newline;
 /// - trailing whitespace removed;
 /// - at most one ordinary blank line;
@@ -127,6 +130,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
+    let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut pending_blank = false;
@@ -1194,10 +1198,11 @@ fn canonicalize_name_first_parameter(parameter: &str) -> Option<String> {
             '}' => brace = brace.checked_sub(1)?,
             '<' => angle += 1,
             '>' => angle = angle.checked_sub(1)?,
+            ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 && colon.is_some() => {
+                return None;
+            }
             ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => {
-                if colon.replace(index).is_some() {
-                    return None;
-                }
+                colon = Some(index);
             }
             _ => {}
         }
