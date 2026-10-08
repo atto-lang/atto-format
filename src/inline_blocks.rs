@@ -107,7 +107,7 @@ pub(crate) fn normalize(source: &str) -> String {
 
         let mut start = 0;
         for cut in cuts {
-            result.push_str(&line[start..cut]);
+            result.push_str(line[start..cut].trim_end());
             result.push('\n');
             start = cut;
         }
@@ -168,7 +168,7 @@ mod tests {
         let source = r#"fnc run() -> String { val s = "};"; /* ; } */ return s; }"#;
         assert_eq!(
             normalize(source),
-            "fnc run() -> String {\n val s = \"};\";\n /* ; } */ return s;\n }"
+            "fnc run() -> String {\n val s = \"};\";\n /* ; } */ return s;\n}"
         );
     }
 
