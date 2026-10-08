@@ -206,14 +206,13 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     match tokens[cursor].text {
                         "{" if nesting.is_empty() => break,
                         "(" | "[" => nesting.push(tokens[cursor].text),
-                        ")" | "]" => {
-                            if !pop_matching(&mut nesting, tokens[cursor].text) {
-                                return Err(error(
-                                    tokens[cursor].start,
-                                    "mismatched delimiter in timeout/cancelled select arm header",
-                                ));
-                            }
+                        ")" | "]" if !pop_matching(&mut nesting, tokens[cursor].text) => {
+                            return Err(error(
+                                tokens[cursor].start,
+                                "mismatched delimiter in timeout/cancelled select arm header",
+                            ));
                         }
+                        ")" | "]" => {}
                         _ => {}
                     }
                     cursor += 1;
@@ -252,14 +251,13 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                         ":" if nesting.is_empty() && ternaries > 0 => ternaries -= 1,
                         ":" if nesting.is_empty() => break,
                         "(" | "[" | "{" => nesting.push(tokens[header].text),
-                        ")" | "]" | "}" => {
-                            if !pop_matching(&mut nesting, tokens[header].text) {
-                                return Err(error(
-                                    tokens[header].start,
-                                    "mismatched delimiter in select arm header",
-                                ));
-                            }
+                        ")" | "]" | "}" if !pop_matching(&mut nesting, tokens[header].text) => {
+                            return Err(error(
+                                tokens[header].start,
+                                "mismatched delimiter in select arm header",
+                            ));
                         }
+                        ")" | "]" | "}" => {}
                         _ => {}
                     }
                     header += 1;
@@ -327,14 +325,13 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     match tokens[end].text {
                         "(" | "[" | "{" => nesting.push(tokens[end].text),
-                        ")" | "]" | "}" => {
-                            if !pop_matching(&mut nesting, tokens[end].text) {
-                                return Err(error(
-                                    tokens[end].start,
-                                    "mismatched delimiter in unbraced select arm body",
-                                ));
-                            }
+                        ")" | "]" | "}" if !pop_matching(&mut nesting, tokens[end].text) => {
+                            return Err(error(
+                                tokens[end].start,
+                                "mismatched delimiter in unbraced select arm body",
+                            ));
                         }
+                        ")" | "]" | "}" => {}
                         _ => {}
                     }
                     end += 1;
