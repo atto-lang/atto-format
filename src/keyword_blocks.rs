@@ -110,6 +110,53 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
         )
 }
 
+fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
+    let mut start = 0usize;
+    for previous in (0..index).rev() {
+        if matches!(
+            tokens[previous].text,
+            ";" | "{" | "}" | "then" | "else" | "fi"
+        ) {
+            start = previous + 1;
+            break;
+        }
+    }
+    let statement = &tokens[start..index];
+    statement.first().is_some_and(|token| token.text == "return") && statement.len() >= 2
+}
+
+fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
+    let expression_head = tokens.get(1).map(|token| token.text);
+    let expression_tail = tokens.last().map(|token| token.text);
+
+    matches!(expression_head, Some("match" | "select" | "switch" | "do"))
+        || matches!(
+            expression_tail,
+            Some(
+                "match"
+                    | "select"
+                    | "switch"
+                    | "over"
+                    | "from"
+                    | "with"
+                    | "as"
+                    | "is"
+                    | "await"
+                    | "then"
+                    | "do"
+            )
+        )
+        || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
+            .iter()
+            .any(|prefix| next.starts_with(prefix))
+        || [
+            "on", "when", "case", "default", "else", "elif", "fi", "done", "end", "as", "is",
+            "with", "over",
+        ]
+        .iter()
+        .any(|word| crate::starts_word(next, word))
+}
+
 fn split_keyword_blocks(source: &str) -> String {
     let mut output = String::with_capacity(source.len());
     let mut lex = LexState::default();
@@ -190,6 +237,7 @@ fn split_keyword_blocks(source: &str) -> String {
                 }
                 "fi" if frames.last() == Some(&Phase::Body)
                     && (statement_boundary(&tokens, index)
+                        || inline_return_before(&tokens, index)
                         || tokens
                             .get(index.wrapping_sub(1))
                             .is_some_and(|t| t.text == ")")) =>
@@ -249,13 +297,17 @@ fn terminate_simple_returns(source: &str) -> String {
         let code_end = scanned.line_comment.unwrap_or(line.len());
         let code = line[..code_end].trim_end();
 
-        // Only add a terminator when the complete return expression fits on
-        // one line. Refuse to guess about block literals or continuations.
-        let is_simple_return = !initial.block_comment
+        // Add a terminator only when the return is definitely complete on
+        // this line. Bare returns are always complete. Expression returns
+        // fail closed around multiline/block syntax so formatting cannot
+        // silently terminate a future match/select/continuation early.
+        let is_return = !initial.block_comment
             && !scanned.block_comment_seen
             && tokens.first().is_some_and(|token| token.text == "return")
+            && !code.ends_with(';');
+        let bare_return = is_return && tokens.len() == 1;
+        let simple_expression_return = is_return
             && tokens.len() >= 2
-            && !code.ends_with(';')
             && !code.ends_with('{')
             && !code.ends_with('}')
             && !code.ends_with(',')
@@ -290,11 +342,14 @@ fn terminate_simple_returns(source: &str) -> String {
             invalid |= parens < 0 || brackets < 0;
         }
         let next = lines.get(index + 1).map_or("", |line| line.trim_start());
-        let next_continues = [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
-            .iter()
-            .any(|prefix| next.starts_with(prefix));
+        let definitely_complete = bare_return
+            || (simple_expression_return
+                && !return_expression_is_multiline(tokens, next)
+                && !invalid
+                && parens == 0
+                && brackets == 0);
 
-        if is_simple_return && !invalid && parens == 0 && brackets == 0 && !next_continues {
+        if definitely_complete {
             let at = code.len();
             output.push_str(&line[..at]);
             output.push(';');
