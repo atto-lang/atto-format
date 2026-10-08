@@ -161,11 +161,11 @@ These flags only relax write-safety checks. They do not change formatting style.
 
 Additional write hardening:
 
-- explicit symlink inputs are refused, and symlinks found during recursive walks
-  are skipped rather than followed;
-- after the full Git preflight, every file is re-read before the first write, so
-  a concurrent editor/generator change aborts the operation instead of being
-  overwritten from a stale formatter snapshot;
+- explicit symlink inputs are refused, symlinked parent-directory components are
+  refused, and symlinks found during recursive walks are skipped rather than followed;
+- after the full Git preflight, every file is re-read before the first write, and
+  each target is revalidated again immediately before its own write; changed
+  contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
 - write-safety override flags are rejected unless `--write` is active.
 
 ## Rust SDK
