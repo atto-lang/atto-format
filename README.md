@@ -134,10 +134,15 @@ oresfmt - < input.ores
 
 # one file -> stdout
 oresfmt --stdout example.ores
+
+# stop option parsing for paths beginning with '-'
+oresfmt --check -- -generated.ores
 ```
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
 alias. Directories are walked recursively and only `.ores` files are selected.
+Filesystem arguments are parsed as native OS strings rather than forced through
+UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
 
 ### Safe writes
 
