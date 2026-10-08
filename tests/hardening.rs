@@ -96,7 +96,8 @@ fi
 
 #[test]
 fn literals_and_argument_semicolons_do_not_create_fake_statement_splits() {
-    let input = r#"fnc check() -> Result { if ready then return parse("fi; then", callback(1, 2)) fi }"#;
+    let input =
+        r#"fnc check() -> Result { if ready then return parse("fi; then", callback(1, 2)) fi }"#;
     let expected = r#"fnc check() -> Result {
   if ready; then
     return parse("fi; then", callback(1, 2));
