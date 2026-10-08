@@ -110,6 +110,37 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
         )
 }
 
+fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
+    let (mut parens, mut brackets) = (0usize, 0usize);
+
+    for (offset, token) in tokens[start..].iter().enumerate() {
+        match token.text {
+            "(" => parens += 1,
+            ")" => {
+                if parens == 0 {
+                    return false;
+                }
+                parens -= 1;
+            }
+            "[" => brackets += 1,
+            "]" => {
+                if brackets == 0 {
+                    return false;
+                }
+                brackets -= 1;
+            }
+            "{" if parens == 0 && brackets == 0 => return false,
+            "then" | "do" if parens == 0 && brackets == 0 => {
+                let absolute = start + offset;
+                return absolute == 0 || tokens[absolute - 1].text != ".";
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
 fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
     let mut start = 0usize;
     for previous in (0..index).rev() {
@@ -190,10 +221,7 @@ fn split_keyword_blocks(source: &str) -> String {
                 "if" if statement_boundary(&tokens, index) => {
                     // Braced if/elif arms are a separate grammatical form.
                     // Require an actual keyword header terminator to opt in.
-                    let has_keyword_header = tokens[index + 1..]
-                        .iter()
-                        .take_while(|token| token.text != "{")
-                        .any(|token| matches!(token.text, "then" | "do"));
+                    let has_keyword_header = has_top_level_keyword_header(&tokens, index + 1);
                     if has_keyword_header && (index == 0 || tokens[index - 1].text != "else") {
                         frames.push(Phase::Header);
                         if index > 0 {
@@ -392,6 +420,26 @@ mod tests {
         assert_eq!(
             normalize(line),
             "if ready; then\n return \"else; fi; then\";\nfi // then fi"
+        );
+    }
+
+    #[test]
+    fn contextual_then_and_do_inside_braced_conditions_do_not_open_keyword_blocks() {
+        for source in [
+            "if predicate.then() {\nwork();\n}\nfi",
+            "if predicate.do() {\nwork();\n}\nfi",
+            "if predicate(then) {\nwork();\n}\nfi",
+            "if predicate(do) {\nwork();\n}\nfi",
+        ] {
+            assert_eq!(normalize(source), source);
+        }
+    }
+
+    #[test]
+    fn top_level_then_after_nested_contextual_tokens_is_still_recognized() {
+        assert_eq!(
+            normalize("if predicate(then) && obj.do(); then return 1 fi"),
+            "if predicate(then) && obj.do(); then\n return 1;\nfi"
         );
     }
 
