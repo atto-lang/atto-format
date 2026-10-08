@@ -202,7 +202,13 @@ fn split_keyword_blocks(source: &str) -> String {
         cuts.dedup();
         let mut last = 0;
         for cut in cuts {
-            if line[last..cut].trim().is_empty() || line[cut..].trim().is_empty() {
+            if line[cut..].trim().is_empty() {
+                continue;
+            }
+            if line[last..cut].trim().is_empty() {
+                // A preceding semicolon already inserted the newline.
+                // Discard the whitespace between that terminator and fi.
+                last = cut;
                 continue;
             }
             output.push_str(line[last..cut].trim_end());
