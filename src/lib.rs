@@ -245,6 +245,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
         let callable_body = is_callable_body_header(structural, signature_context);
         let callable_signature = is_callable_signature(structural, signature_context);
+        if callable_body || callable_signature {
+            content = canonicalize_callable_parameter_order(&content, lex);
+        }
         if callable_body {
             content = canonicalize_callable_arrow(&content, "->", lex);
         } else if callable_signature {
@@ -1043,12 +1046,15 @@ fn contains_word(line: &str, word: &str) -> bool {
 }
 
 fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> String {
-    let body_at = first_visible_char_index(line, '{', initial)
-        .or_else(|| line.rfind(';'))
-        .unwrap_or(line.len());
-    let Some(close_paren) = callable_parameter_close(line, body_at, initial) else {
+    let Some(close_paren) = callable_parameter_close(line, line.len(), initial) else {
         return line.to_string();
     };
+    // Braces within parameter types are not the callable's body delimiter.
+    let after_parameters = close_paren + 1;
+    let body_at = first_visible_char_index(&line[after_parameters..], '{', LexState::default())
+        .map(|index| after_parameters + index)
+        .or_else(|| line.rfind(';'))
+        .unwrap_or(line.len());
     let tail = &line[close_paren + 1..body_at];
     let trimmed = tail.trim_start();
     let leading_ws = tail.len() - trimmed.len();
@@ -1066,11 +1072,163 @@ fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> 
     format!("{before} {desired} {after}")
 }
 
-fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Option<usize> {
+fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> String {
+    let Some((open, close)) = callable_parameter_bounds(line, line.len(), initial) else {
+        return line.to_string();
+    };
+
+    let parameters = &line[open + 1..close];
+    if parameters.trim().is_empty() || parameters.contains("//") || parameters.contains("/*") {
+        return line.to_string();
+    }
+
+    let Some(parts) = split_top_level_parameters(parameters) else {
+        return line.to_string();
+    };
+
+    let mut changed = false;
+    let mut canonical = Vec::with_capacity(parts.len());
+    for part in parts {
+        let trimmed = part.trim();
+        if let Some(rewritten) = canonicalize_name_first_parameter(trimmed) {
+            changed = true;
+            canonical.push(rewritten);
+        } else {
+            canonical.push(trimmed.to_string());
+        }
+    }
+
+    if !changed {
+        return line.to_string();
+    }
+
+    let mut result = String::with_capacity(line.len());
+    result.push_str(&line[..open + 1]);
+    result.push_str(&canonical.join(", "));
+    result.push_str(&line[close..]);
+    result
+}
+
+fn split_top_level_parameters(parameters: &str) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+
+    for (index, ch) in parameters.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren += 1,
+            ')' => paren = paren.checked_sub(1)?,
+            '[' => bracket += 1,
+            ']' => bracket = bracket.checked_sub(1)?,
+            '{' => brace += 1,
+            '}' => brace = brace.checked_sub(1)?,
+            '<' => angle += 1,
+            '>' => angle = angle.checked_sub(1)?,
+            ',' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => {
+                parts.push(&parameters[start..index]);
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    if quote.is_some() || paren != 0 || bracket != 0 || brace != 0 || angle != 0 {
+        return None;
+    }
+
+    parts.push(&parameters[start..]);
+    Some(parts)
+}
+
+fn canonicalize_name_first_parameter(parameter: &str) -> Option<String> {
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+    let mut colon = None;
+
+    for (index, ch) in parameter.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren += 1,
+            ')' => paren = paren.checked_sub(1)?,
+            '[' => bracket += 1,
+            ']' => bracket = bracket.checked_sub(1)?,
+            '{' => brace += 1,
+            '}' => brace = brace.checked_sub(1)?,
+            '<' => angle += 1,
+            '>' => angle = angle.checked_sub(1)?,
+            ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => {
+                if colon.replace(index).is_some() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let colon = colon?;
+    let name = parameter[..colon].trim();
+    let ty = parameter[colon + 1..].trim();
+
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_')
+        || !chars.all(is_ident_char)
+        || ty.is_empty()
+        || ty.contains('=')
+    {
+        return None;
+    }
+
+    Some(format!("{ty} {name}"))
+}
+
+fn callable_parameter_bounds(
+    line: &str,
+    limit: usize,
+    initial: LexState,
+) -> Option<(usize, usize)> {
     let chars: Vec<(usize, char)> = line[..limit].char_indices().collect();
     let mut state = initial;
     let mut depth = 0usize;
-    let mut saw_open = false;
+    let mut open = None;
     let mut i = 0usize;
 
     while i < chars.len() {
@@ -1115,13 +1273,15 @@ fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Opti
 
         match ch {
             '(' => {
-                depth += 1;
-                saw_open = true;
-            }
-            ')' if saw_open => {
-                depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return Some(index);
+                    open = Some(index);
+                }
+                depth += 1;
+            }
+            ')' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((open?, index));
                 }
             }
             _ => {}
@@ -1130,6 +1290,10 @@ fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Opti
     }
 
     None
+}
+
+fn callable_parameter_close(line: &str, limit: usize, initial: LexState) -> Option<usize> {
+    callable_parameter_bounds(line, limit, initial).map(|(_, close)| close)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
