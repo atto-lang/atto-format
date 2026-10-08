@@ -147,9 +147,7 @@ fn split_keyword_blocks(source: &str) -> String {
                         .iter()
                         .take_while(|token| token.text != "{")
                         .any(|token| matches!(token.text, "then" | "do"));
-                    if has_keyword_header
-                        && (index == 0 || tokens[index - 1].text != "else")
-                    {
+                    if has_keyword_header && (index == 0 || tokens[index - 1].text != "else") {
                         frames.push(Phase::Header);
                         if index > 0 {
                             cuts.push(token.start);
@@ -206,7 +204,8 @@ fn split_keyword_blocks(source: &str) -> String {
                 ";" if saw_keyword_arm
                     && frames.last() == Some(&Phase::Body)
                     && index + 1 < tokens.len()
-                    && !matches!(tokens[index + 1].text, "do" | "then") => {
+                    && !matches!(tokens[index + 1].text, "do" | "then") =>
+                {
                     cuts.push(token.end);
                 }
                 _ => {}
