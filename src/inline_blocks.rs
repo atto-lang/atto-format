@@ -92,7 +92,13 @@ pub(crate) fn normalize(source: &str) -> String {
                 ')' => parens = parens.saturating_sub(1),
                 '[' => brackets += 1,
                 ']' => brackets = brackets.saturating_sub(1),
-                ';' if nested == 0 && parens == 0 && brackets == 0 => cuts.push(at + 1),
+                ';' if nested == 0 && parens == 0 && brackets == 0 => {
+                    // The closing brace already provides the final break.
+                    // Do not leave a whitespace-only line after the last ';'.
+                    if !line[at + 1..punctuation[closing].0].trim().is_empty() {
+                        cuts.push(at + 1);
+                    }
+                }
                 _ => {}
             }
         }
