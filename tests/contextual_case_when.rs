@@ -95,3 +95,73 @@ fn contextual_assignments_in_legacy_unbraced_arms_are_not_arm_boundaries() {
     assert!(formatted.contains("when readch input: val case {"));
     assert!(is_formatted(&formatted).unwrap());
 }
+
+#[test]
+fn formats_all_readiness_select_arm_kinds_and_canonicalizes_case() {
+    let src = r#"do select {
+case readch messages: val msg { use(msg); }
+case writech output, value: { sent(); }
+case await future: val result { use(result); }
+case timeout 5s { timed_out(); }
+case cancelled token { cancelled(); }
+default: { idle(); }
+}
+"#;
+
+    let expected = r#"do select {
+  when readch messages: val msg {
+    use(msg);
+  }
+  when writech output, value: {
+    sent();
+  }
+  when await future: val result {
+    use(result);
+  }
+  when timeout 5s {
+    timed_out();
+  }
+  when cancelled token {
+    cancelled();
+  }
+  default: {
+    idle();
+  }
+}
+"#;
+
+    let formatted = format_source(src).unwrap();
+    assert_eq!(formatted, expected);
+    assert_eq!(format_source(&formatted).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn await_binding_and_nested_cancel_expression_remain_intact() {
+    let src = r#"select first {
+when await pending.map(transform): const result { consume(result); }
+when cancelled owner.token() { stop(); }
+when timeout 2.5ms { retry(); }
+}
+"#;
+
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("when await pending.map(transform): const result {"));
+    assert!(formatted.contains("when cancelled owner.token() {"));
+    assert!(formatted.contains("when timeout 2.5ms {"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn readiness_arms_fail_closed_when_required_shape_is_missing() {
+    for source in [
+        "select { when await future val x {} }",
+        "select { when timeout 5s }",
+        "select { when cancelled token }",
+        "select { when cancelled token: {} }",
+        "select { when timeout 5s: {} }",
+        "select { when unknown source: {} }",
+    ] {
+        assert!(format_source(source).is_err(), "{source}");
+    }
+}
