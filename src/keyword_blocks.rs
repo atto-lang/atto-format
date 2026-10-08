@@ -152,10 +152,7 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
         || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
-        || [
-            "on", "when", "case", "default", "else", "elif", "fi", "done", "end", "as", "is",
-            "with", "over",
-        ]
+        || ["on", "when", "case", "default", "as", "is", "with", "over"]
         .iter()
         .any(|word| crate::starts_word(next, word))
 }
