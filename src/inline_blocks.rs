@@ -97,8 +97,8 @@ pub(crate) fn normalize(source: &str) -> String {
                 // The keyword-block pass expands the body after 'then'.
                 ';' if nested == 0 && parens == 0 && brackets == 0 && has_following_code => {
                     let after = line[at + 1..punctuation[closing].0].trim_start();
-                    let header_suffix = crate::starts_word(after, "then")
-                        || crate::starts_word(after, "do");
+                    let header_suffix =
+                        crate::starts_word(after, "then") || crate::starts_word(after, "do");
                     let prefix = &line[punctuation[opening].0 + 1..at];
                     let words = crate::visible_word_spans(prefix, crate::LexState::default());
                     let has_if = words.iter().any(|word| {
