@@ -263,3 +263,26 @@ fn recursive_walk_skips_symlinked_ores_files() {
 
     let _ = fs::remove_dir_all(external_root);
 }
+
+#[cfg(unix)]
+#[test]
+fn explicit_paths_through_symlinked_directories_are_refused() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::new("symlink-parent");
+    let real_dir = repo.root.join("real");
+    fs::create_dir_all(&real_dir).unwrap();
+    let target = real_dir.join("sample.ores");
+    fs::write(&target, UNFORMATTED).unwrap();
+    let alias = repo.root.join("alias");
+    symlink(&real_dir, &alias).unwrap();
+
+    let output = repo.run(&["alias/sample.ores"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(target).unwrap(), UNFORMATTED);
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("refusing path through symlinked directory")
+    );
+}
