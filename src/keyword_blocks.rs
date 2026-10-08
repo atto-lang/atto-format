@@ -394,4 +394,54 @@ mod tests {
             "if ready; then\n return \"else; fi; then\";\nfi // then fi"
         );
     }
+
+    #[test]
+    fn closes_inline_if_after_literal_and_identifier_returns_without_semicolons() {
+        assert_eq!(
+            normalize("if ready then return 1 fi"),
+            "if ready then\n return 1;\nfi"
+        );
+        assert_eq!(
+            normalize("if ready then return value fi"),
+            "if ready then\n return value;\nfi"
+        );
+    }
+
+    #[test]
+    fn fi_as_return_operand_is_not_confused_with_the_structural_closer() {
+        assert_eq!(
+            normalize("if ready; then return fi; fi"),
+            "if ready; then\n return fi;\nfi"
+        );
+    }
+
+    #[test]
+    fn canonicalizes_bare_return_and_preserves_line_comment() {
+        assert_eq!(normalize("return"), "return;");
+        assert_eq!(normalize("return // done"), "return; // done");
+    }
+
+    #[test]
+    fn refuses_to_terminate_multiline_expression_introducers() {
+        assert_eq!(
+            normalize("return match value over\non _ -> 1"),
+            "return match value over\non _ -> 1"
+        );
+        assert_eq!(normalize("return select from plan"), "return select from plan");
+        assert_eq!(
+            normalize("return value\n  .transform()"),
+            "return value\n  .transform()"
+        );
+        assert_eq!(
+            normalize("return value\n  as Result"),
+            "return value\n  as Result"
+        );
+    }
+
+    #[test]
+    fn still_terminates_obviously_complete_async_and_cast_returns() {
+        assert_eq!(normalize("return await task()"), "return await task();");
+        assert_eq!(normalize("return value as Result"), "return value as Result;");
+        assert_eq!(normalize("return obj.match()"), "return obj.match();");
+    }
 }
