@@ -73,9 +73,11 @@ nb select {
 
 The formatter accepts both `when` and legacy `case` for static select arms,
 canonicalizes `case` to `when`, and adds braces to legacy unbraced select
-arms, including read arms without a binding and write/default arms. Comments
-and literals retain their contents. Dynamic `select from cases` expressions
-retain their syntax.
+arms, including read arms without a binding and write/default arms. Arm
+boundaries are recognized only outside nested `()`, `[]`, and `{}`;
+mismatched delimiters fail closed instead of being reformatted heuristically.
+Comments and literals retain their contents. Dynamic `select from cases`
+expressions retain their syntax.
 
 Streaming channel writes use ordinary `for ... of ...` loops or
 `for await ... of ...` over an async iterator. Both braced loops and `do`/`done`
