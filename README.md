@@ -16,7 +16,8 @@ identical behavior.
 - **two blank lines between sibling executable function/routine/method declarations**;
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
-- conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`;
+- conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
+- complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
   - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
