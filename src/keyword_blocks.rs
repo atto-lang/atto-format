@@ -153,8 +153,8 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
             .iter()
             .any(|prefix| next.starts_with(prefix))
         || ["on", "when", "case", "default", "as", "is", "with", "over"]
-        .iter()
-        .any(|word| crate::starts_word(next, word))
+            .iter()
+            .any(|word| crate::starts_word(next, word))
 }
 
 fn split_keyword_blocks(source: &str) -> String {
