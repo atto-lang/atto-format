@@ -1,5 +1,6 @@
 use oreslang_format::{format_source, is_formatted};
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -29,6 +30,7 @@ OTHER:
     -h, --help  Print help
     -V, --version
                 Print version
+    --          Stop option parsing; remaining arguments are filesystem paths
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
@@ -75,29 +77,55 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut explicit_mode: Option<&'static str> = None;
     let mut policy = WritePolicy::default();
     let mut paths = Vec::new();
+    let mut parse_options = true;
 
-    for arg in env::args().skip(1) {
-        match arg.as_str() {
-            "--dry-run" => select_mode(&mut mode, &mut explicit_mode, Mode::DryRun, "--dry-run")?,
-            "--write" => select_mode(&mut mode, &mut explicit_mode, Mode::Write, "--write")?,
-            "--check" => select_mode(&mut mode, &mut explicit_mode, Mode::Check, "--check")?,
-            "--stdout" => select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?,
-            "--ok-to-mod-dirty-files" => policy.allow_dirty_tracked = true,
-            "--ok-to-mod-untracked-files" => policy.allow_untracked = true,
-            "--ok-to-mod-outside-git" => policy.allow_outside_git = true,
-            "-h" | "--help" => {
-                print!("{HELP}");
-                return Ok(ExitCode::SUCCESS);
-            }
-            "-V" | "--version" => {
-                println!("oresfmt {}", env!("CARGO_PKG_VERSION"));
-                return Ok(ExitCode::SUCCESS);
-            }
-            _ if arg.starts_with('-') && arg != "-" => {
-                return Err(format!("unknown option: {arg}").into());
-            }
-            _ => paths.push(PathBuf::from(arg)),
+    for arg in env::args_os().skip(1) {
+        if parse_options && arg == OsStr::new("--") {
+            parse_options = false;
+            continue;
         }
+
+        if parse_options {
+            if let Some(arg) = arg.to_str() {
+                match arg {
+                    "--dry-run" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::DryRun, "--dry-run")?
+                    }
+                    "--write" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Write, "--write")?
+                    }
+                    "--check" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Check, "--check")?
+                    }
+                    "--stdout" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?
+                    }
+                    "--ok-to-mod-dirty-files" => policy.allow_dirty_tracked = true,
+                    "--ok-to-mod-untracked-files" => policy.allow_untracked = true,
+                    "--ok-to-mod-outside-git" => policy.allow_outside_git = true,
+                    "-h" | "--help" => {
+                        io::stdout().write_all(HELP.as_bytes())?;
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    "-V" | "--version" => {
+                        writeln!(io::stdout(), "oresfmt {}", env!("CARGO_PKG_VERSION"))?;
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    _ if arg.starts_with('-') && arg != "-" => {
+                        return Err(format!("unknown option: {arg}").into());
+                    }
+                    _ => {
+                        paths.push(PathBuf::from(arg));
+                        continue;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Non-UTF-8 arguments are valid filesystem paths. They cannot match
+        // textual options, so preserve their raw OsString bytes.
+        paths.push(PathBuf::from(arg));
     }
 
     if paths.is_empty() {
@@ -146,7 +174,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         let input = fs::read_to_string(&paths[0])?;
         let formatted = format_source(&input)?;
-        print!("{formatted}");
+        io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
     }
 
