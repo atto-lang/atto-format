@@ -108,3 +108,51 @@ fn literals_and_argument_semicolons_do_not_create_fake_statement_splits() {
 "#;
     assert_eq!(format_source(input).unwrap(), expected);
 }
+
+#[test]
+fn contextual_then_and_do_names_inside_braced_if_conditions_are_preserved() {
+    let input = r#"fnc check() -> void {
+if predicate.then() {
+work();
+}
+fi
+if predicate(do) {
+work();
+}
+fi
+}
+"#;
+    let expected = r#"fnc check() -> void {
+  if predicate.then() {
+    work();
+  }
+  fi
+  if predicate(do) {
+    work();
+  }
+  fi
+}
+"#;
+    let formatted = format_source(input).unwrap();
+    assert_eq!(formatted, expected);
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn actual_keyword_then_after_nested_contextual_tokens_still_expands() {
+    let input = r#"fnc check() -> int {
+if predicate(then) && helper.do(); then return 1 fi
+return 0
+}
+"#;
+    let expected = r#"fnc check() -> int {
+  if predicate(then) && helper.do(); then
+    return 1;
+  fi
+  return 0;
+}
+"#;
+    let formatted = format_source(input).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
