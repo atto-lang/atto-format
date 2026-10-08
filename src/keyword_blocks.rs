@@ -160,17 +160,13 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "elif" | "elseif"
-                    if !frames.is_empty() && statement_boundary(&tokens, index) =>
-                {
+                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
-                "else"
-                    if !frames.is_empty() && statement_boundary(&tokens, index) =>
-                {
+                "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = if tokens.get(index + 1).is_some_and(|t| t.text == "if") {
@@ -183,10 +179,11 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "fi"
-                    if frames.last() == Some(&Phase::Body)
-                        && (statement_boundary(&tokens, index)
-                            || tokens.get(index.wrapping_sub(1)).is_some_and(|t| t.text == ")")) =>
+                "fi" if frames.last() == Some(&Phase::Body)
+                    && (statement_boundary(&tokens, index)
+                        || tokens
+                            .get(index.wrapping_sub(1))
+                            .is_some_and(|t| t.text == ")")) =>
                 {
                     cuts.push(token.start);
                     frames.pop();
@@ -256,7 +253,9 @@ fn terminate_simple_returns(source: &str) -> String {
             && !code.ends_with('&')
             && !code.contains("->")
             && !code.contains("=>")
-            && !tokens.iter().any(|token| token.text == "{" || token.text == "}");
+            && !tokens
+                .iter()
+                .any(|token| token.text == "{" || token.text == "}");
 
         let (mut parens, mut brackets) = (0isize, 0isize);
         let mut invalid = false;
