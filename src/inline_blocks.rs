@@ -93,9 +93,20 @@ pub(crate) fn normalize(source: &str) -> String {
                 ')' => parens = parens.saturating_sub(1),
                 '[' => brackets += 1,
                 ']' => brackets = brackets.saturating_sub(1),
-                // The closing brace already supplies the final line break.
+                // Preserve the condition terminator in if/elif headers.
+                // The keyword-block pass expands the body after 'then'.
                 ';' if nested == 0 && parens == 0 && brackets == 0 && has_following_code => {
-                    cuts.push(at + 1);
+                    let after = line[at + 1..punctuation[closing].0].trim_start();
+                    let header_suffix = crate::starts_word(after, "then")
+                        || crate::starts_word(after, "do");
+                    let prefix = &line[punctuation[opening].0 + 1..at];
+                    let words = crate::visible_word_spans(prefix, crate::LexState::default());
+                    let has_if = words.iter().any(|word| {
+                        matches!(&prefix[word.start..word.end], "if" | "elif" | "elseif")
+                    });
+                    if !(header_suffix && has_if) {
+                        cuts.push(at + 1);
+                    }
                 }
                 _ => {}
             }
