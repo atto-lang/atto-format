@@ -282,6 +282,7 @@ fn explicit_paths_through_symlinked_directories_are_refused() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(fs::read_to_string(target).unwrap(), UNFORMATTED);
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("refusing path through symlinked directory")
+        String::from_utf8_lossy(&output.stderr)
+            .contains("refusing path through symlinked directory")
     );
 }
