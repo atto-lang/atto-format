@@ -78,6 +78,7 @@ work();
 } else {
 fallback();
 }
+fi
 if again; then
 while busy; do
 tick();
@@ -89,6 +90,7 @@ fi
     let formatted = format_source(input).unwrap();
     assert!(formatted.contains("if ready {\n"));
     assert!(formatted.contains("} else {\n"));
+    assert!(formatted.contains("fi\n"));
     assert!(formatted.contains("while busy; do\n"));
     assert!(formatted.contains("done\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
