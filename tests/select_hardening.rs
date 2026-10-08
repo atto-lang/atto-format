@@ -31,7 +31,10 @@ fn mismatched_select_header_delimiters_fail_closed() {
         "select { when timeout (deadline]: {} }",
     ] {
         let err = format_source(source).unwrap_err();
-        assert!(err.message().contains("mismatched delimiter"), "{source}: {err}");
+        assert!(
+            err.message().contains("mismatched delimiter"),
+            "{source}: {err}"
+        );
     }
 }
 
@@ -43,7 +46,8 @@ fn mismatched_or_unclosed_unbraced_select_body_delimiters_fail_closed() {
     ] {
         let err = format_source(source).unwrap_err();
         assert!(
-            err.message().contains("delimiter in unbraced select arm body"),
+            err.message()
+                .contains("delimiter in unbraced select arm body"),
             "{source}: {err}"
         );
     }
