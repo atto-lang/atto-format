@@ -122,6 +122,7 @@ fn split_keyword_blocks(source: &str) -> String {
         let scanned = lex_line(line, &mut lex);
         let tokens = scanned.tokens;
         let mut cuts: Vec<usize> = Vec::new();
+        let mut saw_keyword_arm = false;
         let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
 
         for (index, token) in tokens.iter().enumerate() {
@@ -140,8 +141,15 @@ fn split_keyword_blocks(source: &str) -> String {
 
             match token.text {
                 "if" if statement_boundary(&tokens, index) => {
-                    // The if in an else-if alias belongs to the same arm.
-                    if index == 0 || tokens[index - 1].text != "else" {
+                    // Braced if/elif arms are a separate grammatical form.
+                    // Require an actual keyword header terminator to opt in.
+                    let has_keyword_header = tokens[index + 1..]
+                        .iter()
+                        .take_while(|token| token.text != "{")
+                        .any(|token| matches!(token.text, "then" | "do"));
+                    if has_keyword_header
+                        && (index == 0 || tokens[index - 1].text != "else")
+                    {
                         frames.push(Phase::Header);
                         if index > 0 {
                             cuts.push(token.start);
@@ -156,17 +164,20 @@ fn split_keyword_blocks(source: &str) -> String {
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Body;
                     }
+                    saw_keyword_arm = true;
                     if index + 1 < tokens.len() {
                         cuts.push(token.end);
                     }
                 }
                 "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                    saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
                 "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                    saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = if tokens.get(index + 1).is_some_and(|t| t.text == "if") {
@@ -185,13 +196,17 @@ fn split_keyword_blocks(source: &str) -> String {
                             .get(index.wrapping_sub(1))
                             .is_some_and(|t| t.text == ")")) =>
                 {
+                    saw_keyword_arm = true;
                     cuts.push(token.start);
                     frames.pop();
                     if index + 1 < tokens.len() && tokens[index + 1].text != ";" {
                         cuts.push(token.end);
                     }
                 }
-                ";" if frames.last() == Some(&Phase::Body) && index + 1 < tokens.len() => {
+                ";" if saw_keyword_arm
+                    && frames.last() == Some(&Phase::Body)
+                    && index + 1 < tokens.len()
+                    && !matches!(tokens[index + 1].text, "do" | "then") => {
                     cuts.push(token.end);
                 }
                 _ => {}
