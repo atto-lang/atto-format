@@ -23,7 +23,7 @@ pub(crate) fn normalize(source: &str) -> String {
                 if ch != '{' {
                     return None;
                 }
-    
+
                 // An inline struct type or default argument can contain braces
                 // before the callable's actual body.
                 let (mut parens, mut brackets) = (0isize, 0isize);
@@ -39,7 +39,7 @@ pub(crate) fn normalize(source: &str) -> String {
                 if parens != 0 || brackets != 0 {
                     return None;
                 }
-    
+
                 let mut header_lex = initial;
                 let visible: String = scan_visible(&line[..at], &mut header_lex)
                     .into_iter()
