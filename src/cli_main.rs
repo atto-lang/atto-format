@@ -477,3 +477,55 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
 
     Ok(())
 }
+
+#[cfg(test)]
+mod write_safety_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "oresfmt-write-safety-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn revalidation_rejects_changed_contents() {
+        let root = scratch("changed");
+        let path = root.join("sample.ores");
+        fs::write(&path, "before").unwrap();
+        fs::write(&path, "after").unwrap();
+
+        let err = revalidate_write_target(&path, "before").unwrap_err();
+        assert!(err.to_string().contains("changed during formatter preflight"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revalidation_rejects_leaf_replaced_by_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("leaf-symlink");
+        let path = root.join("sample.ores");
+        let target = root.join("target.ores");
+        fs::write(&path, "before").unwrap();
+        fs::write(&target, "external").unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink(&target, &path).unwrap();
+
+        let err = revalidate_write_target(&path, "before").unwrap_err();
+        assert!(err.to_string().contains("replaced by symlink"));
+        assert_eq!(fs::read_to_string(target).unwrap(), "external");
+
+        let _ = fs::remove_dir_all(root);
+    }
+}
