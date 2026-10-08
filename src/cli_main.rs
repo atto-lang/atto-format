@@ -2,7 +2,7 @@ use oreslang_format::{format_source, is_formatted};
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const HELP: &str = r#"oresfmt - the canonical Oreslang formatter
@@ -220,25 +220,100 @@ fn write_files(
     }
 
     // Re-read the whole write set after Git preflight. This catches editors,
-    // generators, or hooks that changed a file while formatting was being
-    // prepared, instead of overwriting newer bytes with a stale snapshot.
+    // generators, hooks, or path substitutions that changed a target while
+    // formatting was being prepared, before any write begins.
     for (path, original, _) in &changes {
-        let current = fs::read_to_string(path)?;
-        if current.as_bytes() != original.as_bytes() {
-            return Err(format!(
-                "refusing to overwrite file changed during formatter preflight: {}",
-                path.display()
-            )
-            .into());
-        }
+        revalidate_write_target(path, original)?;
     }
 
-    for (path, _, formatted) in changes {
+    for (path, original, formatted) in changes {
+        // Narrow the remaining TOCTOU window by validating each target again
+        // immediately before its write. In particular, refuse if a path or one
+        // of its parent directories was replaced by a symlink after preflight.
+        revalidate_write_target(&path, &original)?;
         fs::write(&path, formatted)?;
         println!("formatted {}", path.display());
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn revalidate_write_target(
+    path: &Path,
+    original: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    reject_symlinked_ancestors(path)?;
+
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("cannot re-inspect write target {}: {err}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "refusing to overwrite write target replaced by symlink: {}",
+            path.display()
+        )
+        .into());
+    }
+    if !metadata.is_file() {
+        return Err(format!(
+            "refusing to overwrite write target that is no longer a regular file: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    let current = fs::read_to_string(path)?;
+    if current.as_bytes() != original.as_bytes() {
+        return Err(format!(
+            "refusing to overwrite file changed during formatter preflight: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+fn reject_symlinked_ancestors(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+
+    let mut current = if parent.is_absolute() {
+        PathBuf::new()
+    } else {
+        env::current_dir()?
+    };
+
+    for component in parent.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                current.pop();
+            }
+            Component::Normal(part) => {
+                current.push(part);
+                let metadata = fs::symlink_metadata(&current).map_err(|err| {
+                    format!(
+                        "cannot inspect path component {} for {}: {err}",
+                        current.display(),
+                        path.display()
+                    )
+                })?;
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "refusing path through symlinked directory: {} (input {})",
+                        current.display(),
+                        path.display()
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn enforce_write_policy(
@@ -367,6 +442,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         )
         .into());
     }
+    reject_symlinked_ancestors(path)?;
     if metadata.is_file() {
         out.push(path.to_path_buf());
         return Ok(());
