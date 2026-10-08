@@ -3,7 +3,7 @@
 //! quoted braces and semicolons, comments, argument lists and struct literals
 //! must never be mistaken for body delimiters.
 
-use crate::{is_callable_body_header, scan_visible, LexState};
+use crate::{LexState, is_callable_body_header, scan_visible};
 
 pub(crate) fn normalize(source: &str) -> String {
     let mut result = String::with_capacity(source.len());
@@ -16,41 +16,44 @@ pub(crate) fn normalize(source: &str) -> String {
 
         let initial = lex;
         let punctuation = visible_punctuation(line, &mut lex);
-        let opening = punctuation.iter().enumerate().find_map(|(index, &(at, ch))| {
-            if ch != '{' {
-                return None;
-            }
-
-            // An inline struct type or default argument can contain braces
-            // before the callable's actual body.
-            let (mut parens, mut brackets) = (0isize, 0isize);
-            for &(_, ch) in &punctuation[..index] {
-                match ch {
-                    '(' => parens += 1,
-                    ')' => parens -= 1,
-                    '[' => brackets += 1,
-                    ']' => brackets -= 1,
-                    _ => {}
+        let opening = punctuation
+            .iter()
+            .enumerate()
+            .find_map(|(index, &(at, ch))| {
+                if ch != '{' {
+                    return None;
                 }
-            }
-            if parens != 0 || brackets != 0 {
-                return None;
-            }
-
-            let mut header_lex = initial;
-            let visible: String = scan_visible(&line[..at], &mut header_lex)
-                .into_iter()
-                .collect();
-            let header = visible.trim_start().trim_end();
-            if header.ends_with("struct") || header.ends_with("trait") {
-                return None;
-            }
-            if is_callable_body_header(&format!("{header} {{"), false) {
-                Some(index)
-            } else {
-                None
-            }
-        });
+    
+                // An inline struct type or default argument can contain braces
+                // before the callable's actual body.
+                let (mut parens, mut brackets) = (0isize, 0isize);
+                for &(_, ch) in &punctuation[..index] {
+                    match ch {
+                        '(' => parens += 1,
+                        ')' => parens -= 1,
+                        '[' => brackets += 1,
+                        ']' => brackets -= 1,
+                        _ => {}
+                    }
+                }
+                if parens != 0 || brackets != 0 {
+                    return None;
+                }
+    
+                let mut header_lex = initial;
+                let visible: String = scan_visible(&line[..at], &mut header_lex)
+                    .into_iter()
+                    .collect();
+                let header = visible.trim_start().trim_end();
+                if header.ends_with("struct") || header.ends_with("trait") {
+                    return None;
+                }
+                if is_callable_body_header(&format!("{header} {{"), false) {
+                    Some(index)
+                } else {
+                    None
+                }
+            });
 
         let Some(opening) = opening else {
             result.push_str(line);
