@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+mod inline_blocks;
 mod select;
 
 const INDENT: &str = "  ";
@@ -106,6 +107,7 @@ struct LexState {
 ///
 /// - two-space indentation, never tabs for indentation;
 /// - braced static select arms, indented one level inside the select;
+/// - compact callable bodies expanded to one statement per line;
 /// - LF line endings and exactly one final newline;
 /// - trailing whitespace removed;
 /// - at most one ordinary blank line;
@@ -124,6 +126,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = select::normalize(&normalized)?;
+    let normalized = inline_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut pending_blank = false;
@@ -260,7 +263,36 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         } else if (callable_body || annotation_line)
             && matches!(prev_event, PrevEvent::CallableEnd(i) if i == current_indent)
         {
-            2
+            // Members of a named container remain adjacent unless the author
+            // explicitly separated them. Top-level callables keep the existing
+            // two-blank-line canonical style.
+            let in_named_container = define_stack.iter().any(|frame| {
+                matches!(
+                    frame.kind,
+                    DefineKind::Module
+                        | DefineKind::Class
+                        | DefineKind::Interface
+                        | DefineKind::Contract
+                        | DefineKind::Trait
+                        | DefineKind::Struct
+                )
+            }) || brace_stack.iter().any(|frame| {
+                matches!(
+                    frame.kind,
+                    BraceKind::Module
+                        | BraceKind::Class
+                        | BraceKind::Interface
+                        | BraceKind::Contract
+                        | BraceKind::Trait
+                        | BraceKind::Struct
+                        | BraceKind::Actor
+                )
+            });
+            if in_named_container {
+                usize::from(pending_blank)
+            } else {
+                2
+            }
         } else if pending_blank {
             1
         } else {
