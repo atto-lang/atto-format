@@ -90,7 +90,7 @@ another
 "#;
     let formatted = format_source(input).unwrap();
     assert!(formatted.contains("return calculate(\n"));
-    assert!(formatted.contains("  )\n") || formatted.contains("  )\n") || formatted.contains("  )\r\n") || formatted.contains("  )\n}"));
+    assert!(formatted.contains("  )\n"));
     assert!(!formatted.contains("return calculate(;"));
 }
 
