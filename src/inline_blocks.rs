@@ -85,6 +85,7 @@ pub(crate) fn normalize(source: &str) -> String {
         let mut cuts = vec![punctuation[opening].0 + 1, punctuation[closing].0];
         let (mut nested, mut parens, mut brackets) = (0usize, 0usize, 0usize);
         for &(at, ch) in &punctuation[opening + 1..closing] {
+            let has_following_code = !line[at + 1..punctuation[closing].0].trim().is_empty();
             match ch {
                 '{' => nested += 1,
                 '}' => nested = nested.saturating_sub(1),
@@ -92,12 +93,9 @@ pub(crate) fn normalize(source: &str) -> String {
                 ')' => parens = parens.saturating_sub(1),
                 '[' => brackets += 1,
                 ']' => brackets = brackets.saturating_sub(1),
-                ';' if nested == 0 && parens == 0 && brackets == 0 => {
-                    // The closing brace already provides the final break.
-                    // Do not leave a whitespace-only line after the last ';'.
-                    if !line[at + 1..punctuation[closing].0].trim().is_empty() {
-                        cuts.push(at + 1);
-                    }
+                // The closing brace already supplies the final line break.
+                ';' if nested == 0 && parens == 0 && brackets == 0 && has_following_code => {
+                    cuts.push(at + 1);
                 }
                 _ => {}
             }
