@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,6 +42,15 @@ impl TempRepo {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+            .current_dir(&self.root)
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn run_os(&self, args: &[&OsStr]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_oresfmt"))
             .current_dir(&self.root)
             .args(args)
@@ -285,4 +296,37 @@ fn explicit_paths_through_symlinked_directories_are_refused() {
         String::from_utf8_lossy(&output.stderr)
             .contains("refusing path through symlinked directory")
     );
+}
+
+#[test]
+fn end_of_options_allows_dash_prefixed_paths() {
+    let repo = TempRepo::new("dash-path");
+    let path = repo.write("-sample.ores", UNFORMATTED);
+
+    let refused = repo.run(&["--check", "-sample.ores"]);
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("unknown option"));
+
+    let accepted = repo.run(&["--check", "--", "-sample.ores"]);
+    assert_eq!(accepted.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+    assert!(String::from_utf8_lossy(&accepted.stderr).contains("needs formatting"));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_paths_are_preserved_as_os_strings() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let repo = TempRepo::new("non-utf8-path");
+    let name = OsString::from_vec(b"sample-\xff.ores".to_vec());
+    let path = repo.root.join(&name);
+    fs::write(&path, UNFORMATTED).unwrap();
+    let args = [OsStr::new("--check"), OsStr::new("--"), name.as_os_str()];
+
+    let output = repo.run_os(&args);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
 }
