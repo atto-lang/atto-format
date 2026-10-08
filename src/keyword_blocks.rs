@@ -132,7 +132,9 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
             "{" if parens == 0 && brackets == 0 => return false,
             "then" | "do" if parens == 0 && brackets == 0 => {
                 let absolute = start + offset;
-                return absolute == 0 || tokens[absolute - 1].text != ".";
+                if absolute == 0 || tokens[absolute - 1].text != "." {
+                    return true;
+                }
             }
             _ => {}
         }
