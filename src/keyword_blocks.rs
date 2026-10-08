@@ -122,7 +122,10 @@ fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
         }
     }
     let statement = &tokens[start..index];
-    statement.first().is_some_and(|token| token.text == "return") && statement.len() >= 2
+    statement
+        .first()
+        .is_some_and(|token| token.text == "return")
+        && statement.len() >= 2
 }
 
 fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
@@ -427,7 +430,10 @@ mod tests {
             normalize("return match value over\non _ -> 1"),
             "return match value over\non _ -> 1"
         );
-        assert_eq!(normalize("return select from plan"), "return select from plan");
+        assert_eq!(
+            normalize("return select from plan"),
+            "return select from plan"
+        );
         assert_eq!(
             normalize("return value\n  .transform()"),
             "return value\n  .transform()"
@@ -441,7 +447,10 @@ mod tests {
     #[test]
     fn still_terminates_obviously_complete_async_and_cast_returns() {
         assert_eq!(normalize("return await task()"), "return await task();");
-        assert_eq!(normalize("return value as Result"), "return value as Result;");
+        assert_eq!(
+            normalize("return value as Result"),
+            "return value as Result;"
+        );
         assert_eq!(normalize("return obj.match()"), "return obj.match();");
     }
 }
