@@ -1198,10 +1198,11 @@ fn canonicalize_name_first_parameter(parameter: &str) -> Option<String> {
             '}' => brace = brace.checked_sub(1)?,
             '<' => angle += 1,
             '>' => angle = angle.checked_sub(1)?,
+            ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 && colon.is_some() => {
+                return None;
+            }
             ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => {
-                if colon.replace(index).is_some() {
-                    return None;
-                }
+                colon = Some(index);
             }
             _ => {}
         }
