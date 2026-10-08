@@ -1014,12 +1014,15 @@ fn contains_word(line: &str, word: &str) -> bool {
 }
 
 fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> String {
-    let body_at = first_visible_char_index(line, '{', initial)
-        .or_else(|| line.rfind(';'))
-        .unwrap_or(line.len());
-    let Some(close_paren) = callable_parameter_close(line, body_at, initial) else {
+    let Some(close_paren) = callable_parameter_close(line, line.len(), initial) else {
         return line.to_string();
     };
+    // Braces within parameter types are not the callable's body delimiter.
+    let after_parameters = close_paren + 1;
+    let body_at = first_visible_char_index(&line[after_parameters..], '{', LexState::default())
+        .map(|index| after_parameters + index)
+        .or_else(|| line.rfind(';'))
+        .unwrap_or(line.len());
     let tail = &line[close_paren + 1..body_at];
     let trimmed = tail.trim_start();
     let leading_ws = tail.len() - trimmed.len();
@@ -1038,10 +1041,7 @@ fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> 
 }
 
 fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> String {
-    let body_at = first_visible_char_index(line, '{', initial)
-        .or_else(|| line.rfind(';'))
-        .unwrap_or(line.len());
-    let Some((open, close)) = callable_parameter_bounds(line, body_at, initial) else {
+    let Some((open, close)) = callable_parameter_bounds(line, line.len(), initial) else {
         return line.to_string();
     };
 
