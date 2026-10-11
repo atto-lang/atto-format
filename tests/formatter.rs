@@ -1307,3 +1307,27 @@ end
     assert!(formatted.contains("default -> {"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+
+#[test]
+fn typed_match_return_contracts_preserve_named_parameter_and_result_mode() {
+    let source = r#"fnc choose(int n): bool {
+match<ret=bool> n over {
+on 7 { return true; }
+on _ as remaining { return false; }
+}
+}
+fnc procedural(int n): bool {
+do match<ret=bool> n over {
+default as remaining { return false; }
+on 7 { return true; }
+}
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("do match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("default as remaining {"), "{once}");
+    assert!(!once.contains("on _ as remaining"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
