@@ -1150,3 +1150,65 @@ return value.id;
 "#;
     assert_eq!(format_source(source).unwrap(), expected);
 }
+
+
+#[test]
+fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
+    let source = r#"
+pub fnc use_switch(string v) : string {
+switch (v) {
+_ {
+return "star";
+},
+case "foo", "car", "mar" {
+return "bar";
+};
+}
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("switch (v) {"), "{formatted}");
+    assert!(formatted.contains("case \"foo\", \"car\", \"mar\" {"), "{formatted}");
+    assert!(!formatted.contains("},\n"), "{formatted}");
+    assert!(!formatted.contains("};\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn braced_and_end_delimited_match_variants_format_idempotently() {
+    let braced = r#"define actor Counter as
+receive(ActorMail<MessagePatterns> mail): void {
+match mail.value over {
+on is MessagePatterns.Reset as m {
+handle(m.reset);
+},
+on MessagePatterns.Tuple as (m1,m2) {
+handle_pair(m1,m2);
+};
+on _ { return; }
+}
+}
+end
+"#;
+    let canonical = format_source(braced).unwrap();
+    assert!(canonical.contains("on is MessagePatterns.Reset as m {"), "{canonical}");
+    assert!(canonical.contains("on MessagePatterns.Tuple as (m1,m2) {"), "{canonical}");
+    assert!(!canonical.contains("},\n"), "{canonical}");
+    assert_eq!(format_source(&canonical).unwrap(), canonical);
+
+    let end_delimited = r#"fnc f(Option<int> v): int {
+match v over
+on Some(value) {
+return value;
+}
+on _ {
+return 0;
+}
+end
+}
+"#;
+    let output = format_source(end_delimited).unwrap();
+    assert!(output.contains("match v over"), "{output}");
+    assert!(output.contains("  end\n"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
