@@ -1111,7 +1111,7 @@ return dispatch(job: job, options: options);
 }
 
 #[test]
-fn canonicalizes_name_first_parameters_in_methods_and_interface_signatures() {
+fn preserves_name_first_method_parameters_but_normalizes_interface_signatures() {
     let source = r#"define class Worker as
 pub run(job: Job): Result {
 return process(job);
@@ -1123,7 +1123,7 @@ run(job: Job): Result;
 end
 "#;
     let expected = r#"define class Worker as
-  pub run(Job job) -> Result {
+  pub run(job: Job) -> Result {
     return process(job);
   }
 end
