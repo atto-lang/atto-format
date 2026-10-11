@@ -1285,3 +1285,26 @@ end
     assert!(!once.contains("\n  _ ->"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
+
+
+#[test]
+fn legacy_default_normalization_never_rewrites_multiline_comment_content() {
+    let src = r#"fnc inspect(int n): int {
+match n over
+/*
+on _ -> { phantom(); }
+*/
+on 7 -> {
+return 7;
+}
+on _ -> {
+return 0;
+}
+end
+}
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("on _ -> { phantom(); }"), "{formatted}");
+    assert!(formatted.contains("default -> {"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
