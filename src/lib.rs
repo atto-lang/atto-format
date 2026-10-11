@@ -163,7 +163,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(&content, lex);
-        content = canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len());
+        content = canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -501,7 +501,13 @@ fn canonicalize_legacy_catchall(
     line: &str,
     scope: Option<&DefineFrame>,
     brace_depth: usize,
+    lex: LexState,
 ) -> String {
+    // Never rewrite source text inside a continued multiline comment
+    // or quoted literal. The structural lexer has not run yet.
+    if lex.block_comment || lex.quote.is_some() {
+        return line.to_owned();
+    }
     let Some(scope) = scope.filter(|f| f.brace_depth == brace_depth) else {
         return line.to_owned();
     };
