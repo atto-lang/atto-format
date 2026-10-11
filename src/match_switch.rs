@@ -2,11 +2,14 @@
 //! Only remove punctuation immediately after a verified arm body; quoted and
 //! commented characters, and commas inside case alternatives, are untouched.
 
+use crate::select::{Token, break_after, break_before, matching_brace, tokens};
 use std::collections::{BTreeMap, BTreeSet};
-use crate::select::{break_after, break_before, matching_brace, tokens, Token};
 
 #[derive(Clone, Copy)]
-enum Kind { Switch, Match }
+enum Kind {
+    Switch,
+    Match,
+}
 
 fn arm_starts(kind: Kind, text: &str) -> bool {
     match kind {
@@ -26,7 +29,9 @@ fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
             // *before* any outer '{'. Its arm's own body brace must never
             // be mistaken for a switch/match block opener.
             "case" | "default" | "_" if parens == 0 && matches!(kind, Kind::Switch) => return None,
-            "on" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => return None,
+            "on" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => {
+                return None;
+            }
             "over" if parens == 0 => saw_over = true,
             "{" if parens == 0 => {
                 if matches!(kind, Kind::Switch) || saw_over {
@@ -54,9 +59,15 @@ pub(crate) fn normalize(source: &str) -> String {
             _ => continue,
         };
         // Ignore calls and member names that merely contain these words.
-        if i > 0 && lexed[i - 1].text == "." { continue; }
-        let Some(open) = outer_open(&lexed, i, kind) else { continue; };
-        let Some(close) = matching_brace(&lexed, open) else { continue; };
+        if i > 0 && lexed[i - 1].text == "." {
+            continue;
+        }
+        let Some(open) = outer_open(&lexed, i, kind) else {
+            continue;
+        };
+        let Some(close) = matching_brace(&lexed, open) else {
+            continue;
+        };
         break_after(source, lexed[open].end, &mut edits);
         break_before(source, lexed[close].start, &mut edits);
         let mut arm = open + 1;
@@ -81,17 +92,21 @@ pub(crate) fn normalize(source: &str) -> String {
                         // An inline 'structural { ... }' pattern shape is
                         // not the arm body; keep it intact and scan onward.
                         if body > arm && lexed[body - 1].text == "structural" {
-                            let Some(shape_end) = matching_brace(&lexed, body) else { break; };
+                            let Some(shape_end) = matching_brace(&lexed, body) else {
+                                break;
+                            };
                             body = shape_end + 1;
                             continue;
                         }
                         break;
-                    },
+                    }
                     _ => {}
                 }
                 body += 1;
             }
-            if body == close { break; }
+            if body == close {
+                break;
+            }
             let Some(end) = matching_brace(&lexed, body).filter(|end| *end < close) else {
                 break;
             };
@@ -100,24 +115,35 @@ pub(crate) fn normalize(source: &str) -> String {
             // Rewrite only verified catch-all arm heads, never tuple discards.
             let start = arm;
             if matches!(kind, Kind::Switch) && lexed[start].text == "_" {
-                for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
+                for pos in lexed[start].start..lexed[start].end {
+                    removed.insert(pos);
+                }
                 inserted.insert(lexed[start].start, "default");
             }
-            if matches!(kind, Kind::Match) && lexed[start].text == "on"
-                && start + 1 < body && matches!(lexed[start + 1].text, "_" | "default")
-                // The tokenizer ignores comments. Keep intervening trivia
-                // exactly as authored, including line and block comments.
+            if matches!(kind, Kind::Match)
+                && lexed[start].text == "on"
+                && start + 1 < body
+                && matches!(lexed[start + 1].text, "_" | "default")
+            // The tokenizer ignores comments. Keep intervening trivia
+            // exactly as authored, including line and block comments.
             {
                 // When a comment appears between 'on' and the wildcard,
                 // place canonical 'default' on a fresh line immediately.
                 // Otherwise a second formatting pass would split the line
                 // again, violating formatter idempotence.
-                if !source[lexed[start].end..lexed[start + 1].start].trim().is_empty() {
+                if !source[lexed[start].end..lexed[start + 1].start]
+                    .trim()
+                    .is_empty()
+                {
                     break_before(source, lexed[start + 1].start, &mut edits);
                 }
-                for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
+                for pos in lexed[start].start..lexed[start].end {
+                    removed.insert(pos);
+                }
                 if lexed[start + 1].text == "_" {
-                    for pos in lexed[start + 1].start..lexed[start + 1].end { removed.insert(pos); }
+                    for pos in lexed[start + 1].start..lexed[start + 1].end {
+                        removed.insert(pos);
+                    }
                     inserted.insert(lexed[start + 1].start, "default");
                 }
             }
@@ -125,21 +151,33 @@ pub(crate) fn normalize(source: &str) -> String {
             while next < close && matches!(lexed[next].text, "," | ";") {
                 // Delete only visible delimiter bytes (comments and all
                 // surrounding text stay exactly where they were).
-                for pos in lexed[next].start..lexed[next].end { removed.insert(pos); }
+                for pos in lexed[next].start..lexed[next].end {
+                    removed.insert(pos);
+                }
                 next += 1;
             }
             arm = next;
         }
     }
 
-    if removed.is_empty() && edits.is_empty() { return source.to_owned(); }
+    if removed.is_empty() && edits.is_empty() {
+        return source.to_owned();
+    }
     let mut result = String::with_capacity(source.len() + inserted.len() * 8 + edits.len());
     for (pos, ch) in source.char_indices() {
-        if let Some(prefix) = edits.get(&pos) { result.push_str(prefix); }
-        if let Some(replacement) = inserted.get(&pos) { result.push_str(replacement); }
-        if !removed.contains(&pos) { result.push(ch); }
+        if let Some(prefix) = edits.get(&pos) {
+            result.push_str(prefix);
+        }
+        if let Some(replacement) = inserted.get(&pos) {
+            result.push_str(replacement);
+        }
+        if !removed.contains(&pos) {
+            result.push(ch);
+        }
     }
-    if let Some(suffix) = edits.get(&source.len()) { result.push_str(suffix); }
+    if let Some(suffix) = edits.get(&source.len()) {
+        result.push_str(suffix);
+    }
     result
 }
 
@@ -218,5 +256,4 @@ match msg over {
 }"#;
         assert_eq!(normalize(source), source);
     }
-
 }
