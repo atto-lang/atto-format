@@ -421,7 +421,7 @@ fi
 }
 "#;
     let expected = r#"shared actor Cleaner {
-  pub fnc compact() -> void {
+  pub compact() -> void {
     if ready; then
       actor.gc();
     else
@@ -1149,4 +1149,65 @@ return value.id;
 }
 "#;
     assert_eq!(format_source(source).unwrap(), expected);
+}
+
+#[test]
+fn legacy_instance_fnc_is_canonicalized_but_explicit_method_and_static_fnc_remain() {
+    let input = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+suspend method explicit_join(group: ActorGroup) {
+group.join()
+}
+static fnc static_send(group: ActorGroup) {
+group.leave()
+}
+end
+define class Client as
+fnc legacy(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+fnc standalone(): int { return 4; }
+"#;
+    let out = format_source(input).unwrap();
+    assert!(out.contains("suspend join_room("), "{out}");
+    assert!(out.contains("  leave_room(group: ActorGroup) {"), "{out}");
+    assert!(out.contains("suspend method explicit_join("), "{out}");
+    assert!(out.contains("static fnc static_send("), "{out}");
+    assert!(out.contains("  legacy(): int {"), "{out}");
+    assert!(out.contains("  method explicit(): int {"), "{out}");
+    assert!(out.contains("  static fnc helper(): int {"), "{out}");
+    assert!(out.contains("fnc standalone(): int {"), "{out}");
+    assert!(!out.contains("fnc join_room"), "{out}");
+    assert!(!out.contains("fnc leave_room"), "{out}");
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn never_rewrites_nested_or_string_or_comment_fnc() {
+    let src = r#"define actor User as
+fnc call(): String {
+  // fnc marker() is a comment
+  val title = "fnc name()";
+  return title;
+}
+static fnc direct(): int { return 42; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("call(): String {"));
+    assert!(out.contains("// fnc marker() is a comment"));
+    assert!(out.contains("\"fnc name()\""));
+    assert!(out.contains("static fnc direct()"));
+    assert_eq!(format_source(&out).unwrap(), out);
 }
