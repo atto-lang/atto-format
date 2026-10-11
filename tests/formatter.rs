@@ -1151,7 +1151,6 @@ return value.id;
     assert_eq!(format_source(source).unwrap(), expected);
 }
 
-
 #[test]
 fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
     let source = r#"
@@ -1168,7 +1167,10 @@ return "bar";
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("switch (v) {"), "{formatted}");
-    assert!(formatted.contains("case \"foo\", \"car\", \"mar\" {"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
     assert!(!formatted.contains("},\n"), "{formatted}");
     assert!(!formatted.contains("};\n"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
@@ -1191,8 +1193,14 @@ on _ { return; }
 end
 "#;
     let canonical = format_source(braced).unwrap();
-    assert!(canonical.contains("on is MessagePatterns.Reset as m {"), "{canonical}");
-    assert!(canonical.contains("on MessagePatterns.Tuple as (m1,m2) {"), "{canonical}");
+    assert!(
+        canonical.contains("on is MessagePatterns.Reset as m {"),
+        "{canonical}"
+    );
+    assert!(
+        canonical.contains("on MessagePatterns.Tuple as (m1,m2) {"),
+        "{canonical}"
+    );
     assert!(!canonical.contains("},\n"), "{canonical}");
     assert_eq!(format_source(&canonical).unwrap(), canonical);
 
@@ -1212,7 +1220,6 @@ end
     assert!(output.contains("  end\n"), "{output}");
     assert_eq!(format_source(&output).unwrap(), output);
 }
-
 
 #[test]
 fn switch_and_match_underscore_aliases_format_as_default() {
@@ -1239,6 +1246,9 @@ fnc other(int n): int {
     assert!(formatted.contains("default as m {\n"), "{formatted}");
     assert!(!formatted.contains("on _ as m"), "{formatted}");
     assert!(!formatted.contains("on default"), "{formatted}");
-    assert!(formatted.contains("case \"foo\", \"car\", \"mar\" {"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
