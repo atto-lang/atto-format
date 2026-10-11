@@ -103,6 +103,13 @@ pub(crate) fn normalize(source: &str) -> String {
                 // The tokenizer ignores comments. Keep intervening trivia
                 // exactly as authored, including line and block comments.
             {
+                // When a comment appears between 'on' and the wildcard,
+                // place canonical 'default' on a fresh line immediately.
+                // Otherwise a second formatting pass would split the line
+                // again, violating formatter idempotence.
+                if !source[lexed[start].end..lexed[start + 1].start].trim().is_empty() {
+                    break_before(source, lexed[start + 1].start, &mut edits);
+                }
                 for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
                 if lexed[start + 1].text == "_" {
                     for pos in lexed[start + 1].start..lexed[start + 1].end { removed.insert(pos); }
@@ -186,7 +193,7 @@ match msg over {
 }
 "#;
         let output = normalize(source);
-        assert!(output.contains("/*why*/ default as item"), "{output}");
+        assert!(output.contains("/*why*/ \ndefault as item"), "{output}");
         assert!(!output.contains("on /*why*/ _"), "{output}");
         assert_eq!(normalize(&output), output);
     }
