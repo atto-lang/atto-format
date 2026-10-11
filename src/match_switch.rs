@@ -2,7 +2,7 @@
 //! Only remove punctuation immediately after a verified arm body; quoted and
 //! commented characters, and commas inside case alternatives, are untouched.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use crate::select::{matching_brace, tokens, Token};
 
 #[derive(Clone, Copy)]
@@ -11,7 +11,7 @@ enum Kind { Switch, Match }
 fn arm_starts(kind: Kind, text: &str) -> bool {
     match kind {
         Kind::Switch => matches!(text, "case" | "default" | "_"),
-        Kind::Match => text == "on",
+        Kind::Match => matches!(text, "on" | "default"),
     }
 }
 
@@ -39,6 +39,7 @@ fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
 pub(crate) fn normalize(source: &str) -> String {
     let lexed = tokens(source);
     let mut removed = BTreeSet::<usize>::new();
+    let mut inserted = BTreeMap::<usize, &'static str>::new();
 
     for (i, token) in lexed.iter().enumerate() {
         let kind = match token.text {
@@ -76,6 +77,22 @@ pub(crate) fn normalize(source: &str) -> String {
             let Some(end) = matching_brace(&lexed, body).filter(|end| *end < close) else {
                 break;
             };
+            // Rewrite only verified catch-all arm heads, never tuple discards.
+            let start = arm;
+            if matches!(kind, Kind::Switch) && lexed[start].text == "_" {
+                for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
+                inserted.insert(lexed[start].start, "default");
+            }
+            if matches!(kind, Kind::Match) && lexed[start].text == "on"
+                && start + 1 < body && matches!(lexed[start + 1].text, "_" | "default")
+                && source[lexed[start].end..lexed[start + 1].start].trim().is_empty()
+            {
+                for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
+                if lexed[start + 1].text == "_" {
+                    for pos in lexed[start + 1].start..lexed[start + 1].end { removed.insert(pos); }
+                    inserted.insert(lexed[start + 1].start, "default");
+                }
+            }
             let mut next = end + 1;
             while next < close && matches!(lexed[next].text, "," | ";") {
                 // Delete only visible delimiter bytes (comments and all
@@ -88,9 +105,12 @@ pub(crate) fn normalize(source: &str) -> String {
     }
 
     if removed.is_empty() { return source.to_owned(); }
-    source.char_indices()
-        .filter_map(|(pos, ch)| (!removed.contains(&pos)).then_some(ch))
-        .collect()
+    let mut result = String::with_capacity(source.len() + inserted.len() * 6);
+    for (pos, ch) in source.char_indices() {
+        if let Some(replacement) = inserted.get(&pos) { result.push_str(replacement); }
+        if !removed.contains(&pos) { result.push(ch); }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -101,7 +121,7 @@ mod tests {
     fn strips_only_arm_separators_not_case_alternatives() {
         let input = "switch (v) {\n  _ { return 0; },\n  case \"foo\", \"bar\" { return 1; };\n}\n";
         let output = normalize(input);
-        assert!(output.contains("_ { return 0; }\n"));
+        assert!(output.contains("default { return 0; }\n"));
         assert!(output.contains("case \"foo\", \"bar\" { return 1; }\n"));
         assert_eq!(normalize(&output), output);
     }
@@ -112,7 +132,7 @@ mod tests {
         let output = normalize(input);
         assert!(output.contains("select { default: { return; }, }"));
         assert!(output.contains("on Tag as (a, b) { log(a, b); } // a comment"));
-        assert!(output.contains("on _ { return; }"));
+        assert!(output.contains("default { return; }"));
         assert!(output.contains("\"case } , ;\""));
     }
 }
