@@ -281,6 +281,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     frame.kind,
                     DefineKind::Module
                         | DefineKind::Class
+                        | DefineKind::Actor
                         | DefineKind::Interface
                         | DefineKind::Contract
                         | DefineKind::Trait
