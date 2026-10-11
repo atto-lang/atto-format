@@ -135,4 +135,39 @@ mod tests {
         assert!(output.contains("default { return; }"));
         assert!(output.contains("\"case } , ;\""));
     }
+
+    #[test]
+    fn canonicalizes_only_catchall_head_tokens() {
+        let source = r#"switch v {
+  _ { return "star"; }
+  case "foo", "bar" { return "baz"; }
+}
+match msg over {
+  on _ as remaining { handle(remaining); }
+  on Thing.Tuple as (_, item) { handle(item); }
+}
+match msg over {
+  on default { return; }
+}
+"#;
+        let output = normalize(source);
+        assert!(output.contains("default { return \"star\"; }"), "{output}");
+        assert!(output.contains("default as remaining { handle(remaining); }"), "{output}");
+        assert!(output.contains("on Thing.Tuple as (_, item) { handle(item); }"), "{output}");
+        assert!(output.contains("default { return; }"), "{output}");
+        assert!(!output.contains("on default"), "{output}");
+        assert!(!output.contains("on _ as"), "{output}");
+        assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn ignores_underscores_in_unrelated_syntax_and_strings() {
+        let source = r#"fnc f() {
+  const [x, _] = [1, 2];
+  val quoted = "on _ { }";
+  return quoted;
+}"#;
+        assert_eq!(normalize(source), source);
+    }
+
 }
