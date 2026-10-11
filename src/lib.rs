@@ -397,7 +397,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         {
             next_order += 1;
             define_stack.push(DefineFrame {
-                kind: if starts_word(structural, "switch") { DefineKind::Switch } else { DefineKind::Match },
+                kind: if starts_word(structural, "switch") {
+                    DefineKind::Switch
+                } else {
+                    DefineKind::Match
+                },
                 order: next_order,
                 brace_depth: brace_stack.len(),
                 keyword_depth: keyword_stack.len(),
