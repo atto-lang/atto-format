@@ -3,7 +3,7 @@
 //! commented characters, and commas inside case alternatives, are untouched.
 
 use std::collections::{BTreeMap, BTreeSet};
-use crate::select::{matching_brace, tokens, Token};
+use crate::select::{break_after, break_before, matching_brace, tokens, Token};
 
 #[derive(Clone, Copy)]
 enum Kind { Switch, Match }
@@ -40,6 +40,7 @@ pub(crate) fn normalize(source: &str) -> String {
     let lexed = tokens(source);
     let mut removed = BTreeSet::<usize>::new();
     let mut inserted = BTreeMap::<usize, &'static str>::new();
+    let mut edits = BTreeMap::<usize, String>::new();
 
     for (i, token) in lexed.iter().enumerate() {
         let kind = match token.text {
@@ -51,12 +52,15 @@ pub(crate) fn normalize(source: &str) -> String {
         if i > 0 && lexed[i - 1].text == "." { continue; }
         let Some(open) = outer_open(&lexed, i, kind) else { continue; };
         let Some(close) = matching_brace(&lexed, open) else { continue; };
+        break_after(source, lexed[open].end, &mut edits);
+        break_before(source, lexed[close].start, &mut edits);
         let mut arm = open + 1;
         while arm < close {
             if !arm_starts(kind, lexed[arm].text) {
                 arm += 1;
                 continue;
             }
+            break_before(source, lexed[arm].start, &mut edits);
             // Scan only within the block, skipping parenthesized tuple
             // bindings and switch scrutinee alternatives.
             let mut parens = 0usize;
@@ -68,7 +72,16 @@ pub(crate) fn normalize(source: &str) -> String {
                     ")" => parens = parens.saturating_sub(1),
                     "[" => brackets += 1,
                     "]" => brackets = brackets.saturating_sub(1),
-                    "{" if parens == 0 && brackets == 0 => break,
+                    "{" if parens == 0 && brackets == 0 => {
+                        // An inline 'structural { ... }' pattern shape is
+                        // not the arm body; keep it intact and scan onward.
+                        if body > arm && lexed[body - 1].text == "structural" {
+                            let Some(shape_end) = matching_brace(&lexed, body) else { break; };
+                            body = shape_end + 1;
+                            continue;
+                        }
+                        break;
+                    },
                     _ => {}
                 }
                 body += 1;
@@ -77,6 +90,8 @@ pub(crate) fn normalize(source: &str) -> String {
             let Some(end) = matching_brace(&lexed, body).filter(|end| *end < close) else {
                 break;
             };
+            break_after(source, lexed[body].end, &mut edits);
+            break_before(source, lexed[end].start, &mut edits);
             // Rewrite only verified catch-all arm heads, never tuple discards.
             let start = arm;
             if matches!(kind, Kind::Switch) && lexed[start].text == "_" {
@@ -105,12 +120,14 @@ pub(crate) fn normalize(source: &str) -> String {
         }
     }
 
-    if removed.is_empty() { return source.to_owned(); }
-    let mut result = String::with_capacity(source.len() + inserted.len() * 6);
+    if removed.is_empty() && edits.is_empty() { return source.to_owned(); }
+    let mut result = String::with_capacity(source.len() + inserted.len() * 8 + edits.len());
     for (pos, ch) in source.char_indices() {
+        if let Some(prefix) = edits.get(&pos) { result.push_str(prefix); }
         if let Some(replacement) = inserted.get(&pos) { result.push_str(replacement); }
         if !removed.contains(&pos) { result.push(ch); }
     }
+    if let Some(suffix) = edits.get(&source.len()) { result.push_str(suffix); }
     result
 }
 
