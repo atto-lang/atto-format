@@ -47,6 +47,7 @@ enum DefineKind {
     Switch,
     Module,
     Class,
+    Actor,
     Interface,
     Contract,
     Trait,
@@ -160,6 +161,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(&content, lex);
+        if in_instance_member_scope(&define_stack, &brace_stack) {
+            content = canonicalize_instance_method_fnc(&content, lex);
+        }
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -278,6 +282,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     frame.kind,
                     DefineKind::Module
                         | DefineKind::Class
+                        | DefineKind::Actor
                         | DefineKind::Interface
                         | DefineKind::Contract
                         | DefineKind::Trait
@@ -549,6 +554,54 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
     newest
         .map(|(_, is_signature)| is_signature)
         .unwrap_or(false)
+}
+
+/// Restrict fnc-to-method rewriting to the immediate class/actor member scope.
+/// A callable body, object literal, or other nested brace is never such a scope.
+fn in_instance_member_scope(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let mut nearest: Option<(usize, bool)> = None;
+    for frame in defines {
+        let member = matches!(frame.kind, DefineKind::Class | DefineKind::Actor);
+        if nearest.is_none_or(|(order, _)| frame.order > order) {
+            nearest = Some((frame.order, member));
+        }
+    }
+    for frame in braces {
+        let member = matches!(frame.kind, BraceKind::Class | BraceKind::Actor);
+        if nearest.is_none_or(|(order, _)| frame.order > order) {
+            nearest = Some((frame.order, member));
+        }
+    }
+    nearest.is_some_and(|(_, member)| member)
+}
+
+/// Only a declaration-head fnc followed by a method name and '(' is removed.
+/// static fnc and explicit method remain unchanged; expressions, comments and
+/// strings cannot become declarations through formatter rewriting.
+fn canonicalize_instance_method_fnc(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    let mut fnc = None;
+    for (i, span) in words.iter().enumerate() {
+        let word = &line[span.start..span.end];
+        if word == "fnc" {
+            fnc = Some(i);
+            break;
+        }
+        if !matches!(word, "pub" | "private" | "suspend" | "suspends"
+            | "async" | "structural" | "abstract") {
+            return line.to_string();
+        }
+    }
+    let Some(i) = fnc else { return line.to_string(); };
+    if i + 1 >= words.len() || !plain_word_prefix(line, &words[..=i + 1]) {
+        return line.to_string();
+    }
+    let name = words[i + 1];
+    if !line[name.end..].trim_start().starts_with('(') {
+        return line.to_string();
+    }
+    let keyword = words[i];
+    format!("{}{}", &line[..keyword.start], line[keyword.end..].trim_start())
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState) -> String {
@@ -968,6 +1021,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             "pub" | "private" | "abstract" => continue,
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
+            "actor" | "isoactor" => return Some(DefineKind::Actor),
             "interface" => return Some(DefineKind::Interface),
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
