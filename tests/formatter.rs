@@ -1308,7 +1308,6 @@ end
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
-
 #[test]
 fn typed_match_return_contracts_preserve_named_parameter_and_result_mode() {
     let source = r#"fnc choose(int n): bool {
