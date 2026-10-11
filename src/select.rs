@@ -4,13 +4,13 @@ use crate::FormatError;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy)]
-struct Token<'a> {
-    text: &'a str,
-    start: usize,
-    end: usize,
+pub(crate) struct Token<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
-fn tokens(source: &str) -> Vec<Token<'_>> {
+pub(crate) fn tokens(source: &str) -> Vec<Token<'_>> {
     let mut result = Vec::new();
     let mut chars = source.char_indices().peekable();
     while let Some((start, c)) = chars.next() {
@@ -103,7 +103,7 @@ fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     }
 }
 
-fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
+pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (i, token) in tokens.iter().enumerate().skip(open) {
         match token.text {
