@@ -7,6 +7,7 @@ use std::fmt;
 
 mod inline_blocks;
 mod keyword_blocks;
+mod match_switch;
 mod select;
 
 const INDENT: &str = "  ";
@@ -45,6 +46,7 @@ impl std::error::Error for FormatError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
     Switch,
+    Match,
     Module,
     Class,
     Interface,
@@ -128,6 +130,7 @@ struct LexState {
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
@@ -388,10 +391,13 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if starts_word(structural, "switch") {
+        if (starts_word(structural, "switch")
+            || (starts_word(structural, "match") && contains_word(structural, "over")))
+            && !structural.contains('{')
+        {
             next_order += 1;
             define_stack.push(DefineFrame {
-                kind: DefineKind::Switch,
+                kind: if starts_word(structural, "switch") { DefineKind::Switch } else { DefineKind::Match },
                 order: next_order,
                 brace_depth: brace_stack.len(),
                 keyword_depth: keyword_stack.len(),
