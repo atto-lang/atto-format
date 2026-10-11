@@ -421,7 +421,7 @@ fi
 }
 "#;
     let expected = r#"shared actor Cleaner {
-  pub fnc compact() -> void {
+  pub compact() -> void {
     if ready; then
       actor.gc();
     else
