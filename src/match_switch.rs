@@ -22,6 +22,11 @@ fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
         match tokens[i].text {
             "(" => parens += 1,
             ")" => parens = parens.saturating_sub(1),
+            // A legacy keyword-delimited switch/match reaches an arm label
+            // *before* any outer '{'. Its arm's own body brace must never
+            // be mistaken for a switch/match block opener.
+            "case" | "default" | "_" if parens == 0 && matches!(kind, Kind::Switch) => return None,
+            "on" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => return None,
             "over" if parens == 0 => saw_over = true,
             "{" if parens == 0 => {
                 if matches!(kind, Kind::Switch) || saw_over {
@@ -183,6 +188,12 @@ match msg over {
         assert!(!output.contains("on default"), "{output}");
         assert!(!output.contains("on _ as"), "{output}");
         assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn never_reinterprets_legacy_switch_arm_braces_as_outer_switch() {
+        let legacy = "define module M as\n  switch 1;\n    case 1 -> {\n      switch 2\n        case 2 -> {}\n      end\n    }\n  end\nend\n";
+        assert_eq!(normalize(legacy), legacy);
     }
 
     #[test]
