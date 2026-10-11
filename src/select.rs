@@ -80,7 +80,7 @@ fn line_start(source: &str, pos: usize) -> usize {
     source[..pos].rfind('\n').map_or(0, |i| i + 1)
 }
 
-fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
+pub(crate) fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     if !source[line_start(source, pos)..pos].trim().is_empty() {
         if edits
             .range(..=pos)
@@ -95,7 +95,7 @@ fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     }
 }
 
-fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
+pub(crate) fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     let rest = source[pos..].split('\n').next().unwrap_or("").trim();
     // A trailing comment belongs to this header/closer.
     if !rest.is_empty() && !rest.starts_with("//") && !rest.starts_with("/*") {
