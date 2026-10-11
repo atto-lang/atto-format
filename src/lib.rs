@@ -163,6 +163,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(&content, lex);
+        content = canonicalize_legacy_catchall(
+            &content,
+            define_stack.last(),
+            brace_stack.len(),
+        );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -491,6 +496,34 @@ fn push_blank_lines(out: &mut Vec<String>, count: usize) {
     }
     for _ in 0..count {
         out.push(String::new());
+    }
+}
+
+/// Normalize catch-all aliases only while directly inside a legacy
+/// end-delimited switch/match arm list. Nested arm bodies remain untouched.
+fn canonicalize_legacy_catchall(
+    line: &str,
+    scope: Option<&DefineFrame>,
+    brace_depth: usize,
+) -> String {
+    let Some(scope) = scope.filter(|f| f.brace_depth == brace_depth) else {
+        return line.to_owned();
+    };
+    match scope.kind {
+        DefineKind::Switch if starts_word(line, "_") => {
+            format!("default{}", &line[1..])
+        }
+        DefineKind::Match if starts_word(line, "on") => {
+            let rest = line[2..].trim_start();
+            if starts_word(rest, "_") {
+                format!("default{}", &rest[1..])
+            } else if starts_word(rest, "default") {
+                rest.to_owned()
+            } else {
+                line.to_owned()
+            }
+        }
+        _ => line.to_owned(),
     }
 }
 
