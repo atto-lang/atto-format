@@ -85,7 +85,8 @@ pub(crate) fn normalize(source: &str) -> String {
             }
             if matches!(kind, Kind::Match) && lexed[start].text == "on"
                 && start + 1 < body && matches!(lexed[start + 1].text, "_" | "default")
-                && source[lexed[start].end..lexed[start + 1].start].trim().is_empty()
+                // The tokenizer ignores comments. Keep intervening trivia
+                // exactly as authored, including line and block comments.
             {
                 for pos in lexed[start].start..lexed[start].end { removed.insert(pos); }
                 if lexed[start + 1].text == "_" {
@@ -157,6 +158,19 @@ match msg over {
         assert!(output.contains("default { return; }"), "{output}");
         assert!(!output.contains("on default"), "{output}");
         assert!(!output.contains("on _ as"), "{output}");
+        assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn preserves_comments_between_on_and_catchall_alias() {
+        let source = r#"match v over {
+  on /*why*/ _ as item { handle(item); }
+  on 7 { handle(7); }
+}
+"#;
+        let output = normalize(source);
+        assert!(output.contains("/*why*/ default as item"), "{output}");
+        assert!(!output.contains("on /*why*/ _"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 
