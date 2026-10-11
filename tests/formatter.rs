@@ -1286,7 +1286,6 @@ end
     assert_eq!(format_source(&once).unwrap(), once);
 }
 
-
 #[test]
 fn legacy_default_normalization_never_rewrites_multiline_comment_content() {
     let src = r#"fnc inspect(int n): int {
