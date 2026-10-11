@@ -139,8 +139,8 @@ mod tests {
     fn strips_only_arm_separators_not_case_alternatives() {
         let input = "switch (v) {\n  _ { return 0; },\n  case \"foo\", \"bar\" { return 1; };\n}\n";
         let output = normalize(input);
-        assert!(output.contains("default {\\n"));
-        assert!(output.contains("case \\"foo\\", \\"bar\\" {\\n"));
+        assert!(output.contains("default {\n"));
+        assert!(output.contains("case \"foo\", \"bar\" {\n"));
         assert_eq!(normalize(&output), output);
     }
 
