@@ -1253,7 +1253,6 @@ fnc other(int n): int {
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
-
 #[test]
 fn legacy_end_delimited_fallbacks_are_formatted_as_default() {
     let source = r#"define module M as
