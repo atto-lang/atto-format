@@ -1252,3 +1252,37 @@ fnc other(int n): int {
     );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+
+#[test]
+fn legacy_end_delimited_fallbacks_are_formatted_as_default() {
+    let source = r#"define module M as
+fnc choose(int n): int {
+switch n
+case 7 -> {
+return 42;
+}
+_ -> {
+return 0;
+}
+end
+}
+fnc inspect(int n): int {
+match n over
+on 7 -> {
+return 42;
+}
+on _ as other -> {
+return other;
+}
+end
+}
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("default -> {"), "{once}");
+    assert!(once.contains("default as other -> {"), "{once}");
+    assert!(!once.contains("on _ as other"), "{once}");
+    assert!(!once.contains("\n  _ ->"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
