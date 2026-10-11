@@ -27,10 +27,20 @@ fn tokens(source: &str) -> Vec<Token<'_>> {
         }
         if c == '/' && chars.peek().is_some_and(|(_, c)| *c == '*') {
             chars.next();
-            while let Some((_, c)) = chars.next() {
-                if c == '*' && chars.peek().is_some_and(|(_, c)| *c == '/') {
+            // The compiler supports nested block comments. Ignore the entire
+            // nested span so a fake "select" in an outer comment cannot be
+            // mistaken for executable source after the inner */.
+            let mut depth = 1usize;
+            while let Some((_, ch)) = chars.next() {
+                if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '*') {
                     chars.next();
-                    break;
+                    depth = depth.saturating_add(1);
+                } else if ch == '*' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+                    chars.next();
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
                 }
             }
             continue;
@@ -367,4 +377,32 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         output.push_str(edit);
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod nested_comment_regressions {
+    use super::tokens;
+
+    #[test]
+    fn deeply_nested_comment_does_not_inject_false_select_tokens() {
+        let source = "/* outer /* inner select { when await bad: {} } */ still outer */ select { when timeout 5s {} }";
+        let words: Vec<_> = tokens(source).into_iter().map(|token| token.text).collect();
+        assert_eq!(words.iter().filter(|&&word| word == "select").count(), 1);
+        assert!(!words.contains(&"bad"));
+        assert!(!words.contains(&"still"));
+        assert!(words.contains(&"timeout"));
+    }
+
+    #[test]
+    fn unterminated_nested_comment_never_exposes_fake_keyword() {
+        let source = "/* outer /* inner */ select { when timeout 5s {} }";
+        assert!(tokens(source).is_empty());
+    }
+
+    #[test]
+    fn comment_boundaries_do_not_eat_real_select_tokens() {
+        let source = "/* a /* b */ c */ select {} /* d */";
+        let words: Vec<_> = tokens(source).into_iter().map(|token| token.text).collect();
+        assert_eq!(words, vec!["select", "{", "}"]);
+    }
 }
