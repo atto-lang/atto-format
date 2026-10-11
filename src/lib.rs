@@ -47,6 +47,7 @@ enum DefineKind {
     Switch,
     Module,
     Class,
+    Actor,
     Interface,
     Contract,
     Trait,
@@ -159,7 +160,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
-        content = canonicalize_declaration_line(&content, lex);
+        content = canonicalize_declaration_line(
+            &content, lex, in_direct_instance_container(&define_stack, &brace_stack)
+        );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -551,17 +554,63 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
         .unwrap_or(false)
 }
 
-fn canonicalize_declaration_line(line: &str, initial: LexState) -> String {
+// Only class/actor immediate members can use implicit receivers. Nested
+// local functions and expressions must not be rewritten as methods.
+fn in_direct_instance_container(
+    define_stack: &[DefineFrame],
+    brace_stack: &[BraceFrame],
+) -> bool {
+    let latest_define = define_stack.last().map(|frame| (frame.order, match frame.kind {
+        DefineKind::Class | DefineKind::Actor => true,
+        _ => false,
+    }));
+    let latest_brace = brace_stack.last().map(|frame| (frame.order, match frame.kind {
+        BraceKind::Class | BraceKind::Actor => true,
+        _ => false,
+    }));
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
     let words = visible_word_spans(line, initial);
     if words.is_empty() {
         return line.to_string();
     }
 
-    canonicalize_class_declaration(line, &words)
+    (instance_member.then(|| canonicalize_instance_method_fnc(line, &words)).flatten())
+        .or_else(|| canonicalize_class_declaration(line, &words))
         .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
         .or_else(|| canonicalize_actor_declaration(line, &words))
         .or_else(|| canonicalize_callable_declaration(line, &words))
         .unwrap_or_else(|| line.to_string())
+}
+
+// Legacy "fnc name(...)" inside a class or actor is an instance method,
+// not a static, reifiable function. Drop only that declaration marker.
+// In particular never touch static fnc, comments, strings or nested callables.
+fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
+    let index = words.iter().position(|w| &line[w.start..w.end] == "fnc")?;
+    if !words[..index].iter().all(|w| matches!(&line[w.start..w.end],
+            "pub" | "private" | "async" | "suspends" | "suspend"
+            | "critical" | "structural" | "abstract")) {
+        return None;
+    }
+    let name = words.get(index + 1)?;
+    if !line[words[index].end..name.start].chars().all(char::is_whitespace) {
+        return None;
+    }
+    let suffix = line[name.end..].trim_start();
+    if !(suffix.starts_with('(') || suffix.starts_with('<')) {
+        return None;
+    }
+    let mut out = String::with_capacity(line.len());
+    out.push_str(&line[..words[index].start]);
+    out.push_str(&line[name.start..]);
+    Some(out)
 }
 
 fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<String> {
@@ -968,6 +1017,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             "pub" | "private" | "abstract" => continue,
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
+            "actor" | "isoactor" => return Some(DefineKind::Actor),
             "interface" => return Some(DefineKind::Interface),
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
