@@ -1212,3 +1212,33 @@ end
     assert!(output.contains("  end\n"), "{output}");
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+
+#[test]
+fn switch_and_match_underscore_aliases_format_as_default() {
+    let source = r#"fnc choose(string v): string {
+  switch v {
+    _ { return "star"; }
+    case "foo", "car", "mar" { return "bar"; }
+  }
+}
+fnc check(int n): int {
+  match n over {
+    on _ as m { return m; }
+    on 7 { return 42; }
+  }
+}
+fnc other(int n): int {
+  match n over {
+    on default { return 0; }
+  }
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("default {\n"), "{formatted}");
+    assert!(formatted.contains("default as m {\n"), "{formatted}");
+    assert!(!formatted.contains("on _ as m"), "{formatted}");
+    assert!(!formatted.contains("on default"), "{formatted}");
+    assert!(formatted.contains("case \"foo\", \"car\", \"mar\" {"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
