@@ -253,7 +253,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
         let callable_body = is_callable_body_header(structural, signature_context);
         let callable_signature = is_callable_signature(structural, signature_context);
-        if callable_body || callable_signature {
+        if (callable_body || callable_signature)
+            && !in_instance_member_scope(&define_stack, &brace_stack)
+        {
             content = canonicalize_callable_parameter_order(&content, lex);
         }
         if callable_body {
