@@ -1300,3 +1300,16 @@ end
     assert_eq!(out, expected);
     assert_eq!(format_source(&out).unwrap(), out);
 }
+
+#[test]
+fn define_shared_actor_is_also_a_method_container() {
+    let source = r#"define shared actor Worker as
+fnc handle(): int { return 7; }
+static fnc utility(): int { return 9; }
+end
+"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains("  handle(): int {"), "{result}");
+    assert!(result.contains("  static fnc utility(): int {"), "{result}");
+    assert_eq!(format_source(&result).unwrap(), result);
+}
