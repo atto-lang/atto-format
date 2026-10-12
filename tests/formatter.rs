@@ -1211,3 +1211,42 @@ end
     assert!(out.contains("static fnc direct()"));
     assert_eq!(format_source(&out).unwrap(), out);
 }
+
+#[test]
+fn modifier_permutations_format_in_one_pass_without_changing_static_dispatch() {
+    let src = r#"define class Client as
+fnc pub legacy(): int { return 1; }
+fnc suspend pub deferred(): int { return 2; }
+pub fnc async compute(): int { return 3; }
+fnc static pub reusable(): int { return 4; }
+fnc method_name(): int { return 5; }
+method method(): int { return 6; }
+end
+"#;
+    let once = format_source(src).unwrap();
+    assert!(once.contains("  pub legacy(): int {"), "{once}");
+    assert!(once.contains("  pub suspend deferred(): int {"), "{once}");
+    assert!(once.contains("  pub async compute(): int {"), "{once}");
+    assert!(once.contains("  pub static fnc reusable(): int {"), "{once}");
+    assert!(once.contains("  method_name(): int {"), "{once}");
+    assert!(once.contains("  method method(): int {"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn method_normalization_never_mutates_comments_literals_or_static_fnc() {
+    let src = r#"define class Client as
+// fnc ignored(): int
+static fnc keep(): int { return 1; }
+fnc ordinary(): String {
+  return "fnc literal";
+}
+end
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("// fnc ignored(): int"));
+    assert!(formatted.contains("  static fnc keep(): int"));
+    assert!(formatted.contains("  ordinary(): String"));
+    assert!(formatted.contains("\"fnc literal\""));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
