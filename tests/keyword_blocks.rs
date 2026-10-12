@@ -4,14 +4,14 @@ use oreslang_format::{format_source, is_formatted};
 fn compact_keyword_if_expands_inside_a_callable() {
     let input = r#"define class Builder as
   pub fnc build(): Result {
-    if self.built; then return Err("builder already consumed"); fi
+    if self.built then return Err("builder already consumed"); fi
     return Ok(self.value)
   }
 end
 "#;
     let expected = r#"define class Builder as
   pub build() -> Result {
-    if self.built; then
+    if self.built then
       return Err("builder already consumed");
     fi
     return Ok(self.value);
@@ -26,9 +26,9 @@ end
 
 #[test]
 fn no_same_line_conditionals_in_one_line_callable() {
-    let input = r#"fnc check() -> Result { if self.built; then return Err("already consumed"); fi return Ok(1); }"#;
+    let input = r#"fnc check() -> Result { if self.built then return Err("already consumed"); fi return Ok(1); }"#;
     let expected = r#"fnc check() -> Result {
-  if self.built; then
+  if self.built then
     return Err("already consumed");
   fi
   return Ok(1);
@@ -44,13 +44,13 @@ if x < 0 then if x < -5 then return -5; else return -1; fi elif x == 0 then retu
 }
 "#;
     let expected = r#"fnc classify(int x) -> int {
-  if x < 0; then
-    if x < -5; then
+  if x < 0 then
+    if x < -5 then
       return -5;
     else
       return -1;
     fi
-  elif x == 0; then
+  elif x == 0 then
     return 0;
   else
     return 1;
@@ -65,12 +65,12 @@ if x < 0 then if x < -5 then return -5; else return -1; fi elif x == 0 then retu
 #[test]
 fn preserves_comments_and_literals_with_conditional_words() {
     let input = r#"fnc check(): String {
-if obj.then; then return "else; fi; then"; fi // comment: then fi
+if obj.then then return "else; fi; then"; fi // comment: then fi
 return "http://example.com" // leave comment in place
 }
 "#;
     let expected = r#"fnc check() -> String {
-  if obj.then; then
+  if obj.then then
     return "else; fi; then";
   fi // comment: then fi
   return "http://example.com"; // leave comment in place
