@@ -19,7 +19,7 @@ identical behavior.
   instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
-- conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
+- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
@@ -56,8 +56,8 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-Conditional compatibility spellings are migrated automatically: deprecated
-`if ... do` becomes `if ...; then`, `elseif` becomes `elif`, and a
+Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
+`if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
 single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
 unchanged; the deprecation applies only to using `do` as an if/branch
 introducer.
