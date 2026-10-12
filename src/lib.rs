@@ -146,6 +146,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     // changing the structural brace/keyword nesting used by the language.
     let mut lambda_expr_continuation: Option<usize> = None;
     let mut pending_assignment_continuation = false;
+    // Parenthesized instance-method parameters can span lines. Preserve one
+    // continuation indent without treating their declarations as statements.
+    let mut pending_method_parameter_depth = 0usize;
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
@@ -250,7 +253,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let callable_body = is_callable_body_header(structural, signature_context);
+        let closes_multiline_method = pending_method_parameter_depth > 0
+            && structural.trim_start().starts_with(')');
+        let callable_body = is_callable_body_header(structural, signature_context)
+            || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body || callable_signature {
             content = canonicalize_callable_parameter_order(&content, lex);
@@ -266,7 +272,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             pending_assignment_continuation && starts_pipe_lambda_expression(structural);
         let current_indent = indent
             + usize::from(lambda_expr_continuation.is_some())
-            + usize::from(assignment_lambda_continuation);
+            + usize::from(assignment_lambda_continuation)
+            + usize::from(pending_method_parameter_depth > 0 && !closes_multiline_method);
         let annotation_line = structural.starts_with('@');
         let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
@@ -428,6 +435,30 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         pending_assignment_continuation = structural.trim_end().ends_with('=');
+
+        let parens_open = structural.chars().filter(|&ch| ch == '(').count();
+        let parens_close = structural.chars().filter(|&ch| ch == ')').count();
+        if pending_method_parameter_depth > 0 {
+            let depth = pending_method_parameter_depth + parens_open;
+            if parens_close > depth {
+                return Err(FormatError::new(line_no, "unbalanced multiline method parameters"));
+            }
+            pending_method_parameter_depth = depth - parens_close;
+        } else if keyword_stack.is_empty()
+            && in_direct_instance_container(&define_stack, &brace_stack)
+            && structural.trim_end().ends_with('(')
+            && !structural.contains('=') && !structural.contains('.')
+            && parens_open > parens_close
+        {
+            pending_method_parameter_depth = parens_open - parens_close;
+        }
+    }
+
+    if pending_method_parameter_depth != 0 {
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            "unterminated multiline method parameters",
+        ));
     }
 
     if lambda_expr_continuation.is_some() {
