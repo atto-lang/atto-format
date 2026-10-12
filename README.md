@@ -14,6 +14,9 @@ identical behavior.
 - LF line endings, no trailing whitespace, one final newline;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
+- in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
+  explicit `method name(...)` remains explicit, and `static fnc` is preserved;
+  instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;

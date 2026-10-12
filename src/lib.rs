@@ -47,6 +47,7 @@ enum DefineKind {
     Switch,
     Module,
     Class,
+    Actor,
     Interface,
     Contract,
     Trait,
@@ -145,6 +146,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     // changing the structural brace/keyword nesting used by the language.
     let mut lambda_expr_continuation: Option<usize> = None;
     let mut pending_assignment_continuation = false;
+    // Parenthesized instance-method parameters can span lines. Preserve one
+    // continuation indent without treating their declarations as statements.
+    let mut pending_method_parameter_depth = 0usize;
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
@@ -159,7 +163,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
-        content = canonicalize_declaration_line(&content, lex);
+        content = canonicalize_declaration_line(
+            &content,
+            lex,
+            keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
+        );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -247,7 +255,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let callable_body = is_callable_body_header(structural, signature_context);
+        let closes_multiline_method =
+            pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        let callable_body = is_callable_body_header(structural, signature_context)
+            || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body || callable_signature {
             content = canonicalize_callable_parameter_order(&content, lex);
@@ -263,7 +274,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             pending_assignment_continuation && starts_pipe_lambda_expression(structural);
         let current_indent = indent
             + usize::from(lambda_expr_continuation.is_some())
-            + usize::from(assignment_lambda_continuation);
+            + usize::from(assignment_lambda_continuation)
+            + usize::from(pending_method_parameter_depth > 0 && !closes_multiline_method);
         let annotation_line = structural.starts_with('@');
         let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
@@ -278,6 +290,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     frame.kind,
                     DefineKind::Module
                         | DefineKind::Class
+                        | DefineKind::Actor
                         | DefineKind::Interface
                         | DefineKind::Contract
                         | DefineKind::Trait
@@ -424,6 +437,34 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         pending_assignment_continuation = structural.trim_end().ends_with('=');
+
+        let parens_open = structural.chars().filter(|&ch| ch == '(').count();
+        let parens_close = structural.chars().filter(|&ch| ch == ')').count();
+        if pending_method_parameter_depth > 0 {
+            let depth = pending_method_parameter_depth + parens_open;
+            if parens_close > depth {
+                return Err(FormatError::new(
+                    line_no,
+                    "unbalanced multiline method parameters",
+                ));
+            }
+            pending_method_parameter_depth = depth - parens_close;
+        } else if keyword_stack.is_empty()
+            && in_direct_instance_container(&define_stack, &brace_stack)
+            && structural.trim_end().ends_with('(')
+            && !structural.contains('=')
+            && !structural.contains('.')
+            && parens_open > parens_close
+        {
+            pending_method_parameter_depth = parens_open - parens_close;
+        }
+    }
+
+    if pending_method_parameter_depth != 0 {
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            "unterminated multiline method parameters",
+        ));
     }
 
     if lambda_expr_continuation.is_some() {
@@ -551,17 +592,128 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
         .unwrap_or(false)
 }
 
-fn canonicalize_declaration_line(line: &str, initial: LexState) -> String {
+// Only class/actor immediate members can use implicit receivers. Nested
+// local functions and expressions must not be rewritten as methods.
+fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack.last().map(|frame| {
+        (
+            frame.order,
+            matches!(frame.kind, DefineKind::Class | DefineKind::Actor),
+        )
+    });
+    let latest_brace = brace_stack.last().map(|frame| {
+        (
+            frame.order,
+            matches!(frame.kind, BraceKind::Class | BraceKind::Actor),
+        )
+    });
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => {
+            if a > b {
+                value
+            } else {
+                other
+            }
+        }
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
     let words = visible_word_spans(line, initial);
     if words.is_empty() {
         return line.to_string();
     }
 
-    canonicalize_class_declaration(line, &words)
-        .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
-        .or_else(|| canonicalize_actor_declaration(line, &words))
-        .or_else(|| canonicalize_callable_declaration(line, &words))
-        .unwrap_or_else(|| line.to_string())
+    (instance_member
+        .then(|| canonicalize_instance_method_fnc(line, &words))
+        .flatten())
+    .or_else(|| canonicalize_class_declaration(line, &words))
+    .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
+    .or_else(|| canonicalize_actor_declaration(line, &words))
+    .or_else(|| canonicalize_callable_declaration(line, &words))
+    .unwrap_or_else(|| line.to_string())
+}
+
+// Legacy "fnc name(...)" inside a class or actor is an instance method,
+// not a static, reifiable function. Drop only that declaration marker.
+// In particular never touch static fnc, comments, strings or nested callables.
+fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_modifier = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "async"
+                | "suspends"
+                | "suspend"
+                | "critical"
+                | "structural"
+                | "abstract"
+        )
+    };
+    let mut prefix_len = 0;
+    let mut saw_fnc = false;
+    let mut modifiers: Vec<&str> = Vec::new();
+    for span in words {
+        let word = &line[span.start..span.end];
+        if word == "fnc" {
+            if saw_fnc {
+                return None;
+            }
+            saw_fnc = true;
+        } else if is_modifier(word) {
+            if modifiers.contains(&word) {
+                return None;
+            }
+            modifiers.push(word);
+        } else {
+            break;
+        }
+        prefix_len += 1;
+    }
+    if !saw_fnc || prefix_len >= words.len() {
+        return None;
+    }
+    // No static modifier, comments, punctuation or expressions may appear
+    // among the declaration prefix. This also rejects invalid combinations
+    // without manufacturing plausible-looking source.
+    if !plain_word_prefix(line, &words[..=prefix_len])
+        || (modifiers.contains(&"pub") && modifiers.contains(&"private"))
+        || (modifiers.contains(&"suspend") && modifiers.contains(&"suspends"))
+    {
+        return None;
+    }
+    let name = &words[prefix_len];
+    let suffix = line[name.end..].trim_start();
+    if !(suffix.starts_with('(') || suffix.starts_with('<')) {
+        return None;
+    }
+
+    let mut canonical: Vec<&str> = Vec::new();
+    for modifier in [
+        "pub",
+        "private",
+        "async",
+        "suspend",
+        "suspends",
+        "critical",
+        "structural",
+        "abstract",
+    ] {
+        if modifiers.contains(&modifier) {
+            canonical.push(modifier);
+        }
+    }
+    let mut out = String::with_capacity(line.len());
+    out.push_str(&line[..words[0].start]);
+    if !canonical.is_empty() {
+        out.push_str(&canonical.join(" "));
+        out.push(' ');
+    }
+    out.push_str(&line[name.start..]);
+    Some(out)
 }
 
 fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<String> {
@@ -958,6 +1110,23 @@ fn rewrite_word_prefix(line: &str, words: &[WordSpan], canonical: &[&str]) -> St
 }
 
 fn define_kind(line: &str) -> Option<DefineKind> {
+    // Bare, end-delimited actor declarations are legal without 'define'.
+    // Keep this narrow: actor callables (actor fnc) must never open a frame.
+    let header: Vec<&str> = line.split_whitespace().collect();
+    if header.last() == Some(&"as") {
+        if let Some(actor_index) = header
+            .iter()
+            .position(|word| matches!(*word, "actor" | "isoactor"))
+        {
+            if actor_index + 3 == header.len()
+                && header[..actor_index]
+                    .iter()
+                    .all(|word| matches!(*word, "pub" | "private" | "shared" | "untrusted"))
+            {
+                return Some(DefineKind::Actor);
+            }
+        }
+    }
     let mut words = line.split_whitespace();
     if words.next()? != "define" {
         return None;
@@ -965,9 +1134,10 @@ fn define_kind(line: &str) -> Option<DefineKind> {
 
     for word in words {
         match word {
-            "pub" | "private" | "abstract" => continue,
+            "pub" | "private" | "abstract" | "shared" | "untrusted" => continue,
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
+            "actor" | "isoactor" => return Some(DefineKind::Actor),
             "interface" => return Some(DefineKind::Interface),
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
