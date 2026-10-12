@@ -1265,3 +1265,38 @@ end
     assert!(out.contains("  static fnc helper(): int {"), "{out}");
     assert_eq!(out, format_source(&out).unwrap());
 }
+
+#[test]
+fn multiline_connection_actor_method_params_are_indented_and_idempotent() {
+    let source = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+end
+"#;
+    let expected = r#"define actor ConnectionActor as
+  final rooms: Map<RoomId, ActorGroup>
+
+  suspend join_room(
+    group: ActorGroup,
+    permit: ActorGroupJoinCapability
+  ) {
+    group.join(permit)
+  }
+  leave_room(group: ActorGroup) {
+    group.leave()
+  }
+end
+"#;
+    let out = format_source(source).unwrap();
+    assert_eq!(out, expected);
+    assert_eq!(format_source(&out).unwrap(), out);
+}
