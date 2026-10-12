@@ -594,22 +594,56 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
 // not a static, reifiable function. Drop only that declaration marker.
 // In particular never touch static fnc, comments, strings or nested callables.
 fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
-    let index = words.iter().position(|w| &line[w.start..w.end] == "fnc")?;
-    if !words[..index].iter().all(|w| matches!(&line[w.start..w.end],
-            "pub" | "private" | "async" | "suspends" | "suspend"
-            | "critical" | "structural" | "abstract")) {
+    let is_modifier = |word: &str| matches!(word,
+        "pub" | "private" | "async" | "suspends" | "suspend"
+        | "critical" | "structural" | "abstract");
+    let mut prefix_len = 0;
+    let mut saw_fnc = false;
+    let mut modifiers: Vec<&str> = Vec::new();
+    for span in words {
+        let word = &line[span.start..span.end];
+        if word == "fnc" {
+            if saw_fnc { return None; }
+            saw_fnc = true;
+        } else if is_modifier(word) {
+            if modifiers.contains(&word) { return None; }
+            modifiers.push(word);
+        } else {
+            break;
+        }
+        prefix_len += 1;
+    }
+    if !saw_fnc || prefix_len >= words.len() {
         return None;
     }
-    let name = words.get(index + 1)?;
-    if !line[words[index].end..name.start].chars().all(char::is_whitespace) {
+    // No static modifier, comments, punctuation or expressions may appear
+    // among the declaration prefix. This also rejects invalid combinations
+    // without manufacturing plausible-looking source.
+    if !plain_word_prefix(line, &words[..=prefix_len])
+        || (modifiers.contains(&"pub") && modifiers.contains(&"private"))
+        || (modifiers.contains(&"suspend") && modifiers.contains(&"suspends"))
+    {
         return None;
     }
+    let name = &words[prefix_len];
     let suffix = line[name.end..].trim_start();
     if !(suffix.starts_with('(') || suffix.starts_with('<')) {
         return None;
     }
+
+    let mut canonical: Vec<&str> = Vec::new();
+    for modifier in ["pub", "private", "async", "suspend", "suspends",
+                     "critical", "structural", "abstract"] {
+        if modifiers.contains(&modifier) {
+            canonical.push(modifier);
+        }
+    }
     let mut out = String::with_capacity(line.len());
-    out.push_str(&line[..words[index].start]);
+    out.push_str(&line[..words[0].start]);
+    if !canonical.is_empty() {
+        out.push_str(&canonical.join(" "));
+        out.push(' ');
+    }
     out.push_str(&line[name.start..]);
     Some(out)
 }
