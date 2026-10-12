@@ -161,7 +161,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(
-            &content, lex, in_direct_instance_container(&define_stack, &brace_stack)
+            &content, lex, keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack)
         );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
