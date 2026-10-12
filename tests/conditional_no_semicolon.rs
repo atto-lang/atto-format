@@ -41,8 +41,8 @@ fn condition_separator_whitespace_is_canonical() {
 #[test]
 fn final_field_spelling_is_preserved_until_compiler_admission() {
     let source = r#"define class Cache as
-final Map<int, int> frozen = new Map<int, int>();
-final mut Map<int, int> writable = new Map<int, int>();
+  final Map<int, int> frozen = new Map<int, int>();
+  final mut Map<int, int> writable = new Map<int, int>();
 end
 "#;
     assert_eq!(format_source(source).unwrap(), source);
