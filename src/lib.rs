@@ -592,14 +592,10 @@ fn in_direct_instance_container(
     define_stack: &[DefineFrame],
     brace_stack: &[BraceFrame],
 ) -> bool {
-    let latest_define = define_stack.last().map(|frame| (frame.order, match frame.kind {
-        DefineKind::Class | DefineKind::Actor => true,
-        _ => false,
-    }));
-    let latest_brace = brace_stack.last().map(|frame| (frame.order, match frame.kind {
-        BraceKind::Class | BraceKind::Actor => true,
-        _ => false,
-    }));
+    let latest_define = define_stack.last().map(|frame| (frame.order,
+        matches!(frame.kind, DefineKind::Class | DefineKind::Actor)));
+    let latest_brace = brace_stack.last().map(|frame| (frame.order,
+        matches!(frame.kind, BraceKind::Class | BraceKind::Actor)));
     match (latest_define, latest_brace) {
         (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
         (Some((_, value)), None) | (None, Some((_, value))) => value,
