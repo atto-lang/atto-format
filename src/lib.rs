@@ -1042,6 +1042,19 @@ fn rewrite_word_prefix(line: &str, words: &[WordSpan], canonical: &[&str]) -> St
 }
 
 fn define_kind(line: &str) -> Option<DefineKind> {
+    // Bare, end-delimited actor declarations are legal without 'define'.
+    // Keep this narrow: actor callables (actor fnc) must never open a frame.
+    let header: Vec<&str> = line.split_whitespace().collect();
+    if header.last() == Some(&"as") {
+        if let Some(actor_index) = header.iter().position(|word| matches!(*word, "actor" | "isoactor")) {
+            if actor_index + 3 == header.len()
+                && header[..actor_index].iter().all(|word|
+                    matches!(*word, "pub" | "private" | "shared" | "untrusted"))
+            {
+                return Some(DefineKind::Actor);
+            }
+        }
+    }
     let mut words = line.split_whitespace();
     if words.next()? != "define" {
         return None;
