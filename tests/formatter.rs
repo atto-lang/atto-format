@@ -1250,3 +1250,18 @@ end
     assert!(formatted.contains("\"fnc literal\""));
     assert_eq!(formatted, format_source(&formatted).unwrap());
 }
+
+#[test]
+fn bare_keyword_actor_end_body_is_an_instance_method_scope() {
+    let src = r#"shared actor Worker as
+fnc handle(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("  handle(): int {"), "{out}");
+    assert!(out.contains("  method explicit(): int {"), "{out}");
+    assert!(out.contains("  static fnc helper(): int {"), "{out}");
+    assert_eq!(out, format_source(&out).unwrap());
+}
