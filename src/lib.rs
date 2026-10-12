@@ -164,7 +164,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
         content = canonicalize_declaration_line(
-            &content, lex, keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack)
+            &content,
+            lex,
+            keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
@@ -253,8 +255,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let closes_multiline_method = pending_method_parameter_depth > 0
-            && structural.trim_start().starts_with(')');
+        let closes_multiline_method =
+            pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
         let callable_body = is_callable_body_header(structural, signature_context)
             || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
@@ -441,13 +443,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         if pending_method_parameter_depth > 0 {
             let depth = pending_method_parameter_depth + parens_open;
             if parens_close > depth {
-                return Err(FormatError::new(line_no, "unbalanced multiline method parameters"));
+                return Err(FormatError::new(
+                    line_no,
+                    "unbalanced multiline method parameters",
+                ));
             }
             pending_method_parameter_depth = depth - parens_close;
         } else if keyword_stack.is_empty()
             && in_direct_instance_container(&define_stack, &brace_stack)
             && structural.trim_end().ends_with('(')
-            && !structural.contains('=') && !structural.contains('.')
+            && !structural.contains('=')
+            && !structural.contains('.')
             && parens_open > parens_close
         {
             pending_method_parameter_depth = parens_open - parens_close;
@@ -609,31 +615,47 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
         return line.to_string();
     }
 
-    (instance_member.then(|| canonicalize_instance_method_fnc(line, &words)).flatten())
-        .or_else(|| canonicalize_class_declaration(line, &words))
-        .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
-        .or_else(|| canonicalize_actor_declaration(line, &words))
-        .or_else(|| canonicalize_callable_declaration(line, &words))
-        .unwrap_or_else(|| line.to_string())
+    (instance_member
+        .then(|| canonicalize_instance_method_fnc(line, &words))
+        .flatten())
+    .or_else(|| canonicalize_class_declaration(line, &words))
+    .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
+    .or_else(|| canonicalize_actor_declaration(line, &words))
+    .or_else(|| canonicalize_callable_declaration(line, &words))
+    .unwrap_or_else(|| line.to_string())
 }
 
 // Legacy "fnc name(...)" inside a class or actor is an instance method,
 // not a static, reifiable function. Drop only that declaration marker.
 // In particular never touch static fnc, comments, strings or nested callables.
 fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
-    let is_modifier = |word: &str| matches!(word,
-        "pub" | "private" | "async" | "suspends" | "suspend"
-        | "critical" | "structural" | "abstract");
+    let is_modifier = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "async"
+                | "suspends"
+                | "suspend"
+                | "critical"
+                | "structural"
+                | "abstract"
+        )
+    };
     let mut prefix_len = 0;
     let mut saw_fnc = false;
     let mut modifiers: Vec<&str> = Vec::new();
     for span in words {
         let word = &line[span.start..span.end];
         if word == "fnc" {
-            if saw_fnc { return None; }
+            if saw_fnc {
+                return None;
+            }
             saw_fnc = true;
         } else if is_modifier(word) {
-            if modifiers.contains(&word) { return None; }
+            if modifiers.contains(&word) {
+                return None;
+            }
             modifiers.push(word);
         } else {
             break;
@@ -659,8 +681,16 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     }
 
     let mut canonical: Vec<&str> = Vec::new();
-    for modifier in ["pub", "private", "async", "suspend", "suspends",
-                     "critical", "structural", "abstract"] {
+    for modifier in [
+        "pub",
+        "private",
+        "async",
+        "suspend",
+        "suspends",
+        "critical",
+        "structural",
+        "abstract",
+    ] {
         if modifiers.contains(&modifier) {
             canonical.push(modifier);
         }
@@ -1073,10 +1103,14 @@ fn define_kind(line: &str) -> Option<DefineKind> {
     // Keep this narrow: actor callables (actor fnc) must never open a frame.
     let header: Vec<&str> = line.split_whitespace().collect();
     if header.last() == Some(&"as") {
-        if let Some(actor_index) = header.iter().position(|word| matches!(*word, "actor" | "isoactor")) {
+        if let Some(actor_index) = header
+            .iter()
+            .position(|word| matches!(*word, "actor" | "isoactor"))
+        {
             if actor_index + 3 == header.len()
-                && header[..actor_index].iter().all(|word|
-                    matches!(*word, "pub" | "private" | "shared" | "untrusted"))
+                && header[..actor_index]
+                    .iter()
+                    .all(|word| matches!(*word, "pub" | "private" | "shared" | "untrusted"))
             {
                 return Some(DefineKind::Actor);
             }
