@@ -1162,7 +1162,7 @@ permit: ActorGroupJoinCapability
 ) {
 group.join(permit)
 }
-fnc leave_room(group: ActorGroup) {
+fnc leave_room(ActorGroup group) {
 group.leave()
 }
 suspend method explicit_join(group: ActorGroup) {
@@ -1173,21 +1173,21 @@ group.leave()
 }
 end
 define class Client as
-fnc legacy(): int { return 1; }
-method explicit(): int { return 2; }
-static fnc helper(): int { return 3; }
+fnc legacy() -> int { return 1; }
+method explicit() -> int { return 2; }
+static fnc helper() -> int { return 3; }
 end
-fnc standalone(): int { return 4; }
+fnc standalone() -> int { return 4; }
 "#;
     let out = format_source(input).unwrap();
     assert!(out.contains("suspend join_room("), "{out}");
-    assert!(out.contains("  leave_room(group: ActorGroup) {"), "{out}");
+    assert!(out.contains("  leave_room(ActorGroup group) {"), "{out}");
     assert!(out.contains("suspend method explicit_join("), "{out}");
     assert!(out.contains("static fnc static_send("), "{out}");
-    assert!(out.contains("  legacy(): int {"), "{out}");
-    assert!(out.contains("  method explicit(): int {"), "{out}");
-    assert!(out.contains("  static fnc helper(): int {"), "{out}");
-    assert!(out.contains("fnc standalone(): int {"), "{out}");
+    assert!(out.contains("  legacy() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert!(out.contains("fnc standalone() -> int {"), "{out}");
     assert!(!out.contains("fnc join_room"), "{out}");
     assert!(!out.contains("fnc leave_room"), "{out}");
     assert_eq!(format_source(&out).unwrap(), out);
@@ -1196,7 +1196,7 @@ fnc standalone(): int { return 4; }
 #[test]
 fn never_rewrites_nested_or_string_or_comment_fnc() {
     let src = r#"define actor User as
-fnc call(): String {
+fnc call() -> String {
   // fnc marker() is a comment
   val title = "fnc name()";
   return title;
@@ -1205,7 +1205,7 @@ static fnc direct(): int { return 42; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("call(): String {"));
+    assert!(out.contains("call() -> String {"));
     assert!(out.contains("// fnc marker() is a comment"));
     assert!(out.contains("\"fnc name()\""));
     assert!(out.contains("static fnc direct()"));
@@ -1215,21 +1215,21 @@ end
 #[test]
 fn modifier_permutations_format_in_one_pass_without_changing_static_dispatch() {
     let src = r#"define class Client as
-fnc pub legacy(): int { return 1; }
+fnc pub legacy() -> int { return 1; }
 fnc suspend pub deferred(): int { return 2; }
 pub fnc async compute(): int { return 3; }
 fnc static pub reusable(): int { return 4; }
-fnc method_name(): int { return 5; }
-method method(): int { return 6; }
+fnc method_name() -> int { return 5; }
+method method() -> int { return 6; }
 end
 "#;
     let once = format_source(src).unwrap();
-    assert!(once.contains("  pub legacy(): int {"), "{once}");
-    assert!(once.contains("  pub suspend deferred(): int {"), "{once}");
-    assert!(once.contains("  pub async compute(): int {"), "{once}");
-    assert!(once.contains("  pub static fnc reusable(): int {"), "{once}");
-    assert!(once.contains("  method_name(): int {"), "{once}");
-    assert!(once.contains("  method method(): int {"), "{once}");
+    assert!(once.contains("  pub legacy() -> int {"), "{once}");
+    assert!(once.contains("  pub suspend deferred() -> int {"), "{once}");
+    assert!(once.contains("  pub async compute() -> int {"), "{once}");
+    assert!(once.contains("  pub static fnc reusable() -> int {"), "{once}");
+    assert!(once.contains("  method_name() -> int {"), "{once}");
+    assert!(once.contains("  method method() -> int {"), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
 }
 
@@ -1237,7 +1237,7 @@ end
 fn method_normalization_never_mutates_comments_literals_or_static_fnc() {
     let src = r#"define class Client as
 // fnc ignored(): int
-static fnc keep(): int { return 1; }
+static fnc keep() -> int { return 1; }
 fnc ordinary(): String {
   return "fnc literal";
 }
@@ -1245,7 +1245,7 @@ end
 "#;
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("// fnc ignored(): int"));
-    assert!(formatted.contains("  static fnc keep(): int"));
+    assert!(formatted.contains("  static fnc keep() -> int"));
     assert!(formatted.contains("  ordinary(): String"));
     assert!(formatted.contains("\"fnc literal\""));
     assert_eq!(formatted, format_source(&formatted).unwrap());
@@ -1254,15 +1254,15 @@ end
 #[test]
 fn bare_keyword_actor_end_body_is_an_instance_method_scope() {
     let src = r#"shared actor Worker as
-fnc handle(): int { return 1; }
-method explicit(): int { return 2; }
-static fnc helper(): int { return 3; }
+fnc handle() -> int { return 1; }
+method explicit() -> int { return 2; }
+static fnc helper() -> int { return 3; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("  handle(): int {"), "{out}");
-    assert!(out.contains("  method explicit(): int {"), "{out}");
-    assert!(out.contains("  static fnc helper(): int {"), "{out}");
+    assert!(out.contains("  handle() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
     assert_eq!(out, format_source(&out).unwrap());
 }
 
@@ -1277,7 +1277,7 @@ permit: ActorGroupJoinCapability
 ) {
 group.join(permit)
 }
-fnc leave_room(group: ActorGroup) {
+fnc leave_room(ActorGroup group) {
 group.leave()
 }
 end
@@ -1291,7 +1291,7 @@ end
   ) {
     group.join(permit)
   }
-  leave_room(group: ActorGroup) {
+  leave_room(ActorGroup group) {
     group.leave()
   }
 end
@@ -1304,12 +1304,12 @@ end
 #[test]
 fn define_shared_actor_is_also_a_method_container() {
     let source = r#"define shared actor Worker as
-fnc handle(): int { return 7; }
-static fnc utility(): int { return 9; }
+fnc handle() -> int { return 7; }
+static fnc utility() -> int { return 9; }
 end
 "#;
     let result = format_source(source).unwrap();
-    assert!(result.contains("  handle(): int {"), "{result}");
-    assert!(result.contains("  static fnc utility(): int {"), "{result}");
+    assert!(result.contains("  handle() -> int {"), "{result}");
+    assert!(result.contains("  static fnc utility() -> int {"), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
