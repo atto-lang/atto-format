@@ -1518,11 +1518,10 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 // The canonical spelling is "if condition then" on one line.
                 // Replace the optional semicolon and all whitespace between
                 // the condition and branch marker in one lexical rewrite.
-                let replacement_start = if before.ends_with(';') {
-                    before.len() - 1
-                } else {
-                    before.len()
-                };
+                let replacement_start = before
+                    .trim_end_matches(';')
+                    .trim_end()
+                    .len();
                 let replacement = " then".to_string();
                 replacements.push((replacement_start, last.end, replacement));
             }
