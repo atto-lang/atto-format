@@ -1227,7 +1227,10 @@ end
     assert!(once.contains("  pub legacy() -> int {"), "{once}");
     assert!(once.contains("  pub suspend deferred() -> int {"), "{once}");
     assert!(once.contains("  pub async compute() -> int {"), "{once}");
-    assert!(once.contains("  pub static fnc reusable() -> int {"), "{once}");
+    assert!(
+        once.contains("  pub static fnc reusable() -> int {"),
+        "{once}"
+    );
     assert!(once.contains("  method_name() -> int {"), "{once}");
     assert!(once.contains("  method method() -> int {"), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
@@ -1310,6 +1313,9 @@ end
 "#;
     let result = format_source(source).unwrap();
     assert!(result.contains("  handle() -> int {"), "{result}");
-    assert!(result.contains("  static fnc utility() -> int {"), "{result}");
+    assert!(
+        result.contains("  static fnc utility() -> int {"),
+        "{result}"
+    );
     assert_eq!(format_source(&result).unwrap(), result);
 }
