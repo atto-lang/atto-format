@@ -594,16 +594,27 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
 
 // Only class/actor immediate members can use implicit receivers. Nested
 // local functions and expressions must not be rewritten as methods.
-fn in_direct_instance_container(
-    define_stack: &[DefineFrame],
-    brace_stack: &[BraceFrame],
-) -> bool {
-    let latest_define = define_stack.last().map(|frame| (frame.order,
-        matches!(frame.kind, DefineKind::Class | DefineKind::Actor)));
-    let latest_brace = brace_stack.last().map(|frame| (frame.order,
-        matches!(frame.kind, BraceKind::Class | BraceKind::Actor)));
+fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack.last().map(|frame| {
+        (
+            frame.order,
+            matches!(frame.kind, DefineKind::Class | DefineKind::Actor),
+        )
+    });
+    let latest_brace = brace_stack.last().map(|frame| {
+        (
+            frame.order,
+            matches!(frame.kind, BraceKind::Class | BraceKind::Actor),
+        )
+    });
     match (latest_define, latest_brace) {
-        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((a, value)), Some((b, other))) => {
+            if a > b {
+                value
+            } else {
+                other
+            }
+        }
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
