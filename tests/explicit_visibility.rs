@@ -48,10 +48,10 @@ val int secret: 3
 end
 "#;
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("pub class Box as\n    val int hidden: 1\nend"));
+    assert!(formatted.contains("pub class Box as\n  val int hidden: 1\nend"));
     assert!(formatted.contains("trait Descriptor as\nend"));
     assert!(formatted.contains("struct Position as\nend"));
-    assert!(formatted.contains("define class Vault as\n    val int secret: 3\nend"));
+    assert!(formatted.contains("define class Vault as\n  val int secret: 3\nend"));
     assert!(!formatted.contains("define pub class Vault"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
