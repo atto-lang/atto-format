@@ -146,6 +146,52 @@ fn pop_matching(nesting: &mut Vec<&str>, close: &str) -> bool {
     matching_open(close).is_some_and(|expected| nesting.pop() == Some(expected))
 }
 
+
+/// The lexer deliberately exposes slim arrows as '-' and '>' tokens.
+/// Restrict recognition to contiguous bytes, so arithmetic and comments
+/// cannot accidentally become dispatch syntax.
+fn slim_arrow(tokens: &[Token<'_>], at: usize) -> bool {
+    tokens.get(at).is_some_and(|token| token.text == "-")
+        && tokens.get(at + 1).is_some_and(|token| token.text == ">")
+        && tokens[at].end == tokens[at + 1].start
+}
+
+/// Find a canonical arrow between an arm header and its braced body.
+/// An opening '{' before the arrow is only a record projection when its
+/// balanced closer is immediately followed (ignoring comments/space) by
+/// the slim arrow; otherwise it is the historical brace-only arm body.
+/// Never scan into a later arm and consume that arm's arrow.
+fn explicit_select_arrow(tokens: &[Token<'_>], start: usize, close: usize) -> Option<usize> {
+    let mut nesting = Vec::new();
+    let mut cursor = start;
+    while cursor < close {
+        if nesting.is_empty() && slim_arrow(tokens, cursor) {
+            return Some(cursor);
+        }
+        if nesting.is_empty() && is_arm_start(tokens, cursor) {
+            return None;
+        }
+        match tokens[cursor].text {
+            "{" if nesting.is_empty() => {
+                let end = matching_brace(tokens, cursor)?;
+                return if end + 1 < close && slim_arrow(tokens, end + 1) {
+                    Some(end + 1)
+                } else {
+                    None
+                };
+            }
+            "(" | "[" | "{" => nesting.push(tokens[cursor].text),
+            ")" | "]" | "}" if !pop_matching(&mut nesting, tokens[cursor].text) => {
+                return None;
+            }
+            ")" | "]" | "}" => {}
+            _ => {}
+        }
+        cursor += 1;
+    }
+    None
+}
+
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
     let tokens = tokens(source);
     let mut edits = BTreeMap::<usize, String>::new();
@@ -275,6 +321,18 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 if header == close || tokens[header].text != ":" {
                     return Err(error(tokens[arm].start, "select arm requires ':'"));
                 }
+                // Typed and destructured read patterns may include
+                // arbitrary bracket/record shapes before the arrow. Prefer
+                // the explicit canonical boundary over name-only heuristics.
+                if let Some(arrow) = explicit_select_arrow(&tokens, header + 1, close) {
+                    if tokens.get(arrow + 2).is_none_or(|token| token.text != "{") {
+                        return Err(error(
+                            tokens[arrow].start,
+                            "select arm slim arrow must be followed by a braced body",
+                        ));
+                    }
+                    (arrow + 2, tokens[arrow + 1].end)
+                } else {
                 let mut body = header + 1;
                 if (read || await_future)
                     && tokens
@@ -309,6 +367,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     tokens[body - 1].end
                 };
                 (body, header_end)
+                }
             };
             if body < close && tokens[body].text == "{" {
                 let end = matching_brace(&tokens, body)
