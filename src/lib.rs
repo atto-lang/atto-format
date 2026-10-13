@@ -172,6 +172,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             &content,
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
+            keyword_stack.is_empty() && in_declaration_scope(&define_stack, &brace_stack),
         );
         content =
             canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
@@ -668,7 +669,31 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
     }
 }
 
-fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
+// Only source-root/module/class/actor scopes can declare private bindings.
+// Stripping 'private' inside a local block would otherwise hide a compiler
+// diagnostic on a malformed local binding or expression.
+fn in_declaration_scope(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let defined = defines.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, DefineKind::Module | DefineKind::Class | DefineKind::Actor),
+    ));
+    let braced = braces.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, BraceKind::Module | BraceKind::Class | BraceKind::Actor),
+    ));
+    match (defined, braced) {
+        (Some((a, allowed)), Some((b, other))) => if a > b { allowed } else { other },
+        (Some((_, allowed)), None) | (None, Some((_, allowed))) => allowed,
+        (None, None) => true,
+    }
+}
+
+fn canonicalize_declaration_line(
+    line: &str,
+    initial: LexState,
+    instance_member: bool,
+    declaration_scope: bool,
+) -> String {
     let words = visible_word_spans(line, initial);
     if words.is_empty() {
         return line.to_string();
@@ -684,7 +709,11 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
     .or_else(|| {
         instance_member.then(|| canonicalize_private_instance_method(line, &words)).flatten()
     })
-    .or_else(|| canonicalize_private_member(line, &words, instance_member))
+    .or_else(|| {
+        declaration_scope
+            .then(|| canonicalize_private_member(line, &words, instance_member))
+            .flatten()
+    })
     .unwrap_or_else(|| line.to_string())
 }
 
