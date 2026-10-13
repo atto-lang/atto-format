@@ -168,6 +168,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
+        if keyword_stack.is_empty() && in_direct_class_container(&define_stack, &brace_stack) {
+            content = canonicalize_class_field_initializer(&content, lex);
+        }
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -618,6 +621,86 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
+}
+
+// A source-level type-first class field uses ':' for initialization. Restrict
+// '=' rewriting to *direct* class members, never methods, local assignments,
+// object/map literals, match arms, comments, or name-first type annotations.
+fn in_direct_class_container(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let newest_define = defines.last().map(|frame| (frame.order, frame.kind == DefineKind::Class));
+    let newest_brace = braces.last().map(|frame| (frame.order, frame.kind == BraceKind::Class));
+    match (newest_define, newest_brace) {
+        (Some((a, v)), Some((b, w))) => if a > b { v } else { w },
+        (Some((_, v)), None) | (None, Some((_, v))) => v,
+        (None, None) => false,
+    }
+}
+
+fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String {
+    let Some(equal) = first_visible_char_index(line, '=', initial) else {
+        return line.to_string();
+    };
+    // Reject operators and malformed/incomplete declarations.
+    if line[equal..].starts_with("==") || line[equal..].starts_with("=>")
+        || line[equal + 1..].trim().is_empty()
+    {
+        return line.to_string();
+    }
+    let left = line[..equal].trim();
+    let mut header = left;
+    for modifier in ["pub", "private"] {
+        if header.starts_with(modifier)
+            && header[modifier.len()..].starts_with(char::is_whitespace)
+        {
+            header = header[modifier.len()..].trim_start();
+            break;
+        }
+    }
+    if header.starts_with("final") && header["final".len()..].starts_with(char::is_whitespace) {
+        header = header["final".len()..].trim_start();
+    }
+    // Find the last whitespace outside generic <> arguments: it separates the
+    // complete type from its field name even for Map<string, Array<int>>.
+    let mut angle = 0i32;
+    let mut square = 0i32;
+    let mut split = None;
+    for (at, ch) in header.char_indices() {
+        match ch {
+            '<' => angle += 1,
+            '>' => {
+                angle -= 1;
+                if angle < 0 { return line.to_string(); }
+            }
+            '[' => square += 1,
+            ']' => {
+                square -= 1;
+                if square < 0 { return line.to_string(); }
+            }
+            _ if ch.is_whitespace() && angle == 0 && square == 0 => split = Some(at),
+            _ => {}
+        }
+    }
+    if angle != 0 || square != 0 {
+        return line.to_string();
+    }
+    let Some(split) = split else { return line.to_string(); };
+    let ty = header[..split].trim();
+    let field = header[split..].trim();
+    let valid_name = |name: &str| {
+        let mut chars = name.chars();
+        chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    };
+    if ty.is_empty() || !valid_name(field)
+        || matches!(ty, "let" | "val" | "const" | "static" | "fnc" | "return")
+        || !ty.chars().all(|ch| ch.is_ascii_alphanumeric()
+            || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' '))
+    {
+        return line.to_string();
+    }
+    let mut out = line.to_string();
+    out.replace_range(equal..equal + 1, ":");
+    out
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
