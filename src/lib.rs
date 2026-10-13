@@ -406,10 +406,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
+        let starts_match = starts_word(structural, "match")
+            || (starts_word(structural, "do")
+                && starts_word(structural["do".len()..].trim_start(), "match"));
         if (starts_word(structural, "switch")
-            || ((starts_word(structural, "match")
-                || starts_word(structural, "do match"))
-                && contains_word(structural, "over")))
+            || (starts_match && contains_word(structural, "over")))
             && !structural.contains('{')
         {
             next_order += 1;
