@@ -673,16 +673,32 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
 // Stripping 'private' inside a local block would otherwise hide a compiler
 // diagnostic on a malformed local binding or expression.
 fn in_declaration_scope(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
-    let defined = defines.last().map(|frame| (
-        frame.order,
-        matches!(frame.kind, DefineKind::Module | DefineKind::Class | DefineKind::Actor),
-    ));
-    let braced = braces.last().map(|frame| (
-        frame.order,
-        matches!(frame.kind, BraceKind::Module | BraceKind::Class | BraceKind::Actor),
-    ));
+    let defined = defines.last().map(|frame| {
+        (
+            frame.order,
+            matches!(
+                frame.kind,
+                DefineKind::Module | DefineKind::Class | DefineKind::Actor
+            ),
+        )
+    });
+    let braced = braces.last().map(|frame| {
+        (
+            frame.order,
+            matches!(
+                frame.kind,
+                BraceKind::Module | BraceKind::Class | BraceKind::Actor
+            ),
+        )
+    });
     match (defined, braced) {
-        (Some((a, allowed)), Some((b, other))) => if a > b { allowed } else { other },
+        (Some((a, allowed)), Some((b, other))) => {
+            if a > b {
+                allowed
+            } else {
+                other
+            }
+        }
         (Some((_, allowed)), None) | (None, Some((_, allowed))) => allowed,
         (None, None) => true,
     }
@@ -707,7 +723,9 @@ fn canonicalize_declaration_line(
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .or_else(|| {
-        instance_member.then(|| canonicalize_private_instance_method(line, &words)).flatten()
+        instance_member
+            .then(|| canonicalize_private_instance_method(line, &words))
+            .flatten()
     })
     .or_else(|| {
         declaration_scope
@@ -1180,11 +1198,22 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
 // signatures, including their other modifiers. Never mask conflicting 'pub'
 // or syntax separated by comments.
 fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Option<String> {
-    let is_modifier = |word: &str| matches!(
-        word, "pub" | "private" | "async" | "suspend" | "suspends"
-            | "critical" | "structural" | "abstract" | "trap"
-    );
-    let prefix_len = words.iter()
+    let is_modifier = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "async"
+                | "suspend"
+                | "suspends"
+                | "critical"
+                | "structural"
+                | "abstract"
+                | "trap"
+        )
+    };
+    let prefix_len = words
+        .iter()
         .take_while(|span| is_modifier(&line[span.start..span.end]))
         .count();
     if prefix_len == 0 || prefix_len >= words.len() {
@@ -1195,8 +1224,7 @@ fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Optio
         return None;
     }
     let modifiers: Vec<&str> = prefix.iter().map(|s| &line[s.start..s.end]).collect();
-    if modifiers.iter().filter(|&&s| s == "private").count() != 1
-        || modifiers.contains(&"pub") {
+    if modifiers.iter().filter(|&&s| s == "private").count() != 1 || modifiers.contains(&"pub") {
         return None;
     }
     let target = words[prefix_len];
@@ -1208,7 +1236,10 @@ fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Optio
         })
     } else if target_word == "constructor" {
         line[target.end..].trim_start().starts_with('(')
-    } else if matches!(target_word, "fnc" | "routine" | "static" | "class" | "actor") {
+    } else if matches!(
+        target_word,
+        "fnc" | "routine" | "static" | "class" | "actor"
+    ) {
         false
     } else {
         line[target.end..].trim_start().starts_with('(')
@@ -1217,7 +1248,10 @@ fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Optio
     if !signature {
         return None;
     }
-    let rest: Vec<&str> = modifiers.into_iter().filter(|s| *s != "private").collect();
+    let rest: Vec<&str> = modifiers
+        .into_iter()
+        .filter(|s| *s != "private")
+        .collect();
     let mut out = String::with_capacity(line.len());
     out.push_str(&line[..prefix[0].start]);
     if !rest.is_empty() {
@@ -1262,7 +1296,8 @@ fn canonicalize_private_member(
     let suffix = line[second.end..].trim_start();
     let is_binding = matches!(token, "let" | "val" | "const" | "final");
     let is_constructor = instance_member && token == "constructor" && suffix.starts_with('(');
-    let is_explicit_method = instance_member && token == "method"
+    let is_explicit_method = instance_member
+        && token == "method"
         && words.get(2).is_some_and(|name| {
             plain_word_prefix(line, &words[..3])
                 && line[name.end..].trim_start().starts_with('(')
@@ -1274,8 +1309,11 @@ fn canonicalize_private_member(
     // Fields declared with name-first colon syntax are a class-only feature.
     let is_colon_field = instance_member && suffix.starts_with(':');
 
-    if !(is_binding || is_constructor || is_explicit_method
-        || is_implicit_method || is_colon_field)
+    if !(is_binding
+        || is_constructor
+        || is_explicit_method
+        || is_implicit_method
+        || is_colon_field)
     {
         return None;
     }
