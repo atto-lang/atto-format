@@ -87,3 +87,45 @@ end
 "#;
     assert!(format_source(input).unwrap().contains("val mut Map m = new Map();"));
 }
+
+#[test]
+fn generic_named_type_arguments_do_not_become_initializers() {
+    let input = r#"define class Pipeline as
+  const Box<messages=Message> queue = new Box();
+  pub let Map<string, Box<messages=Message>> routes = new Map();
+  final int answer: 42;
+end
+"#;
+    let expected = r#"define class Pipeline as
+  final Box<messages=Message> queue: new Box();
+  pub Map<string, Box<messages=Message>> routes: new Map();
+  final int answer: 42;
+end
+"#;
+    assert_eq!(format_source(input).unwrap(), expected);
+    assert_eq!(format_source(expected).unwrap(), expected);
+}
+
+#[test]
+fn generic_nested_colons_and_method_signatures_are_not_rewritten() {
+    let source = r#"define class Foo as
+  final Map<value: string> fields = build();
+  calculate(int x): int {
+    return x;
+  }
+  final mut Map<int, string> cache: new Map();
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("final Map<value: string> fields: build();"));
+    assert!(formatted.contains("calculate(int x): int {"));
+    assert!(formatted.contains("final mut Map<int, string> cache: new Map();"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn comment_separated_prefixes_are_not_silently_normalized() {
+    let source = "define class Foo as\n  const /* ownership */ int value = 1;\nend\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("const /* ownership */ int value = 1;"));
+}
