@@ -7,6 +7,7 @@ use std::fmt;
 
 mod inline_blocks;
 mod keyword_blocks;
+mod match_switch;
 mod select;
 
 const INDENT: &str = "  ";
@@ -45,6 +46,7 @@ impl std::error::Error for FormatError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
     Switch,
+    Match,
     Module,
     Class,
     Actor,
@@ -129,6 +131,7 @@ struct LexState {
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
@@ -168,6 +171,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
+        content =
+            canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -401,10 +406,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if starts_word(structural, "switch") {
+        if (starts_word(structural, "switch")
+            || (starts_word(structural, "match") && contains_word(structural, "over")))
+            && !structural.contains('{')
+        {
             next_order += 1;
             define_stack.push(DefineFrame {
-                kind: DefineKind::Switch,
+                kind: if starts_word(structural, "switch") {
+                    DefineKind::Switch
+                } else {
+                    DefineKind::Match
+                },
                 order: next_order,
                 brace_depth: brace_stack.len(),
                 keyword_depth: keyword_stack.len(),
@@ -522,6 +534,40 @@ fn push_blank_lines(out: &mut Vec<String>, count: usize) {
     }
     for _ in 0..count {
         out.push(String::new());
+    }
+}
+
+/// Normalize catch-all aliases only while directly inside a legacy
+/// end-delimited switch/match arm list. Nested arm bodies remain untouched.
+fn canonicalize_legacy_catchall(
+    line: &str,
+    scope: Option<&DefineFrame>,
+    brace_depth: usize,
+    lex: LexState,
+) -> String {
+    // Never rewrite source text inside a continued multiline comment
+    // or quoted literal. The structural lexer has not run yet.
+    if lex.block_comment || lex.quote.is_some() {
+        return line.to_owned();
+    }
+    let Some(scope) = scope.filter(|f| f.brace_depth == brace_depth) else {
+        return line.to_owned();
+    };
+    match scope.kind {
+        DefineKind::Switch if starts_word(line, "_") => {
+            format!("default{}", &line[1..])
+        }
+        DefineKind::Match if starts_word(line, "on") => {
+            let rest = line[2..].trim_start();
+            if starts_word(rest, "_") {
+                format!("default{}", &rest[1..])
+            } else if starts_word(rest, "default") {
+                rest.to_owned()
+            } else {
+                line.to_owned()
+            }
+        }
+        _ => line.to_owned(),
     }
 }
 
