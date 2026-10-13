@@ -129,3 +129,13 @@ fn comment_separated_prefixes_are_not_silently_normalized() {
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("const /* ownership */ int value = 1;"));
 }
+
+#[test]
+fn named_struct_declarations_are_left_unchanged_until_compiler_parity() {
+    let source = r#"define struct Pair as
+  const int left = 1;
+  val int right = 2;
+end
+"#;
+    assert_eq!(format_source(source).unwrap(), source);
+}
