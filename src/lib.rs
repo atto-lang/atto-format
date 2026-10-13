@@ -667,7 +667,7 @@ fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<us
         if ch == '/' && matches!(next, Some('/' | '*')) {
             return None;
         }
-        if matches!(ch, '"' | '\\'' | '`') {
+        if matches!(ch, '"' | '\'' | '`') {
             return None; // literals never start a field declaration
         }
         if ch == '<' {
