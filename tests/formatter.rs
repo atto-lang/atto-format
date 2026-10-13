@@ -1371,3 +1371,34 @@ end
     assert!(actual.contains("\"key\": \"=\""));
     assert_eq!(format_source(&actual).unwrap(), actual);
 }
+
+#[test]
+fn colon_normalization_preserves_legacy_binding_kind_fields_and_nested_code() {
+    let src = r#"define class Box as
+  pub let int balance = 100;
+  val string label = "fixed";
+  const int limit = 9;
+  let mut Array<int> items = new Array<int>();
+  final int identifier = 42
+  string name = "box"
+  change(): void {
+    let int n = 2;
+    balance = 3;
+  }
+end
+"#;
+    let got = format_source(src).unwrap();
+    for unchanged in [
+        "pub let int balance = 100;",
+        "val string label = \"fixed\";",
+        "const int limit = 9;",
+        "let mut Array<int> items = new Array<int>();",
+        "let int n = 2;",
+        "balance = 3;",
+    ] {
+        assert!(got.contains(unchanged), "rewrote an unrelated construct: {unchanged} in {got}");
+    }
+    assert!(got.contains("final int identifier: 42"));
+    assert!(got.contains("string name: \"box\""));
+    assert_eq!(got, format_source(&got).unwrap());
+}
