@@ -1390,7 +1390,7 @@ end
 }
 
 #[test]
-fn switch_and_match_underscore_aliases_format_as_default() {
+fn switch_underscore_maps_to_default_but_match_wildcard_is_preserved() {
     let source = r#"fnc choose(string v): string {
   switch v {
     _ { return "star"; }
@@ -1411,9 +1411,8 @@ fnc other(int n): int {
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("default {\n"), "{formatted}");
-    assert!(formatted.contains("default as m {\n"), "{formatted}");
-    assert!(!formatted.contains("on _ as m"), "{formatted}");
-    assert!(!formatted.contains("on default"), "{formatted}");
+    assert!(formatted.contains("on _ as m {\n"), "{formatted}");
+    assert!(formatted.contains("on default"), "{formatted}");
     assert!(
         formatted.contains("case \"foo\", \"car\", \"mar\" {"),
         "{formatted}"
@@ -1422,7 +1421,7 @@ fnc other(int n): int {
 }
 
 #[test]
-fn legacy_end_delimited_fallbacks_are_formatted_as_default() {
+fn legacy_switch_default_normalization_preserves_match_wildcard() {
     let source = r#"define module M as
 fnc choose(int n): int {
 switch n
@@ -1448,8 +1447,7 @@ end
 "#;
     let once = format_source(source).unwrap();
     assert!(once.contains("default -> {"), "{once}");
-    assert!(once.contains("default as other -> {"), "{once}");
-    assert!(!once.contains("on _ as other"), "{once}");
+    assert!(once.contains("on _ as other -> {"), "{once}");
     assert!(!once.contains("\n  _ ->"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
@@ -1472,7 +1470,7 @@ end
 "#;
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("on _ -> { phantom(); }"), "{formatted}");
-    assert!(formatted.contains("default -> {"), "{formatted}");
+    assert!(formatted.contains("on _ -> {"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
@@ -1494,7 +1492,7 @@ on 7 { return true; }
     let once = format_source(source).unwrap();
     assert!(once.contains("match<ret=bool> n over {"), "{once}");
     assert!(once.contains("do match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("on _ as remaining {"), "{once}");
     assert!(once.contains("default as remaining {"), "{once}");
-    assert!(!once.contains("on _ as remaining"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
