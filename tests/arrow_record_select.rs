@@ -36,6 +36,19 @@ fn typed_tuple_and_record_select_patterns_are_not_split_as_bodies() {
 }
 
 #[test]
+fn nested_record_type_in_select_header_keeps_single_arm_arrow() {
+    let src = r#"do select {
+  when readch data: const payload: {foo: {bar: int}} -> {
+    use(payload);
+  }
+}
+"#;
+    let once = format_source(src).expect("nested record projection");
+    assert!(once.contains("const payload: {foo: {bar: int}} -> {"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
 fn select_legacy_braced_body_remains_distinct_from_record_pattern() {
     let src = r#"select {
   when readch input: {
