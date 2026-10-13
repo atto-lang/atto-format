@@ -668,14 +668,20 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
 }
 
 
- // A direct class member, not an actor member, nested callable, or module binding.
- // Mirror the existing scope-order logic: the most recently opened container
- // determines whether a source line is a class field.
+// A direct class member, not an actor member, nested callable, or module binding.
+// Mirror the existing scope-order logic: the most recently opened container
+// determines whether a source line is a class field.
 fn in_direct_class_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
-    let latest_define = define_stack.last().map(|frame| (frame.order, frame.kind == DefineKind::Class));
-    let latest_brace = brace_stack.last().map(|frame| (frame.order, frame.kind == BraceKind::Class));
+    let latest_define = define_stack
+        .last()
+        .map(|frame| (frame.order, frame.kind == DefineKind::Class));
+    let latest_brace = brace_stack
+        .last()
+        .map(|frame| (frame.order, frame.kind == BraceKind::Class));
     match (latest_define, latest_brace) {
-        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((a, value)), Some((b, other))) => {
+            if a > b { value } else { other }
+        }
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
@@ -702,14 +708,17 @@ fn canonicalize_final_const_literal_field(line: &str, words: &[WordSpan]) -> Opt
         return None;
     }
     let tail = line[name.end..].trim_start();
-    let initializer = tail.strip_prefix(':').or_else(|| tail.strip_prefix('='))?.trim_start();
+    let initializer = tail
+        .strip_prefix(':')
+        .or_else(|| tail.strip_prefix('='))?
+        .trim_start();
     if !is_single_compile_time_literal(initializer, ty) {
         return None;
     }
     let token = words[i + 1];
     let mut result = String::with_capacity(line.len());
     result.push_str(&line[..token.start]);
-    result.push_str(&line[token.end..].trim_start_matches(|c: char| c.is_whitespace()));
+    result.push_str(line[token.end..].trim_start_matches(|c: char| c.is_whitespace()));
     Some(result)
 }
 
@@ -737,9 +746,13 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
             None => return false,
         }
     } else if ty == "bool" {
-        if initializer.starts_with("true") { 4 }
-        else if initializer.starts_with("false") { 5 }
-        else { return false }
+        if initializer.starts_with("true") {
+            4
+        } else if initializer.starts_with("false") {
+            5
+        } else {
+            return false;
+        }
     } else {
         let end = initializer.bytes().take_while(|b| b.is_ascii_digit() || *b == b'_').count();
         if end == 0 {
@@ -770,7 +783,11 @@ fn canonicalize_declaration_line(
     (instance_member
         .then(|| canonicalize_instance_method_fnc(line, &words))
         .flatten())
-    .or_else(|| (class_member.then(|| canonicalize_final_const_literal_field(line, &words))).flatten())
+    .or_else(|| {
+        class_member
+            .then(|| canonicalize_final_const_literal_field(line, &words))
+            .flatten()
+    })
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_actor_declaration(line, &words))
