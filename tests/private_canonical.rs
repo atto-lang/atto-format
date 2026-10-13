@@ -142,3 +142,38 @@ fn preserves_comments_when_removing_standalone_modifier() {
         "fnc foo() -> void { // keep\n}\n",
     );
 }
+
+#[test]
+fn does_not_strip_private_from_invalid_local_bindings() {
+    let source = r#"pub fnc example(): void {
+private val int invalid = 3;
+if true then
+private let int also_invalid = 4;
+fi
+}
+"#;
+    let got = format_source(source).unwrap();
+    assert!(got.contains("private val int invalid = 3;"), "{got}");
+    assert!(got.contains("private let int also_invalid = 4;"), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn private_after_other_instance_method_modifiers_is_stripped() {
+    let source = r#"define class Example as
+async private load(): int {
+return 1;
+}
+private async flush(): int {
+return 2;
+}
+abstract private required() => int;
+end
+"#;
+    let got = format_source(source).unwrap();
+    assert!(got.contains("  async load() -> int {"), "{got}");
+    assert!(got.contains("  async flush() -> int {"), "{got}");
+    assert!(got.contains("  abstract required() => int;"), "{got}");
+    assert!(!got.contains("private "), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
