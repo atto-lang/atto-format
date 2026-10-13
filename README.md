@@ -28,7 +28,8 @@ identical behavior.
   - interfaces/contracts/traits/structs/types: `[define] [pub] interface|contract|trait|struct|type Name ...`;
   - actor declarations/callables: explicit `pub` (if present), effects, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
   - package/module callables: `[pub] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
-  - explicit `private` is accepted by the compiler but **stripped by the formatter** on recognized declarations because private is the default (including class fields, constructors and methods). Only `pub` is retained. The formatter never adds `pub` to an unmarked declaration. When `define` exists it precedes `pub`; the `define` keyword itself remains optional;
+  - explicit `private` is accepted by the compiler but **stripped by the formatter** on recognized declarations because private is the default (including modules, class fields, constructors, type-first fields, and methods). Only `pub` is retained. The formatter never adds `pub` to an unmarked declaration. When `define` exists it precedes `pub`; the `define` keyword itself remains optional **except for module declarations**, which require `define`;
+  - `private define module Internal as ... end` and `define private module Internal as ... end` both canonicalize to `define module Internal as ... end`. `pub define module PublicAPI as ... end` canonicalizes to `define pub module PublicAPI as ... end`. Malformed/conflicting modifiers are preserved for compiler diagnostics, not silently legalized;
   - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
