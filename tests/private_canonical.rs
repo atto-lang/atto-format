@@ -26,6 +26,9 @@ fn strips_private_from_named_declarations_but_keeps_define_and_pub() {
         ("private type Alias = int;\n", "type Alias = int;\n"),
         ("pub define class Box as\nend\n", "define pub class Box as\nend\n"),
         ("define pub class Box as\nend\n", "define pub class Box as\nend\n"),
+        ("define private actor Worker as\nend\n", "define actor Worker as\nend\n"),
+        ("private define actor Worker as\nend\n", "define actor Worker as\nend\n"),
+        ("define pub actor Worker as\nend\n", "define pub actor Worker as\nend\n"),
         ("pub type Exported = int;\n", "pub type Exported = int;\n"),
     ] {
         canonical(input, expected);
@@ -64,6 +67,10 @@ return 7;
 private fnc legacy(): int {
 return 8;
 }
+async private modified(): int {
+return 9;
+}
+private abstract required() => int;
 private [Symbol.iterator](): Array<int> {
 return arr[1, 2];
 }
@@ -81,6 +88,8 @@ end
         "  get_secret() -> int {",
         "  method explicit() -> int {",
         "  legacy() -> int {",
+        "  async modified() -> int {",
+        "  abstract required() => int;",
         "  [Symbol.iterator]() -> Array<int> {",
         "  pub get_label() -> String {",
     ] {
