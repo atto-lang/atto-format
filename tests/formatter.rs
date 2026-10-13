@@ -1518,7 +1518,7 @@ end
   string bar: "100"
   Map<string, Array<int>> cache: factory()
   bar: string = "typed"
-  update(): void {
+  update() -> void {
     foo = 6;
     const value = struct{bar: "literal = stays"};
     return;
