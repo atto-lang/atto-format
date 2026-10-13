@@ -168,6 +168,14 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
+        // Field syntax is contextual: do not rewrite local const/let/val,
+        // actor state, method bodies, or trait signatures.
+        if keyword_stack.is_empty()
+            && in_direct_storage_container(&define_stack, &brace_stack)
+        {
+            content = canonicalize_storage_field_line(&content, lex)
+                .unwrap_or(content);
+        }
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -618,6 +626,125 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
+}
+
+// Class/struct member slots use final (fixed binding) and mut (mutable
+// referent), while lexical bindings retain const/val/let. Never apply this to
+// actor state, trait contracts, or code nested within a callable.
+fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, DefineKind::Class | DefineKind::Struct),
+    ));
+    let latest_brace = brace_stack.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, BraceKind::Class | BraceKind::Struct),
+    ));
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+// This is deliberately conservative until the formatter has a full parser:
+// only single-line, typed member declarations with recognizable prefixes and
+// an unambiguous initializer separator are normalized. Suspicious syntax,
+// nested expression prefixes, comments, and multiline signatures are left
+// unchanged for compiler diagnostics rather than rewritten by guesswork.
+fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
+    let equals = first_visible_char_index(line, '=', initial);
+    let colon = first_visible_char_index(line, ':', initial);
+    let separator = match (equals, colon) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => {
+            // Still canonicalize uninitialized legacy modifier spelling;
+            // validity remains the compiler's responsibility.
+            first_visible_char_index(line, ';', initial)?
+        }
+    };
+    let lhs = &line[..separator];
+    if lhs.contains(['(', ')', '{', '}', '[', ']'])
+        || lhs.contains("//") || lhs.contains("/*")
+        || lhs.contains("->") || lhs.contains("=>")
+    {
+        return None;
+    }
+    let words = visible_word_spans(lhs, initial);
+    if words.len() < 2 {
+        return None;
+    }
+    let mut cursor = 0usize;
+    let visibility = match &lhs[words[cursor].start..words[cursor].end] {
+        "pub" | "private" => {
+            cursor += 1;
+            Some(&lhs[words[0].start..words[0].end])
+        }
+        _ => None,
+    };
+    if cursor >= words.len() {
+        return None;
+    }
+    let binding = match &lhs[words[cursor].start..words[cursor].end] {
+        "const" | "final" => {
+            cursor += 1;
+            Some("final")
+        }
+        "val" => {
+            cursor += 1;
+            Some("final mut")
+        }
+        "let" => {
+            cursor += 1;
+            None
+        }
+        _ => None,
+    };
+    let mut mutable = false;
+    if cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut" {
+        if binding == Some("final mut") {
+            return None; // duplicate val mut remains a compiler error
+        }
+        mutable = true;
+        cursor += 1;
+    }
+    if words.len() < cursor + 2 {
+        return None; // not a typed field (e.g. legacy name: Type)
+    }
+    let field = words.last()?;
+    if !lhs[field.end..].trim().is_empty() {
+        return None;
+    }
+    let type_and_name = lhs[words[cursor].start..field.end].trim();
+    if type_and_name.is_empty() || type_and_name.contains("::") {
+        return None;
+    }
+    // The declaration type may contain generic args, but the text before
+    // the name must not itself contain an initializer or a callable.
+    let mut prefix = String::new();
+    if let Some(vis) = visibility {
+        prefix.push_str(vis);
+        prefix.push(' ');
+    }
+    if let Some(binding) = binding {
+        prefix.push_str(binding);
+        prefix.push(' ');
+    } else if mutable {
+        prefix.push_str("mut ");
+    }
+    if mutable && binding == Some("final") {
+        prefix.push_str("mut ");
+    }
+    prefix.push_str(type_and_name);
+    if line.as_bytes().get(separator) == Some(&b';') {
+        prefix.push_str(&line[separator..]);
+    } else {
+        prefix.push(':');
+        prefix.push(' ');
+        prefix.push_str(line[separator + 1..].trim_start());
+    }
+    Some(prefix)
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
