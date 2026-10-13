@@ -24,10 +24,11 @@ identical behavior.
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
-  - classes: `define [pub|private] [abstract] class Name ... as`;
-  - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
-  - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
-  - package/module callables: `[pub|private] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - classes: `[define] [pub] [abstract] class Name ... as`;
+  - interfaces/contracts/traits/structs/types: `[define] [pub] interface|contract|trait|struct|type Name ...`;
+  - actor declarations/callables: explicit `pub` (if present), effects, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
+  - package/module callables: `[pub] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - explicit `private` is accepted by the compiler but **stripped by the formatter** on recognized declarations because private is the default (including class fields, constructors and methods). Only `pub` is retained. The formatter never adds `pub` to an unmarked declaration. When `define` exists it precedes `pub`; the `define` keyword itself remains optional;
   - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
