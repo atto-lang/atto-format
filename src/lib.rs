@@ -407,7 +407,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
         if (starts_word(structural, "switch")
-            || (starts_word(structural, "match") && contains_word(structural, "over")))
+            || ((starts_word(structural, "match")
+                || starts_word(structural, "do match"))
+                && contains_word(structural, "over")))
             && !structural.contains('{')
         {
             next_order += 1;
