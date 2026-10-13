@@ -47,7 +47,7 @@ end
 "#;
     let expected = r#"define class Cache as
   final Map<int, int> frozen: new Map<int, int>();
-  final mut Map<int, int> writable = new Map<int, int>();
+  final mut Map<int, int> writable: new Map<int, int>();
 end
 "#;
     let actual = format_source(source).unwrap();
