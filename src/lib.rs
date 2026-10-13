@@ -715,6 +715,13 @@ fn canonicalize_declaration_line(
         return line.to_string();
     }
 
+    // Normalizing a modifier on a malformed local/nested declaration can
+    // erase the compiler diagnostic. All declaration rewrites must stay at
+    // source-root or direct module/class/actor scope.
+    if !declaration_scope {
+        return line.to_string();
+    }
+
     (instance_member
         .then(|| canonicalize_instance_method_fnc(line, &words))
         .flatten())
@@ -727,11 +734,7 @@ fn canonicalize_declaration_line(
             .then(|| canonicalize_private_instance_method(line, &words))
             .flatten()
     })
-    .or_else(|| {
-        declaration_scope
-            .then(|| canonicalize_private_member(line, &words, instance_member))
-            .flatten()
-    })
+    .or_else(|| canonicalize_private_member(line, &words, instance_member))
     .unwrap_or_else(|| line.to_string())
 }
 
@@ -1313,12 +1316,15 @@ fn canonicalize_private_member(
         && (suffix.starts_with('(') || suffix.starts_with('<'));
     // Fields declared with name-first colon syntax are a class-only feature.
     let is_colon_field = instance_member && suffix.starts_with(':');
+    let is_type_first_field =
+        instance_member && is_type_first_class_field(line, words);
 
     if !(is_binding
         || is_constructor
         || is_explicit_method
         || is_implicit_method
-        || is_colon_field)
+        || is_colon_field
+        || is_type_first_field)
     {
         return None;
     }
@@ -1326,6 +1332,45 @@ fn canonicalize_private_member(
     rewritten.push_str(&line[..first.start]);
     rewritten.push_str(&line[second.start..]);
     Some(rewritten)
+}
+
+// Compiler class fields also accept type-first spelling, for example:
+//   private int count: 1
+//   private Map<String, int> lookup = values
+// Unlike the name-first 'private count: int' spelling, the assignment token
+// follows the *third or later* identifier. Restrict this to simple type syntax
+// with balanced angle/bracket delimiters. Do not cross comments or arbitrary
+// expressions to remove an explicit modifier from malformed code.
+fn is_type_first_class_field(line: &str, words: &[WordSpan]) -> bool {
+    if words.len() < 3 {
+        return false;
+    }
+    let type_start = words[1].start;
+    for field in words.iter().skip(2) {
+        let suffix = line[field.end..].trim_start();
+        if !suffix.starts_with(':') && !suffix.starts_with('=') {
+            continue;
+        }
+        let type_prefix = &line[type_start..field.start];
+        if type_prefix.contains("/*") || type_prefix.contains("//") {
+            return false;
+        }
+        let mut angles = 0usize;
+        let mut brackets = 0usize;
+        for ch in type_prefix.chars() {
+            match ch {
+                '<' => angles += 1,
+                '>' if angles > 0 => angles -= 1,
+                '[' => brackets += 1,
+                ']' if brackets > 0 => brackets -= 1,
+                c if c.is_alphanumeric() || c == '_' || c.is_whitespace()
+                    || matches!(c, ',' | '.' | '&' | '?' | '|' | '!') => {}
+                _ => return false,
+            }
+        }
+        return angles == 0 && brackets == 0;
+    }
+    false
 }
 
 fn set_once(value: &mut bool) -> bool {
