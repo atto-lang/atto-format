@@ -665,7 +665,7 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
         }
     };
     let lhs = &line[..separator];
-    if lhs.contains(['(', ')', '{', '}', '[', ']'])
+    if lhs.chars().any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
         || lhs.contains("//") || lhs.contains("/*")
         || lhs.contains("->") || lhs.contains("=>")
     {
