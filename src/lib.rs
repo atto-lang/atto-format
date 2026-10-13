@@ -652,18 +652,46 @@ fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[Brac
 // an unambiguous initializer separator are normalized. Suspicious syntax,
 // nested expression prefixes, comments, and multiline signatures are left
 // unchanged for compiler diagnostics rather than rewritten by guesswork.
-fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
-    let equals = first_visible_char_index(line, '=', initial);
-    let colon = first_visible_char_index(line, ':', initial);
-    let separator = match (equals, colon) {
-        (Some(a), Some(b)) => a.min(b),
-        (Some(a), None) | (None, Some(a)) => a,
-        (None, None) => {
-            // Still canonicalize uninitialized legacy modifier spelling;
-            // validity remains the compiler's responsibility.
-            first_visible_char_index(line, ';', initial)?
+// Only a top-level declaration separator may become a field initializer.
+// Named generic arguments use '=' (e.g. Box<messages=Message>) and must never
+// be mistaken for the member initializer; nested type contracts may use ':'.
+// Leave malformed, commented or callable prefixes untouched.
+fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<usize> {
+    if initial.block_comment || initial.quote.is_some() {
+        return None;
+    }
+    let mut chars = line.char_indices().peekable();
+    let mut generic_depth = 0usize;
+    while let Some((at, ch)) = chars.next() {
+        let next = chars.peek().map(|(_, c)| *c);
+        if ch == '/' && matches!(next, Some('/' | '*')) {
+            return None;
         }
-    };
+        if matches!(ch, '"' | '\\'' | '`') {
+            return None; // literals never start a field declaration
+        }
+        if ch == '<' {
+            generic_depth += 1;
+            continue;
+        }
+        if ch == '>' {
+            generic_depth = generic_depth.checked_sub(1)?;
+            continue;
+        }
+        if generic_depth == 0 {
+            if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
+                return None; // callable or compound non-field prefix
+            }
+            if matches!(ch, '=' | ':' | ';') {
+                return Some(at);
+            }
+        }
+    }
+    None
+}
+
+fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
+    let separator = canonical_storage_field_separator(line, initial)?;
     let lhs = &line[..separator];
     if lhs.chars().any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
         || lhs.contains("//") || lhs.contains("/*")
