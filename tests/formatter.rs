@@ -1477,7 +1477,7 @@ end
 #[test]
 fn typed_match_return_contracts_preserve_named_parameter_and_result_mode() {
     let source = r#"fnc choose(int n): bool {
-match<ret=bool> n over {
+return match<ret=bool> n over {
 on 7 { return true; }
 on _ as remaining { return false; }
 }
