@@ -1319,3 +1319,55 @@ end
     );
     assert_eq!(format_source(&result).unwrap(), result);
 }
+
+#[test]
+fn colon_initializers_are_canonical_only_for_direct_type_first_class_fields() {
+    let src = r#"define class Foo as
+final int foo = 5
+string bar = "100"
+Map<string, Array<int>> cache = factory()
+bar: string = "typed"
+fnc update(): void {
+  foo = 6;
+  const value = struct{bar: "literal = stays"};
+  return;
+}
+end
+"#;
+    let expected = r#"define class Foo as
+  final int foo: 5
+  string bar: "100"
+  Map<string, Array<int>> cache: factory()
+  bar: string = "typed"
+  update(): void {
+    foo = 6;
+    const value = struct{bar: "literal = stays"};
+    return;
+  }
+end
+"#;
+    let actual = format_source(src).unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(format_source(&actual).unwrap(), actual);
+}
+
+#[test]
+fn colon_initializer_keeps_comments_strings_and_function_assignments_untouched() {
+    let src = r#"define class C as
+  int one = 3 // = inside a comment
+  string label = "a=b:c"
+  int two: 4
+  change(): void {
+    one = 9;
+    const v = {"key": "="};
+  }
+end
+"#;
+    let actual = format_source(src).unwrap();
+    assert!(actual.contains("int one: 3 // = inside a comment"));
+    assert!(actual.contains("string label: \"a=b:c\""));
+    assert!(actual.contains("int two: 4"));
+    assert!(actual.contains("one = 9;"));
+    assert!(actual.contains("\"key\": \"=\""));
+    assert_eq!(format_source(&actual).unwrap(), actual);
+}
