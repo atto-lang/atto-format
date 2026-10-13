@@ -8,7 +8,7 @@ identical behavior.
 
 ## Canonical concrete field syntax (pre-1.0)
 
-In direct class and named-struct member declarations, use `final` to seal
+In direct class member declarations, use `final` to seal
 the member slot and `mut` to permit mutation through a referenced value.
 Local binding declarations retain `const` / `val` / `let` and `=`.
 
@@ -24,8 +24,8 @@ The formatter migrates typed member `let T x = value` to `T x: value`,
 `const T x = value` to `final T x: value`, and
 `val T x = value` to `final mut T x: value` (with analogous
 `const mut` and `let mut` forms). Rewrites are limited to recognized
-direct class/struct members; ambiguous declarations are preserved for
-compiler diagnostics. No change is made to actor state, trait signatures,
+direct class members; ambiguous declarations are preserved for
+compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
 or lexical declarations inside callables.
 
 The language's final initialization rules are compiler constraints, not
