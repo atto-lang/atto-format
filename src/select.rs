@@ -275,7 +275,52 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 if header == close || tokens[header].text != ":" {
                     return Err(error(tokens[arm].start, "select arm requires ':'"));
                 }
+                // The Java parser uses -> as the unambiguous delimiter
+                // after a typed name or a {record}/[tuple] projection. Find
+                // that delimiter without mistaking the pattern's braces for
+                // the body. Legacy bare-body arms remain supported below.
+                let mut explicit_arrow = None;
+                let mut probe = header + 1;
+                let mut head_nesting = Vec::new();
+                while probe < close {
+                    match tokens[probe].text {
+                        "->" if head_nesting.is_empty() => {
+                            explicit_arrow = Some(probe);
+                            break;
+                        }
+                        "{" if head_nesting.is_empty() => {
+                            let Some(end) = matching_brace(&tokens, probe).filter(|end| *end < close) else {
+                                return Err(error(tokens[probe].start, "unclosed record projection or select arm body"));
+                            };
+                            // Header projections can be followed by a binding
+                            // name (Type name) and an optional mut modifier.
+                            // A legacy braced body, by contrast, is not
+                            // followed by a header-level ->.
+                            let next_arrow = (end + 1..=(end + 3).min(close))
+                                .find(|&idx| tokens[idx].text == "->");
+                            if let Some(arrow) = next_arrow {
+                                explicit_arrow = Some(arrow);
+                            }
+                            break;
+                        }
+                        "(" | "[" => head_nesting.push(tokens[probe].text),
+                        ")" | "]" if !pop_matching(&mut head_nesting, tokens[probe].text) => {
+                            return Err(error(tokens[probe].start, "mismatched delimiter in select binding"));
+                        }
+                        ")" | "]" => {}
+                        _ => {}
+                    }
+                    probe += 1;
+                }
+
                 let mut body = header + 1;
+                if let Some(arrow) = explicit_arrow {
+                    body = arrow + 1;
+                    if body >= close || tokens[body].text != "{" {
+                        return Err(error(tokens[arrow].start, "select arm '->' requires a braced body"));
+                    }
+                    (body, tokens[arrow].end)
+                } else {
                 if (read || await_future)
                     && tokens
                         .get(body)
@@ -309,6 +354,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     tokens[body - 1].end
                 };
                 (body, header_end)
+                }
             };
             if body < close && tokens[body].text == "{" {
                 let end = matching_brace(&tokens, body)
