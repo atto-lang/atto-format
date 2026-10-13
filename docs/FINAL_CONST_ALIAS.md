@@ -8,13 +8,20 @@ class members and preserves comments/strings. It does **not** rewrite actors,
 locals, module bindings, method bodies, arithmetic, negatives, references,
 calls, mutable referents, or more complex field types.
 
-The Java/GraalVM parser should admit literal-only `final const` class fields
-as the same fixed slot as `final`, but reject nonliteral initializers with
-an explicit diagnostic. LLVM admits only its existing i64-literal field subset.
-Neither compiler currently has an audited general-purpose compile-time
-constant evaluator for class fields. Arithmetic, named constants, symbol
-literals, type aliases, and cross-module values need a shared typed
-constant-evaluation contract before expanding this rewrite.
+The Java/GraalVM compiler PR #890 now records the compile-time requirement
+separately from final storage and validates a bounded, side-effect-free AST
+expression subset: checked integer arithmetic, boolean operations,
+comparisons, pure branches, strings, and Symbol literals. Calls, imports,
+mutable expressions, unsupported operators, runtime references and over-budget
+expressions fail closed; no user code runs during validation. Legacy const
+bindings keep their original read-only semantics. **This does not yet fold
+the initializer to a literal or establish full compile-time constant inlining.**
+
+LLVM PR #360 still admits its existing i64-literal subset only. The formatter
+deliberately leaves nonliteral expressions (including Java-accepted arithmetic)
+unchanged until a compiler-backed constant proof interface exists. Named
+constants, cross-module references, cycles, compile-time evaluation of
+containers, static constant shadowing, and backend parity remain outstanding.
 
 **Important migration warning:** The existing Java compiler historically uses
 `const` as a fixed/read-only binding (including runtime initialized locals).
