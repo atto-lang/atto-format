@@ -693,6 +693,14 @@ fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<us
 
 fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
     let separator = canonical_storage_field_separator(line, initial)?;
+    // A legacy uninitialized val field may still be filled in its class
+    // constructor. Rewriting it to final mut would manufacture an invalid
+    // declaration before the coordinated breaking constructor migration.
+    // Preserve ALL uninitialized member spellings until both compilers
+    // enforce declaration-site initialization consistently.
+    if line.as_bytes().get(separator) == Some(&b';') {
+        return None;
+    }
     let lhs = &line[..separator];
     if lhs.chars().any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
         || lhs.contains("//") || lhs.contains("/*")
