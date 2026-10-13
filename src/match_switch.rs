@@ -21,8 +21,8 @@ fn arm_starts(kind: Kind, text: &str) -> bool {
 fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
     let mut parens = 0usize;
     let mut saw_over = false;
-    for i in at + 1..tokens.len() {
-        match tokens[i].text {
+    for (i, token) in tokens.iter().enumerate().skip(at + 1) {
+        match token.text {
             "(" => parens += 1,
             ")" => parens = parens.saturating_sub(1),
             // A legacy keyword-delimited switch/match reaches an arm label
