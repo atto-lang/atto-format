@@ -1145,9 +1145,23 @@ fn canonicalize_private_member(
 ) -> Option<String> {
     let first = *words.first()?;
     let second = *words.get(1)?;
-    if &line[first.start..first.end] != "private"
-        || !plain_word_prefix(line, &words[..2])
+    if &line[first.start..first.end] != "private" {
+        return None;
+    }
+    // Symbol-key methods start with '[' rather than an identifier. Inspect
+    // this spelling before the ordinary whitespace-only word-prefix check.
+    let after_private = line[first.end..].trim_start();
+    if instance_member && after_private.starts_with("[Symbol.")
+        && after_private.find(']').is_some_and(|close| {
+            after_private[close + 1..].trim_start().starts_with('(')
+        })
     {
+        let mut rewritten = String::with_capacity(line.len());
+        rewritten.push_str(&line[..first.start]);
+        rewritten.push_str(after_private);
+        return Some(rewritten);
+    }
+    if !plain_word_prefix(line, &words[..2]) {
         return None;
     }
     let token = &line[second.start..second.end];
@@ -1159,10 +1173,6 @@ fn canonicalize_private_member(
             plain_word_prefix(line, &words[..3])
                 && line[name.end..].trim_start().starts_with('(')
         });
-    let is_symbol_method = instance_member && line[second.start..].starts_with("[Symbol.")
-        && line[second.start..].find(']').is_some_and(|close| {
-            line[second.start + close + 1..].trim_start().starts_with('(')
-        });
     let is_implicit_method = instance_member
         && token != "pub"
         && token != "private"
@@ -1170,7 +1180,7 @@ fn canonicalize_private_member(
     // Fields declared with name-first colon syntax are a class-only feature.
     let is_colon_field = instance_member && suffix.starts_with(':');
 
-    if !(is_binding || is_constructor || is_explicit_method || is_symbol_method
+    if !(is_binding || is_constructor || is_explicit_method
         || is_implicit_method || is_colon_field)
     {
         return None;
