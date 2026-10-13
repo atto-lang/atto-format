@@ -131,6 +131,7 @@ struct LexState {
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = canonicalize_hash_symbol_quotes(&normalized);
     let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
@@ -1815,6 +1816,121 @@ fn opens_conditional_block(line: &str) -> bool {
 fn opens_do_block(line: &str) -> bool {
     let t = line.trim_end();
     (t.ends_with(" do") || t.ends_with("; do")) && !starts_word(t.trim_start(), "done")
+}
+
+/// Canonicalize only single-quoted # Symbols; normal strings/comments remain
+/// byte-for-byte unchanged. The Oreslang lexer accepts both quote styles,
+/// but the formatter renders the Symbol's decoded name with double quotes.
+///
+/// This is deliberately a source-aware pass, not a global quote replacement:
+/// it tracks nested block comments, line comments, strings and backtick literals.
+fn canonicalize_hash_symbol_quotes(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut result = String::with_capacity(source.len());
+    let mut index = 0usize;
+    let mut block_depth = 0usize;
+    let mut quote: Option<u8> = None;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let next = bytes.get(index + 1).copied();
+        if block_depth > 0 {
+            if byte == b'/' && next == Some(b'*') {
+                block_depth += 1;
+                result.push_str("/*");
+                index += 2;
+                continue;
+            }
+            if byte == b'*' && next == Some(b'/') {
+                block_depth -= 1;
+                result.push_str("*/");
+                index += 2;
+                continue;
+            }
+        } else if let Some(delimiter) = quote {
+            if byte == b'\\' && next.is_some() {
+                result.push_str(&source[index..index + 2]);
+                index += 2;
+                continue;
+            }
+            if byte == delimiter {
+                quote = None;
+            }
+        } else {
+            if byte == b'/' && next == Some(b'/') {
+                if let Some(end) = source[index..].find('\n') {
+                    result.push_str(&source[index..index + end + 1]);
+                    index += end + 1;
+                } else {
+                    result.push_str(&source[index..]);
+                    break;
+                }
+                continue;
+            }
+            if byte == b'/' && next == Some(b'*') {
+                block_depth = 1;
+                result.push_str("/*");
+                index += 2;
+                continue;
+            }
+            if byte == b'#' && next == Some(b'\'') {
+                if let Some((end, canonical)) = canonicalize_single_quoted_symbol(source, index) {
+                    result.push_str(&canonical);
+                    index = end;
+                    continue;
+                }
+            }
+            if matches!(byte, b'\'' | b'"' | b'`') {
+                quote = Some(byte);
+            }
+        }
+        let ch = source[index..].chars().next().expect("valid UTF-8");
+        result.push(ch);
+        index += ch.len_utf8();
+    }
+    result
+}
+
+/// Return the byte index after the closing quote and its equivalent
+/// double-quoted hash Symbol. Malformed escapes stay unchanged for the
+/// compiler's normal diagnostics, rather than being silently repaired.
+fn canonicalize_single_quoted_symbol(source: &str, start: usize) -> Option<(usize, String)> {
+    let mut result = String::from("#\"");
+    let mut chars = source[start + 2..].char_indices();
+    while let Some((offset, ch)) = chars.next() {
+        match ch {
+            '\'' => {
+                result.push('"');
+                return Some((start + 2 + offset + 1, result));
+            }
+            '\n' | '\r' => return None,
+            '"' => result.push_str("\\\""),
+            '\\' => {
+                let (_, escaped) = chars.next()?;
+                match escaped {
+                    '\'' => result.push('\''),
+                    '"' => result.push_str("\\\""),
+                    '\\' => result.push_str("\\\\"),
+                    'n' | 'r' | 't' => {
+                        result.push('\\');
+                        result.push(escaped);
+                    }
+                    'u' => {
+                        result.push_str("\\u");
+                        for _ in 0..4 {
+                            let (_, hex) = chars.next()?;
+                            if !hex.is_ascii_hexdigit() {
+                                return None;
+                            }
+                            result.push(hex);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => result.push(ch),
+        }
+    }
+    None
 }
 
 fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
