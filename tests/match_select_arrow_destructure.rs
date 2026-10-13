@@ -40,7 +40,7 @@ end
 #[test]
 fn legacy_brace_only_select_arm_is_still_formatable() {
     let source = r#"fnc receive(Channel<int> messages) -> void {
-select {
+do select {
 case readch messages: val msg { consume(msg); }
 }
 }
