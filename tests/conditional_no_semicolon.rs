@@ -39,11 +39,18 @@ fn condition_separator_whitespace_is_canonical() {
 }
 
 #[test]
-fn final_field_spelling_is_preserved_until_compiler_admission() {
+fn final_field_initializers_canonicalize_only_the_admitted_type_first_form() {
     let source = r#"define class Cache as
   final Map<int, int> frozen = new Map<int, int>();
   final mut Map<int, int> writable = new Map<int, int>();
 end
 "#;
-    assert_eq!(format_source(source).unwrap(), source);
+    let expected = r#"define class Cache as
+  final Map<int, int> frozen: new Map<int, int>();
+  final mut Map<int, int> writable = new Map<int, int>();
+end
+"#;
+    let actual = format_source(source).unwrap();
+    assert_eq!(actual, expected);
+    assert!(is_formatted(expected).unwrap());
 }
