@@ -633,10 +633,20 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
 // '=' rewriting to *direct* class members, never methods, local assignments,
 // object/map literals, match arms, comments, or name-first type annotations.
 fn in_direct_class_container(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
-    let newest_define = defines.last().map(|frame| (frame.order, frame.kind == DefineKind::Class));
-    let newest_brace = braces.last().map(|frame| (frame.order, frame.kind == BraceKind::Class));
+    let newest_define = defines
+        .last()
+        .map(|frame| (frame.order, frame.kind == DefineKind::Class));
+    let newest_brace = braces
+        .last()
+        .map(|frame| (frame.order, frame.kind == BraceKind::Class));
     match (newest_define, newest_brace) {
-        (Some((a, v)), Some((b, w))) => if a > b { v } else { w },
+        (Some((a, v)), Some((b, w))) => {
+            if a > b {
+                v
+            } else {
+                w
+            }
+        }
         (Some((_, v)), None) | (None, Some((_, v))) => v,
         (None, None) => false,
     }
@@ -647,7 +657,8 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
         return line.to_string();
     };
     // Reject operators and malformed/incomplete declarations.
-    if line[equal..].starts_with("==") || line[equal..].starts_with("=>")
+    if line[equal..].starts_with("==")
+        || line[equal..].starts_with("=>")
         || line[equal + 1..].trim().is_empty()
     {
         return line.to_string();
@@ -655,8 +666,7 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
     let left = line[..equal].trim();
     let mut header = left;
     for modifier in ["pub", "private"] {
-        if header.starts_with(modifier)
-            && header[modifier.len()..].starts_with(char::is_whitespace)
+        if header.starts_with(modifier) && header[modifier.len()..].starts_with(char::is_whitespace)
         {
             header = header[modifier.len()..].trim_start();
             break;
@@ -675,12 +685,16 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
             '<' => angle += 1,
             '>' => {
                 angle -= 1;
-                if angle < 0 { return line.to_string(); }
+                if angle < 0 {
+                    return line.to_string();
+                }
             }
             '[' => square += 1,
             ']' => {
                 square -= 1;
-                if square < 0 { return line.to_string(); }
+                if square < 0 {
+                    return line.to_string();
+                }
             }
             _ if ch.is_whitespace() && angle == 0 && square == 0 => split = Some(at),
             _ => {}
@@ -689,25 +703,46 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
     if angle != 0 || square != 0 {
         return line.to_string();
     }
-    let Some(split) = split else { return line.to_string(); };
+    let Some(split) = split else {
+        return line.to_string();
+    };
     let ty = header[..split].trim();
     let field = header[split..].trim();
     let valid_name = |name: &str| {
         let mut chars = name.chars();
-        chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        chars
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
             && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     };
     // A legacy declaration like 'pub val int balance = 100' has a type
     // followed by a binding modifier. Rewriting it to ':' produces invalid
     // Oreslang. Inspect the *leading type word*, not the whole type string.
     let head = ty.split_whitespace().next().unwrap_or("");
-    if ty.is_empty() || !valid_name(field)
-        || matches!(head,
-            "let" | "val" | "const" | "mut" | "static" | "fnc" |
-            "routine" | "return" | "define" | "method" | "constructor" |
-            "async" | "suspend" | "suspends" | "pub" | "private")
-        || !ty.chars().all(|ch| ch.is_ascii_alphanumeric()
-            || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' '))
+    if ty.is_empty()
+        || !valid_name(field)
+        || matches!(
+            head,
+            "let"
+                | "val"
+                | "const"
+                | "mut"
+                | "static"
+                | "fnc"
+                | "routine"
+                | "return"
+                | "define"
+                | "method"
+                | "constructor"
+                | "async"
+                | "suspend"
+                | "suspends"
+                | "pub"
+                | "private"
+        )
+        || !ty.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' ')
+        })
     {
         return line.to_string();
     }
