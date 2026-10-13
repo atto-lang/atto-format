@@ -681,6 +681,9 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
+    .or_else(|| {
+        instance_member.then(|| canonicalize_private_instance_method(line, &words)).flatten()
+    })
     .or_else(|| canonicalize_private_member(line, &words, instance_member))
     .unwrap_or_else(|| line.to_string())
 }
@@ -888,6 +891,7 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
                 | "untrusted"
                 | "actor"
                 | "isoactor"
+                | "define"
                 | "fnc"
                 | "routine"
         )
@@ -907,6 +911,7 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     }
 
     let mut visibility: Option<&str> = None;
+    let mut saw_define = false;
     let mut is_static = false;
     let mut is_async = false;
     let mut is_generator = false;
@@ -922,6 +927,7 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     for span in prefix {
         let word = &line[span.start..span.end];
         let duplicate = match word {
+            "define" => set_once(&mut saw_define),
             "pub" | "private" => {
                 if visibility.is_some() {
                     true
@@ -970,7 +976,14 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     }
 
     let actor_marker = actor_marker?;
+    if saw_define && kind.is_some() {
+        // Defined actors are named types, not actor callables.
+        return None;
+    }
     let mut canonical = Vec::new();
+    if saw_define {
+        canonical.push("define");
+    }
     if visibility == Some("pub") {
         canonical.push("pub");
     }
@@ -1132,6 +1145,58 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     canonical.push(kind);
 
     Some(rewrite_word_prefix(line, prefix, &canonical))
+}
+
+// Strip a single redundant 'private' from recognized bare instance method
+// signatures, including their other modifiers. Never mask conflicting 'pub'
+// or syntax separated by comments.
+fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_modifier = |word: &str| matches!(
+        word, "pub" | "private" | "async" | "suspend" | "suspends"
+            | "critical" | "structural" | "abstract" | "trap"
+    );
+    let prefix_len = words.iter()
+        .take_while(|span| is_modifier(&line[span.start..span.end]))
+        .count();
+    if prefix_len == 0 || prefix_len >= words.len() {
+        return None;
+    }
+    let prefix = &words[..prefix_len];
+    if !plain_word_prefix(line, &words[..=prefix_len]) {
+        return None;
+    }
+    let modifiers: Vec<&str> = prefix.iter().map(|s| &line[s.start..s.end]).collect();
+    if modifiers.iter().filter(|&&s| s == "private").count() != 1
+        || modifiers.contains(&"pub") {
+        return None;
+    }
+    let target = words[prefix_len];
+    let target_word = &line[target.start..target.end];
+    let signature = if target_word == "method" {
+        words.get(prefix_len + 1).is_some_and(|name| {
+            plain_word_prefix(line, &words[..=prefix_len + 1])
+                && line[name.end..].trim_start().starts_with('(')
+        })
+    } else if target_word == "constructor" {
+        line[target.end..].trim_start().starts_with('(')
+    } else if matches!(target_word, "fnc" | "routine" | "static" | "class" | "actor") {
+        false
+    } else {
+        line[target.end..].trim_start().starts_with('(')
+            || line[target.end..].trim_start().starts_with('<')
+    };
+    if !signature {
+        return None;
+    }
+    let rest: Vec<&str> = modifiers.into_iter().filter(|s| *s != "private").collect();
+    let mut out = String::with_capacity(line.len());
+    out.push_str(&line[..prefix[0].start]);
+    if !rest.is_empty() {
+        out.push_str(&rest.join(" "));
+        out.push(' ');
+    }
+    out.push_str(&line[target.start..]);
+    Some(out)
 }
 
 // Outside explicitly exported declarations, private visibility is implicit.
