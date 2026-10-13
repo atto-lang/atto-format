@@ -35,13 +35,13 @@ fn strips_private_from_named_declarations_but_keeps_define_and_pub() {
 #[test]
 fn strips_private_from_functions_and_actor_callables() {
     for (input, expected) in [
-        ("private fnc work(): void {\n}\n", "fnc work(): void {\n}\n"),
-        ("private static fnc create(): int {\n}\n", "static fnc create(): int {\n}\n"),
-        ("private async fnc load(): void {\n}\n", "async fnc load(): void {\n}\n"),
-        ("private routine stop(): void {\n}\n", "routine stop(): void {\n}\n"),
-        ("private actor fnc send(): void {\n}\n", "actor fnc send(): void {\n}\n"),
+        ("private fnc work(): void {\n}\n", "fnc work() -> void {\n}\n"),
+        ("private static fnc create(): int {\n}\n", "static fnc create() -> int {\n}\n"),
+        ("private async fnc load(): void {\n}\n", "async fnc load() -> void {\n}\n"),
+        ("private routine stop(): void {\n}\n", "routine stop() -> void {\n}\n"),
+        ("private actor fnc send(): void {\n}\n", "actor fnc send() -> void {\n}\n"),
         ("private untrusted actor fnc receive(): void {\n}\n",
-         "untrusted actor fnc receive(): void {\n}\n"),
+         "untrusted actor fnc receive() -> void {\n}\n"),
     ] {
         canonical(input, expected);
     }
@@ -130,6 +130,6 @@ fn conflicting_or_obscured_prefixes_stay_for_compiler_errors() {
 fn preserves_comments_when_removing_standalone_modifier() {
     canonical(
         "private fnc foo(): void { // keep\n}\n",
-        "fnc foo(): void { // keep\n}\n",
+        "fnc foo() -> void { // keep\n}\n",
     );
 }
