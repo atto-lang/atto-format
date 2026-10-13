@@ -762,6 +762,11 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
         if digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
             return false;
         }
+        // Only normalize a lexical integer that the compiler can represent.
+        // In particular never erase 'const' from an overflowing i64 literal.
+        if digits.replace('_', "").parse::<i64>().is_err() {
+            return false;
+        }
         end
     };
     let tail = initializer[end..].trim_start();
