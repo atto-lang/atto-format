@@ -29,6 +29,7 @@ final const int computed: calculate()
 final const int arithmetic: 1 + 2
 final const int negative: -5
 final const int suffix: 5 + next()
+final const int overflowing: 9223372036854775808
 final const mut Array<int> unsafe: [1, 2]
 const int explicit_constant = 7;
 fnc method(): void {
@@ -42,6 +43,10 @@ end
     assert!(formatted.contains("final const int arithmetic: 1 + 2"), "{formatted}");
     assert!(formatted.contains("final const int negative: -5"), "{formatted}");
     assert!(formatted.contains("final const int suffix: 5 + next()"), "{formatted}");
+    assert!(
+        formatted.contains("final const int overflowing: 9223372036854775808"),
+        "{formatted}"
+    );
     assert!(formatted.contains("final const mut Array<int> unsafe:"), "{formatted}");
     assert!(formatted.contains("const int explicit_constant = 7;"), "{formatted}");
     assert!(formatted.contains("final const int local: 3;"), "{formatted}");
