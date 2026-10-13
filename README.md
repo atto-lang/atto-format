@@ -12,6 +12,10 @@ identical behavior.
 - static `select`, `nb select`, and `try select` arms are indented one level;
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
 - LF line endings, no trailing whitespace, one final newline;
+- direct type-first class field initializers canonically use `:`: `final int foo = 5`
+  becomes `final int foo: 5`, and `string bar = "100"` becomes
+  `string bar: "100"`; ordinary assignments, name-first declarations,
+  comments, string literals, and nested method bodies are never rewritten;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
 - in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
