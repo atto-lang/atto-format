@@ -691,8 +691,15 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
         chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
             && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     };
+    // A legacy declaration like 'pub val int balance = 100' has a type
+    // followed by a binding modifier. Rewriting it to ':' produces invalid
+    // Oreslang. Inspect the *leading type word*, not the whole type string.
+    let head = ty.split_whitespace().next().unwrap_or("");
     if ty.is_empty() || !valid_name(field)
-        || matches!(ty, "let" | "val" | "const" | "static" | "fnc" | "return")
+        || matches!(head,
+            "let" | "val" | "const" | "mut" | "static" | "fnc" |
+            "routine" | "return" | "define" | "method" | "constructor" |
+            "async" | "suspend" | "suspends" | "pub" | "private")
         || !ty.chars().all(|ch| ch.is_ascii_alphanumeric()
             || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' '))
     {
