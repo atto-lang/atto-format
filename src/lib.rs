@@ -168,7 +168,13 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
-        if keyword_stack.is_empty() && in_direct_class_container(&define_stack, &brace_stack) {
+        // A multiline method's parameter list has no body brace yet, so it
+        // still looks like a direct class member. Never rewrite parameter
+        // defaults as field initializers while those parens remain open.
+        if keyword_stack.is_empty()
+            && pending_method_parameter_depth == 0
+            && in_direct_class_container(&define_stack, &brace_stack)
+        {
             content = canonicalize_class_field_initializer(&content, lex);
         }
         let mut structural_lex = lex;
