@@ -845,7 +845,7 @@ return;
 "#;
     let expected = r#"select {
   when readch inbox: val value {
-    nb select {
+    do nb select {
       when writech replies, value: { // sent
         stdio.println("case default: { } λ");
       }
@@ -1073,7 +1073,7 @@ const mut editable = make();
 val owned = make();
 let replaceable = make();
 let mut flexible = make();
-select {
+do select {
 case readch input: const job {
 consume(job);
 }
@@ -1323,7 +1323,7 @@ end
 fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
     let source = r#"
 pub fnc use_switch(string v) : string {
-switch (v) {
+do switch (v) {
 _ {
 return "star";
 },
@@ -1348,7 +1348,7 @@ return "bar";
 fn braced_and_end_delimited_match_variants_format_idempotently() {
     let braced = r#"define actor Counter as
 receive(ActorMail<MessagePatterns> mail): void {
-match mail.value over {
+do match mail.value over {
 on is MessagePatterns.Reset as m {
 handle(m.reset);
 },
@@ -1373,7 +1373,7 @@ end
     assert_eq!(format_source(&canonical).unwrap(), canonical);
 
     let end_delimited = r#"fnc f(Option<int> v): int {
-match v over
+do match v over
 on Some(value) {
 return value;
 }
@@ -1392,19 +1392,19 @@ end
 #[test]
 fn switch_underscore_maps_to_default_but_match_wildcard_is_preserved() {
     let source = r#"fnc choose(string v): string {
-  switch v {
+  do switch v {
     _ { return "star"; }
     case "foo", "car", "mar" { return "bar"; }
   }
 }
 fnc check(int n): int {
-  match n over {
+  do match n over {
     on _ as m { return m; }
     on 7 { return 42; }
   }
 }
 fnc other(int n): int {
-  match n over {
+  do match n over {
     on default { return 0; }
   }
 }
@@ -1424,7 +1424,7 @@ fnc other(int n): int {
 fn legacy_switch_default_normalization_preserves_match_wildcard() {
     let source = r#"define module M as
 fnc choose(int n): int {
-switch n
+do switch n
 case 7 -> {
 return 42;
 }
@@ -1434,7 +1434,7 @@ return 0;
 end
 }
 fnc inspect(int n): int {
-match n over
+do match n over
 on 7 -> {
 return 42;
 }
@@ -1455,7 +1455,7 @@ end
 #[test]
 fn legacy_default_normalization_never_rewrites_multiline_comment_content() {
     let src = r#"fnc inspect(int n): int {
-match n over
+do match n over
 /*
 on _ -> { phantom(); }
 */
