@@ -792,7 +792,8 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
                 | "private"
         )
         || !ty.chars().all(|ch| {
-            ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' ')
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '_' | '.' | '<' | '>' | ',' | '[' | ']' | ' ')
         })
     {
         return line.to_string();
