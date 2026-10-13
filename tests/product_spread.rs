@@ -42,9 +42,7 @@ return;
 }
 "#;
     let output = format_source(src).unwrap();
-    assert!(output.contains(
-        "foo(...(c: side_effect(1), a: side_effect(2), b: side_effect(3)));"
-    ));
+    assert!(output.contains("foo(...(c: side_effect(1), a: side_effect(2), b: side_effect(3)));"));
     assert!(output.contains("foo(...(build_a(), build_b(), build_c()));"));
     assert_eq!(format_source(&output).unwrap(), output);
 }
