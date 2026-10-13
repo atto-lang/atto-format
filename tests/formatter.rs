@@ -1396,7 +1396,10 @@ end
         "let int n = 2;",
         "balance = 3;",
     ] {
-        assert!(got.contains(unchanged), "rewrote an unrelated construct: {unchanged} in {got}");
+        assert!(
+            got.contains(unchanged),
+            "rewrote an unrelated construct: {unchanged} in {got}"
+        );
     }
     assert!(got.contains("final int identifier: 42"));
     assert!(got.contains("string name: \"box\""));
