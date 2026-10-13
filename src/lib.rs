@@ -725,8 +725,10 @@ fn canonicalize_declaration_line(
     (instance_member
         .then(|| canonicalize_instance_method_fnc(line, &words))
         .flatten())
-    .or_else(|| canonicalize_class_declaration(line, &words))
-    .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
+    // Named types and modules cannot be nested inside class/actor bodies.
+    // Do not erase visibility diagnostics on malformed nested declarations.
+    .or_else(|| (!instance_member).then(|| canonicalize_class_declaration(line, &words)).flatten())
+    .or_else(|| (!instance_member).then(|| canonicalize_defined_interface_or_contract(line, &words)).flatten())
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .or_else(|| {
