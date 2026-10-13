@@ -11,6 +11,8 @@ identical behavior.
 - two spaces per indentation level, never tabs for indentation;
 - static `select`, `nb select`, and `try select` arms are indented one level;
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
+- brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
+- braced `switch` `_` fallback and `match ... over` `on _` / `on default` fallback spellings are formatted as `default`, while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
 - direct type-first class field initializers canonically use `:`: `final int foo = 5`
   becomes `final int foo: 5`, and `string bar = "100"` becomes

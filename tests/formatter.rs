@@ -1319,6 +1319,185 @@ end
     );
     assert_eq!(format_source(&result).unwrap(), result);
 }
+#[test]
+fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
+    let source = r#"
+pub fnc use_switch(string v) : string {
+switch (v) {
+_ {
+return "star";
+},
+case "foo", "car", "mar" {
+return "bar";
+};
+}
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("switch (v) {"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
+    assert!(!formatted.contains("},\n"), "{formatted}");
+    assert!(!formatted.contains("};\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn braced_and_end_delimited_match_variants_format_idempotently() {
+    let braced = r#"define actor Counter as
+receive(ActorMail<MessagePatterns> mail): void {
+match mail.value over {
+on is MessagePatterns.Reset as m {
+handle(m.reset);
+},
+on MessagePatterns.Tuple as (m1,m2) {
+handle_pair(m1,m2);
+};
+on _ { return; }
+}
+}
+end
+"#;
+    let canonical = format_source(braced).unwrap();
+    assert!(
+        canonical.contains("on is MessagePatterns.Reset as m {"),
+        "{canonical}"
+    );
+    assert!(
+        canonical.contains("on MessagePatterns.Tuple as (m1,m2) {"),
+        "{canonical}"
+    );
+    assert!(!canonical.contains("},\n"), "{canonical}");
+    assert_eq!(format_source(&canonical).unwrap(), canonical);
+
+    let end_delimited = r#"fnc f(Option<int> v): int {
+match v over
+on Some(value) {
+return value;
+}
+on _ {
+return 0;
+}
+end
+}
+"#;
+    let output = format_source(end_delimited).unwrap();
+    assert!(output.contains("match v over"), "{output}");
+    assert!(output.contains("  end\n"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn switch_and_match_underscore_aliases_format_as_default() {
+    let source = r#"fnc choose(string v): string {
+  switch v {
+    _ { return "star"; }
+    case "foo", "car", "mar" { return "bar"; }
+  }
+}
+fnc check(int n): int {
+  match n over {
+    on _ as m { return m; }
+    on 7 { return 42; }
+  }
+}
+fnc other(int n): int {
+  match n over {
+    on default { return 0; }
+  }
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("default {\n"), "{formatted}");
+    assert!(formatted.contains("default as m {\n"), "{formatted}");
+    assert!(!formatted.contains("on _ as m"), "{formatted}");
+    assert!(!formatted.contains("on default"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn legacy_end_delimited_fallbacks_are_formatted_as_default() {
+    let source = r#"define module M as
+fnc choose(int n): int {
+switch n
+case 7 -> {
+return 42;
+}
+_ -> {
+return 0;
+}
+end
+}
+fnc inspect(int n): int {
+match n over
+on 7 -> {
+return 42;
+}
+on _ as other -> {
+return other;
+}
+end
+}
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("default -> {"), "{once}");
+    assert!(once.contains("default as other -> {"), "{once}");
+    assert!(!once.contains("on _ as other"), "{once}");
+    assert!(!once.contains("\n  _ ->"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn legacy_default_normalization_never_rewrites_multiline_comment_content() {
+    let src = r#"fnc inspect(int n): int {
+match n over
+/*
+on _ -> { phantom(); }
+*/
+on 7 -> {
+return 7;
+}
+on _ -> {
+return 0;
+}
+end
+}
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("on _ -> { phantom(); }"), "{formatted}");
+    assert!(formatted.contains("default -> {"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn typed_match_return_contracts_preserve_named_parameter_and_result_mode() {
+    let source = r#"fnc choose(int n): bool {
+match<ret=bool> n over {
+on 7 { return true; }
+on _ as remaining { return false; }
+}
+}
+fnc procedural(int n): bool {
+do match<ret=bool> n over {
+default as remaining { return false; }
+on 7 { return true; }
+}
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("do match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("default as remaining {"), "{once}");
+    assert!(!once.contains("on _ as remaining"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
 
 #[test]
 fn colon_initializers_are_canonical_only_for_direct_type_first_class_fields() {
