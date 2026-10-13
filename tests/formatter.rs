@@ -1402,3 +1402,24 @@ end
     assert!(got.contains("string name: \"box\""));
     assert_eq!(got, format_source(&got).unwrap());
 }
+
+#[test]
+fn multiline_method_parameter_defaults_are_not_field_initializers() {
+    let src = r#"define class Foo as
+  int field = 42
+  compute(
+    int x = 5,
+    string label = "ok"
+  ): int {
+    return x;
+  }
+end
+"#;
+    let got = format_source(src).unwrap();
+    assert!(got.contains("int field: 42"), "{got}");
+    assert!(got.contains("int x = 5"), "{got}");
+    assert!(got.contains("string label = \"ok\""), "{got}");
+    assert!(!got.contains("int x: 5"), "{got}");
+    assert!(!got.contains("string label: \"ok\""), "{got}");
+    assert_eq!(got, format_source(&got).unwrap());
+}
