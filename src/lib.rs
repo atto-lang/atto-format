@@ -537,8 +537,9 @@ fn push_blank_lines(out: &mut Vec<String>, count: usize) {
     }
 }
 
-/// Normalize catch-all aliases only while directly inside a legacy
-/// end-delimited switch/match arm list. Nested arm bodies remain untouched.
+/// Normalize switch catch-all aliases only inside a legacy end-delimited
+/// switch arm list. Match uses "on _" and must never become "default".
+/// Nested arm bodies remain untouched.
 fn canonicalize_legacy_catchall(
     line: &str,
     scope: Option<&DefineFrame>,
@@ -556,16 +557,6 @@ fn canonicalize_legacy_catchall(
     match scope.kind {
         DefineKind::Switch if starts_word(line, "_") => {
             format!("default{}", &line[1..])
-        }
-        DefineKind::Match if starts_word(line, "on") => {
-            let rest = line[2..].trim_start();
-            if starts_word(rest, "_") {
-                format!("default{}", &rest[1..])
-            } else if starts_word(rest, "default") {
-                rest.to_owned()
-            } else {
-                line.to_owned()
-            }
         }
         _ => line.to_owned(),
     }
