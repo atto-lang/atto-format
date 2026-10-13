@@ -1848,8 +1848,12 @@ fn canonicalize_hash_symbol_quotes(source: &str) -> String {
             }
         } else if let Some(delimiter) = quote {
             if byte == b'\\' && next.is_some() {
-                result.push_str(&source[index..index + 2]);
-                index += 2;
+                // A quoted escape may be followed by a multibyte Unicode
+                // scalar. Never slice UTF-8 at an arbitrary byte index.
+                let escaped = source[index + 1..].chars().next().expect("valid UTF-8");
+                result.push('\\');
+                result.push(escaped);
+                index += 1 + escaped.len_utf8();
                 continue;
             }
             if byte == delimiter {
