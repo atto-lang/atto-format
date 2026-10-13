@@ -139,3 +139,22 @@ end
 "#;
     assert_eq!(format_source(source).unwrap(), source);
 }
+
+#[test]
+fn uninitialized_legacy_constructor_fields_are_not_rewritten_into_invalid_final_fields() {
+    let source = r#"define class Box as
+  val int value;
+  let int accumulator;
+  const int obsolete;
+  constructor(int value) {
+    self.value = value;
+  }
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("val int value;"));
+    assert!(formatted.contains("let int accumulator;"));
+    assert!(formatted.contains("const int obsolete;"));
+    assert!(!formatted.contains("final mut int value;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
