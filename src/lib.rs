@@ -125,8 +125,10 @@ struct LexState {
 /// - `end`, `fi`, `done`, braces, class/interface/contract/trait/struct/module nesting,
 ///   actor bodies, and strings/comments are indentation-aware.
 ///
-/// It canonicalizes recognized declaration-modifier prefixes, but does not
-/// reorder unrelated declarations or unknown grammar whose meaning depends on
+/// It canonicalizes recognized declaration-modifier prefixes and removes
+/// redundant `private` visibility, since private is the language default.
+/// It preserves conflicting or ambiguous modifiers for compiler diagnostics.
+/// It does not reorder unrelated declarations or unknown grammar whose meaning depends on
 /// the compiler's evolving syntax.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
@@ -679,6 +681,7 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
+    .or_else(|| canonicalize_private_member(line, &words, instance_member))
     .unwrap_or_else(|| line.to_string())
 }
 
@@ -748,7 +751,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         "structural",
         "abstract",
     ] {
-        if modifiers.contains(&modifier) {
+        if modifier != "private" && modifiers.contains(&modifier) {
             canonical.push(modifier);
         }
     }
@@ -803,8 +806,8 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     if saw_define {
         canonical.push("define");
     }
-    if let Some(visibility) = visibility {
-        canonical.push(visibility);
+    if visibility == Some("pub") {
+        canonical.push("pub");
     }
     if is_abstract {
         canonical.push("abstract");
@@ -859,8 +862,8 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     if saw_define {
         canonical.push("define");
     }
-    if let Some(visibility) = visibility {
-        canonical.push(visibility);
+    if visibility == Some("pub") {
+        canonical.push("pub");
     }
     canonical.push(kind);
 
@@ -968,8 +971,8 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
 
     let actor_marker = actor_marker?;
     let mut canonical = Vec::new();
-    if let Some(visibility) = visibility {
-        canonical.push(visibility);
+    if visibility == Some("pub") {
+        canonical.push("pub");
     }
     if is_static {
         canonical.push("static");
@@ -1096,8 +1099,8 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
 
     let mut canonical = Vec::new();
-    if let Some(visibility) = visibility {
-        canonical.push(visibility);
+    if visibility == Some("pub") {
+        canonical.push("pub");
     }
     if is_quantum {
         canonical.push("quantum");
@@ -1129,6 +1132,53 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     canonical.push(kind);
 
     Some(rewrite_word_prefix(line, prefix, &canonical))
+}
+
+// Outside explicitly exported declarations, private visibility is implicit.
+// Bare fields, constructors and instance methods are not covered by the
+// class/callable modifier normalizers above, so recognize them conservatively.
+// Do not strip across block comments, duplicate visibility or unclear syntax.
+fn canonicalize_private_member(
+    line: &str,
+    words: &[WordSpan],
+    instance_member: bool,
+) -> Option<String> {
+    let first = *words.first()?;
+    let second = *words.get(1)?;
+    if &line[first.start..first.end] != "private"
+        || !plain_word_prefix(line, &words[..2])
+    {
+        return None;
+    }
+    let token = &line[second.start..second.end];
+    let suffix = line[second.end..].trim_start();
+    let is_binding = matches!(token, "let" | "val" | "const" | "final");
+    let is_constructor = instance_member && token == "constructor" && suffix.starts_with('(');
+    let is_explicit_method = instance_member && token == "method"
+        && words.get(2).is_some_and(|name| {
+            plain_word_prefix(line, &words[..3])
+                && line[name.end..].trim_start().starts_with('(')
+        });
+    let is_symbol_method = instance_member && line[second.start..].starts_with("[Symbol.")
+        && line[second.start..].find(']').is_some_and(|close| {
+            line[second.start + close + 1..].trim_start().starts_with('(')
+        });
+    let is_implicit_method = instance_member
+        && token != "pub"
+        && token != "private"
+        && (suffix.starts_with('(') || suffix.starts_with('<'));
+    // Fields declared with name-first colon syntax are a class-only feature.
+    let is_colon_field = instance_member && suffix.starts_with(':');
+
+    if !(is_binding || is_constructor || is_explicit_method || is_symbol_method
+        || is_implicit_method || is_colon_field)
+    {
+        return None;
+    }
+    let mut rewritten = String::with_capacity(line.len());
+    rewritten.push_str(&line[..first.start]);
+    rewritten.push_str(&line[second.start..]);
+    Some(rewritten)
 }
 
 fn set_once(value: &mut bool) -> bool {
