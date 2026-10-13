@@ -187,10 +187,10 @@ fnc math(int gen, int value) -> int {
 #[test]
 fn else_followed_by_nested_if_is_not_collapsed_to_elif() {
     let src = r#"fnc classify(int value) -> int {
-if value < 0; then
+if value < 0 then
 return -1;
 else
-if value == 0; then
+if value == 0 then
 return 0;
 else
 return 1;
@@ -199,10 +199,10 @@ fi
 }
 "#;
     let expected = r#"fnc classify(int value) -> int {
-  if value < 0; then
+  if value < 0 then
     return -1;
   else
-    if value == 0; then
+    if value == 0 then
       return 0;
     else
       return 1;
@@ -421,8 +421,8 @@ fi
 }
 "#;
     let expected = r#"shared actor Cleaner {
-  pub fnc compact() -> void {
-    if ready; then
+  pub compact() -> void {
+    if ready then
       actor.gc();
     else
       return;
@@ -575,7 +575,7 @@ fi
 }
 "#;
     let formatted = format_source(valid).unwrap();
-    assert!(formatted.contains("  if ready; then"));
+    assert!(formatted.contains("  if ready then"));
     assert!(formatted.contains("    while busy; do"));
     assert!(formatted.contains("  fi"));
 
@@ -616,13 +616,13 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0; then
+  if handler_id < 0 then
     return Err("handler_id must be non-negative");
   fi
-  if !pattern.is_valid(); then
+  if !pattern.is_valid() then
     return Err("invalid route pattern");
   fi
-  if pattern.size() > self.max_segments_value; then
+  if pattern.size() > self.max_segments_value then
     return Err("route pattern exceeds max_segments");
   fi
 }
@@ -703,11 +703,11 @@ fi
 }
 "#;
     let expected = r#"fnc choose(int value) -> int {
-  if value < 0; then
+  if value < 0 then
     return -1;
-  elif value == 0; then
+  elif value == 0 then
     return 0;
-  elif value == 1; then
+  elif value == 1 then
     return 1;
   else
     return 2;
@@ -730,7 +730,7 @@ fi
 "#;
     let expected = r#"fnc text() -> String {
   // elseif fake; do
-  if ready; then
+  if ready then
     return "else if nope do";
   else
     return "then";
@@ -929,7 +929,7 @@ if handler_id < 0; do
 return Err("handler_id must be non-negative");
 elseif !pattern.is_valid(); do
 return Err("invalid route pattern");
-else if pattern.size() > self.max_segments_value; then
+else if pattern.size() > self.max_segments_value then
 return Err("route pattern exceeds max_segments");
 else
 return Ok();
@@ -938,11 +938,11 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0; then
+  if handler_id < 0 then
     return Err("handler_id must be non-negative");
-  elif !pattern.is_valid(); then
+  elif !pattern.is_valid() then
     return Err("invalid route pattern");
-  elif pattern.size() > self.max_segments_value; then
+  elif pattern.size() > self.max_segments_value then
     return Err("route pattern exceeds max_segments");
   else
     return Ok();
@@ -1151,6 +1151,174 @@ return value.id;
     assert_eq!(format_source(source).unwrap(), expected);
 }
 
+#[test]
+fn legacy_instance_fnc_is_canonicalized_but_explicit_method_and_static_fnc_remain() {
+    let input = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+suspend method explicit_join(group: ActorGroup) {
+group.join()
+}
+static fnc static_send(group: ActorGroup) {
+group.leave()
+}
+end
+define class Client as
+fnc legacy(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+fnc standalone(): int { return 4; }
+"#;
+    let out = format_source(input).unwrap();
+    assert!(out.contains("suspend join_room("), "{out}");
+    assert!(out.contains("  leave_room(ActorGroup group) {"), "{out}");
+    assert!(out.contains("suspend method explicit_join("), "{out}");
+    assert!(out.contains("static fnc static_send("), "{out}");
+    assert!(out.contains("  legacy() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert!(out.contains("fnc standalone() -> int {"), "{out}");
+    assert!(!out.contains("fnc join_room"), "{out}");
+    assert!(!out.contains("fnc leave_room"), "{out}");
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn never_rewrites_nested_or_string_or_comment_fnc() {
+    let src = r#"define actor User as
+fnc call(): String {
+  // fnc marker() is a comment
+  val title = "fnc name()";
+  return title;
+}
+static fnc direct(): int { return 42; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("call() -> String {"));
+    assert!(out.contains("// fnc marker() is a comment"));
+    assert!(out.contains("\"fnc name()\""));
+    assert!(out.contains("static fnc direct()"));
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn modifier_permutations_format_in_one_pass_without_changing_static_dispatch() {
+    let src = r#"define class Client as
+fnc pub legacy(): int { return 1; }
+fnc suspend pub deferred(): int { return 2; }
+pub fnc async compute(): int { return 3; }
+fnc static pub reusable(): int { return 4; }
+fnc method_name(): int { return 5; }
+method method(): int { return 6; }
+end
+"#;
+    let once = format_source(src).unwrap();
+    assert!(once.contains("  pub legacy() -> int {"), "{once}");
+    assert!(once.contains("  pub suspend deferred() -> int {"), "{once}");
+    assert!(once.contains("  pub async compute() -> int {"), "{once}");
+    assert!(
+        once.contains("  pub static fnc reusable() -> int {"),
+        "{once}"
+    );
+    assert!(once.contains("  method_name() -> int {"), "{once}");
+    assert!(once.contains("  method method() -> int {"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn method_normalization_never_mutates_comments_literals_or_static_fnc() {
+    let src = r#"define class Client as
+// fnc ignored(): int
+static fnc keep(): int { return 1; }
+fnc ordinary(): String {
+  return "fnc literal";
+}
+end
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("// fnc ignored(): int"));
+    assert!(formatted.contains("  static fnc keep() -> int"));
+    assert!(formatted.contains("  ordinary() -> String"));
+    assert!(formatted.contains("\"fnc literal\""));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
+fn bare_keyword_actor_end_body_is_an_instance_method_scope() {
+    let src = r#"shared actor Worker as
+fnc handle(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("  handle() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert_eq!(out, format_source(&out).unwrap());
+}
+
+#[test]
+fn multiline_connection_actor_method_params_are_indented_and_idempotent() {
+    let source = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+end
+"#;
+    let expected = r#"define actor ConnectionActor as
+  final rooms: Map<RoomId, ActorGroup>
+
+  suspend join_room(
+    group: ActorGroup,
+    permit: ActorGroupJoinCapability
+  ) {
+    group.join(permit)
+  }
+  leave_room(ActorGroup group) {
+    group.leave()
+  }
+end
+"#;
+    let out = format_source(source).unwrap();
+    assert_eq!(out, expected);
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn define_shared_actor_is_also_a_method_container() {
+    let source = r#"define shared actor Worker as
+fnc handle(): int { return 7; }
+static fnc utility(): int { return 9; }
+end
+"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains("  handle() -> int {"), "{result}");
+    assert!(
+        result.contains("  static fnc utility() -> int {"),
+        "{result}"
+    );
+    assert_eq!(format_source(&result).unwrap(), result);
+}
 #[test]
 fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
     let source = r#"
