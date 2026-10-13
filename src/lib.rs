@@ -711,9 +711,14 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
     {
         return line.to_string();
     }
-    let mut out = line.to_string();
-    out.replace_range(equal..equal + 1, ":");
-    out
+    let rhs = line[equal + 1..].trim_start();
+    // A comment-only RHS is not an initializer; preserve malformed input so
+    // the compiler can diagnose it, rather than manufacturing valid-looking
+    // source from a missing value.
+    if rhs.starts_with("//") || rhs.starts_with("/*") {
+        return line.to_string();
+    }
+    format!("{}: {}", line[..equal].trim_end(), rhs)
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
