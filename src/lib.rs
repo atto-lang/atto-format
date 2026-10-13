@@ -628,17 +628,18 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
     }
 }
 
-// Class/struct member slots use final (fixed binding) and mut (mutable
-// referent), while lexical bindings retain const/val/let. Never apply this to
-// actor state, trait contracts, or code nested within a callable.
+// Concrete class member slots use final (fixed binding) and mut (mutable
+// referent), while lexical bindings retain const/val/let. Do not rewrite
+// unimplemented named-struct storage, actor state, trait contracts, or
+// code nested within a callable.
 fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
     let latest_define = define_stack.last().map(|frame| (
         frame.order,
-        matches!(frame.kind, DefineKind::Class | DefineKind::Struct),
+        matches!(frame.kind, DefineKind::Class),
     ));
     let latest_brace = brace_stack.last().map(|frame| (
         frame.order,
-        matches!(frame.kind, BraceKind::Class | BraceKind::Struct),
+        matches!(frame.kind, BraceKind::Class),
     ));
     match (latest_define, latest_brace) {
         (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
