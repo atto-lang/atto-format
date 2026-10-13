@@ -28,6 +28,11 @@ direct class members; ambiguous declarations are preserved for
 compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
 or lexical declarations inside callables.
 
+Uninitialized legacy class members (including `val T x;` followed by
+constructor-body initialization) are deliberately left unchanged. Rewriting
+them to `final mut T x;` would manufacture a compiler error before the
+coordinated breaking migration has removed those legacy semantics.
+
 The language's final initialization rules are compiler constraints, not
 formatter transformations. Formatting does not make an uninitialized final
 field valid, and formatter output is not proof that all backends support
