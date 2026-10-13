@@ -140,6 +140,72 @@ fn conflicting_or_obscured_prefixes_stay_for_compiler_errors() {
 }
 
 #[test]
+fn private_type_first_class_fields_are_canonicalized() {
+    let source = r#"define class Typed as
+private int count: 5
+private String name = "A";
+private Map<String, int> counts: values
+private Array<int> items = values;
+private id: int
+end
+"#;
+    let got = format_source(source).unwrap();
+    for expected in [
+        "  int count: 5",
+        "  String name = \"A\";",
+        "  Map<String, int> counts: values",
+        "  Array<int> items = values;",
+        "  id: int",
+    ] {
+        assert!(got.contains(expected), "missing {expected:?} in {got}");
+    }
+    assert!(!got.contains("private "), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn invalid_nested_visibility_stays_visible_to_compiler() {
+    // These constructs are invalid declarations in local control-flow
+    // scopes. Formatting must not silently make them valid.
+    let source = r#"pub fnc outer(): void {
+private define module Hidden as
+end
+private fnc nested(): void {
+}
+private class Nested as
+end
+return;
+}
+"#;
+    let got = format_source(source).unwrap();
+    for preserved in [
+        "private define module Hidden as",
+        "private fnc nested()",
+        "private class Nested as",
+    ] {
+        assert!(got.contains(preserved), "compiler diagnostic erased: {preserved:?} in {got}");
+    }
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn module_modifier_conflicts_and_comments_are_not_rewritten() {
+    for input in [
+        "define pub private module Service as\nend\n",
+        "private pub define module Service as\nend\n",
+        "define private private module Service as\nend\n",
+        "private /* keep */ define module Service as\nend\n",
+        "private define /* keep */ module Service as\nend\n",
+        "// private define module Service as\n",
+        "val String text = \"private define module Service as\";\n",
+    ] {
+        let got = format_source(input).unwrap();
+        assert!(got.contains("private"), "unexpected rewrite: {input:?} -> {got}");
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+}
+
+#[test]
 fn preserves_comments_when_removing_standalone_modifier() {
     canonical(
         "private fnc foo(): void { // keep\n}\n",
