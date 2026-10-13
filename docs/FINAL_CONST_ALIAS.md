@@ -22,11 +22,14 @@ Do **not** silently reinterpret every `const` binding as a compile-time
 constant: that is a separate potentially breaking language change.
 
 **Inheritance blocker:** The fixed-slot bit and prohibition against subclass
-redeclaration are different obligations. Neither this formatter rule nor the
-literal-only compiler admission proves inheritance shadowing enforcement.
-Before the broader final/const language contract is declared complete, add
-inherited-field visibility and shadowing checks in the type checker, native
-parity tests, and serialization/ABI tests.
+redeclaration are different obligations. Java PR #890 retains an explicit
+`finalDeclaration` AST bit and adds a transitive final-shadowing diagnostic.
+The current storage layout already disallows **all** same-name inherited
+fields, even ordinary `const`, regardless of compatible type. Therefore the
+separately proposed "subclass can explicitly shadow const" semantics are
+**not yet implemented**; accepting that requires a distinct static-lookup
+versus storage-slot design, backend layout parity, and ABI tests. The LLVM
+subset does not yet support class inheritance.
 
 **Release gate:** Keep the formatter/backend PRs draft until exact-head Rust
 fmt/test/clippy, Java full suite, LLVM CTest/Clang smoke, and cross-backend
