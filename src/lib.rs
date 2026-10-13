@@ -721,6 +721,11 @@ fn canonicalize_class_field_initializer(line: &str, initial: LexState) -> String
     if header.starts_with("final") && header["final".len()..].starts_with(char::is_whitespace) {
         header = header["final".len()..].trim_start();
     }
+    // Explicit 'mut' applies to the referent, not the fixed field slot.
+    // Both 'mut T field' and 'final mut T field' are admitted by Java.
+    if header.starts_with("mut") && header["mut".len()..].starts_with(char::is_whitespace) {
+        header = header["mut".len()..].trim_start();
+    }
     // Find the last whitespace outside generic <> arguments: it separates the
     // complete type from its field name even for Map<string, Array<int>>.
     let mut angle = 0i32;
