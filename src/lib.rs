@@ -795,11 +795,14 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         }
     }
 
-    if !saw_define || !saw_class {
+    if !saw_class {
         return None;
     }
 
-    let mut canonical = vec!["define"];
+    let mut canonical = Vec::new();
+    if saw_define {
+        canonical.push("define");
+    }
     if let Some(visibility) = visibility {
         canonical.push(visibility);
     }
@@ -811,11 +814,13 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
+// A declaration's 'define' keyword is optional. When present, visibility
+// follows it; otherwise visibility leads the declaration. Never invent 'pub'.
 fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_prefix_word = |word: &str| {
         matches!(
             word,
-            "define" | "interface" | "contract" | "pub" | "private"
+            "define" | "interface" | "contract" | "trait" | "struct" | "type" | "pub" | "private"
         )
     };
     let prefix_len = words
@@ -841,17 +846,19 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
             "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
-            "interface" | "contract" if kind.is_none() => kind = Some(&line[span.start..span.end]),
+            "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
+                kind = Some(&line[span.start..span.end])
+            },
             _ => return None,
         }
     }
 
     let kind = kind?;
-    if !saw_define {
-        return None;
-    }
 
-    let mut canonical = vec!["define"];
+    let mut canonical = Vec::new();
+    if saw_define {
+        canonical.push("define");
+    }
     if let Some(visibility) = visibility {
         canonical.push(visibility);
     }
@@ -1173,8 +1180,13 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             }
         }
     }
-    let mut words = line.split_whitespace();
-    if words.next()? != "define" {
+    let mut words = line.split_whitespace().peekable();
+    let defined = words.peek() == Some(&&"define");
+    if defined {
+        words.next();
+    } else if header.last() != Some(&"as") {
+        // Bare named declarations are block headers, not expressions or
+        // call sites. An end-delimited class/trait/struct must end in 'as'.
         return None;
     }
 
