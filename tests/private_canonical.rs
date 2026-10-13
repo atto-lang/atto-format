@@ -189,6 +189,21 @@ return;
 }
 
 #[test]
+fn invalid_nested_type_and_module_declarations_inside_class_stay_invalid() {
+    let input = r#"define class Outer as
+private define module Inner as
+end
+private class Nested as
+end
+end
+"#;
+    let formatted = format_source(input).unwrap();
+    assert!(formatted.contains("private define module Inner as"), "{formatted}");
+    assert!(formatted.contains("private class Nested as"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
 fn module_modifier_conflicts_and_comments_are_not_rewritten() {
     for input in [
         "define pub private module Service as\nend\n",
