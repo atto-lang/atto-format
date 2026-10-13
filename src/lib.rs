@@ -873,7 +873,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     let is_prefix_word = |word: &str| {
         matches!(
             word,
-            "define" | "interface" | "contract" | "trait" | "struct" | "type" | "pub" | "private"
+            "define" | "module" | "interface" | "contract" | "trait" | "struct" | "type" | "pub" | "private"
         )
     };
     let prefix_len = words
@@ -899,7 +899,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
             "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
-            "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
+            "module" | "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
                 kind = Some(&line[span.start..span.end])
             },
             _ => return None,
@@ -907,6 +907,11 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     }
 
     let kind = kind?;
+    // Modules still require 'define'; do not make a malformed bare module
+    // declaration look canonical or silently reinterpret it as valid syntax.
+    if kind == "module" && !saw_define {
+        return None;
+    }
 
     let mut canonical = Vec::new();
     if saw_define {
