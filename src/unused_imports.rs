@@ -176,8 +176,16 @@ fn parse_import(tokens: &[Token], start: usize) -> Option<(Vec<String>, usize)> 
         let kind = take_word(tokens, &mut at)?;
         if !matches!(
             kind,
-            "module" | "actor" | "class" | "fnc" | "interface" | "contract"
-                | "trait" | "struct" | "type" | "types"
+            "module"
+                | "actor"
+                | "class"
+                | "fnc"
+                | "interface"
+                | "contract"
+                | "trait"
+                | "struct"
+                | "type"
+                | "types"
         ) {
             return None;
         }
@@ -252,8 +260,14 @@ pub(super) fn comment_unused(source: &str) -> String {
         };
         let first_offset = all[first_token].start;
         let last_offset = all[next - 1].end;
-        let first = source[..first_offset].bytes().filter(|b| *b == b'\n').count();
-        let last = source[..last_offset].bytes().filter(|b| *b == b'\n').count();
+        let first = source[..first_offset]
+            .bytes()
+            .filter(|b| *b == b'\n')
+            .count();
+        let last = source[..last_offset]
+            .bytes()
+            .filter(|b| *b == b'\n')
+            .count();
         // Require an import to own complete physical lines, so comments cannot
         // swallow another declaration that happens to share its line.
         let beginning = source[..first_offset].rfind('\n').map_or(0, |i| i + 1);
@@ -282,8 +296,7 @@ pub(super) fn comment_unused(source: &str) -> String {
         let keep = lines[import.first..=import.last]
             .iter()
             .any(|s| s.contains("oresfmt: keep-import"))
-            || (import.first > 0
-                && lines[import.first - 1].contains("oresfmt: keep-import"));
+            || (import.first > 0 && lines[import.first - 1].contains("oresfmt: keep-import"));
         if !keep
             && !import
                 .bindings
