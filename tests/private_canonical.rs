@@ -164,6 +164,24 @@ end
 }
 
 #[test]
+fn type_first_field_modifier_conflicts_must_not_be_legalized() {
+    // Redundant-private normalization must NEVER turn invalid source into
+    // an exported field by removing the first visibility token.
+    for declaration in [
+        "private pub int secret: 42",
+        "private private int secret: 42",
+        "private pub Map<String, int> secret: values",
+        "private private Array<int> secrets = values;",
+    ] {
+        let source = format!("define class Vault as\n{declaration}\nend\n");
+        let formatted = format_source(&source).unwrap();
+        assert!(formatted.contains(declaration),
+            "visibility conflict erased: {source:?} -> {formatted:?}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+}
+
+#[test]
 fn invalid_nested_visibility_stays_visible_to_compiler() {
     // These constructs are invalid declarations in local control-flow
     // scopes. Formatting must not silently make them valid.
