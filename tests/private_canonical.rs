@@ -280,3 +280,55 @@ end
     assert!(!got.contains("private "), "{got}");
     assert_eq!(format_source(&got).unwrap(), got);
 }
+
+#[test]
+fn malformed_module_and_type_prefixes_are_never_rewritten_into_exports() {
+    // Unknown/misordered modifiers are compiler errors, not syntax sugar.
+    // A formatter must not turn them into successful public or private code.
+    for source in [
+        "define module pub Internal as\nend\n",
+        "define module private Internal as\nend\n",
+        "define private module pub Internal as\nend\n",
+        "define pub module private Internal as\nend\n",
+        "module define pub Internal as\nend\n",
+        "module pub define Internal as\nend\n",
+        "private module Internal as\nend\n",
+        "pub module Internal as\nend\n",
+        "define module define Internal as\nend\n",
+        "define interface pub Api as\nend\n",
+        "define contract private Api as\nend\n",
+        "define trait pub Api as\nend\n",
+        "define struct private S as\nend\n",
+        "define type pub Alias = int;\n",
+        "define type private Alias = int;\n",
+    ] {
+        let formatted = format_source(source).expect("formatter must keep invalid syntax diagnosable");
+        let first_line = source.lines().next().unwrap();
+        assert!(
+            formatted.lines().any(|line| line == first_line),
+            "rewrote invalid declaration into different semantics: {source:?} -> {formatted:?}"
+        );
+        assert_eq!(
+            format_source(&formatted).unwrap(),
+            formatted,
+            "normalization must be idempotent for {source:?}"
+        );
+    }
+}
+
+#[test]
+fn both_explicit_private_module_orders_match_the_implicit_default() {
+    let source = "define module Internal as\n  pub fnc visible(): int {\n    return 1;\n  }\nend\n";
+    let baseline = format_source(source).unwrap();
+    for header in [
+        "private define module Internal as",
+        "define private module Internal as",
+    ] {
+        let variant = source.replacen("define module Internal as", header, 1);
+        let formatted = format_source(&variant).unwrap();
+        assert_eq!(baseline, formatted, "{header} should be semantically identical");
+        assert_eq!(formatted, format_source(&formatted).unwrap());
+    }
+    let public = source.replacen("define module Internal as", "pub define module Internal as", 1);
+    assert!(format_source(&public).unwrap().starts_with("define pub module Internal as\n"));
+}
