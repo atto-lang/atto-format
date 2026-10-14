@@ -47,6 +47,7 @@ impl std::error::Error for FormatError {}
 enum DefineKind {
     Switch,
     Match,
+    Select,
     Module,
     Class,
     Actor,
@@ -406,17 +407,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if (starts_word(structural, "switch")
-            || (starts_word(structural, "match") && contains_word(structural, "over")))
-            && !structural.contains('{')
+        if !structural.contains('{')
+            && let Some(kind) = end_delimited_dispatch_kind(structural)
         {
             next_order += 1;
             define_stack.push(DefineFrame {
-                kind: if starts_word(structural, "switch") {
-                    DefineKind::Switch
-                } else {
-                    DefineKind::Match
-                },
+                kind,
                 order: next_order,
                 brace_depth: brace_stack.len(),
                 keyword_depth: keyword_stack.len(),
@@ -568,6 +564,37 @@ fn canonicalize_legacy_catchall(
             }
         }
         _ => line.to_owned(),
+    }
+}
+
+/// Recognize dispatch headers in expression position as well as statement
+/// position. In particular, `return match<T> ... over` and a declaration
+/// initializer `const T x = match<T> ... over` both own the following `end`.
+/// Tokenization prevents literals/comments or `foo.match(...)` from opening a
+/// fictitious block.
+fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
+    let lexed = select::tokens(line);
+    let mut index = 0usize;
+    match lexed.first()?.text {
+        "return" | "do" => index = 1,
+        "match" | "switch" | "select" => {}
+        _ => {
+            // Source declaration or assignment: only a direct RHS dispatch
+            // expression may own the next end. Do not mistake '==' for '='.
+            let eq = lexed.iter().position(|token| token.text == "=")?;
+            if lexed.get(eq + 1).is_some_and(|token| token.text == "=")
+                || eq > 0 && lexed[eq - 1].text == "=" {
+                return None;
+            }
+            index = eq + 1;
+        }
+    }
+
+    match lexed.get(index)?.text {
+        "match" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => Some(DefineKind::Match),
+        "switch" => Some(DefineKind::Switch),
+        "select" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => Some(DefineKind::Select),
+        _ => None,
     }
 }
 
