@@ -119,6 +119,50 @@ instead of being rewritten. This prevents indentation, trailing-whitespace, or
 line-ending normalization from changing literal runtime bytes while parser-backed
 literal preservation is still being completed.
 
+## Unused imports
+
+For Oreslang (.ores) source, the formatter keeps import declarations in the file
+but comments out declarations with no lexical use of any of their local bindings.
+It never deletes an import, silently trims a selector list, or changes an alias.
+
+```ores
+import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main(): void {
+  make();
+}
+```
+
+becomes:
+
+```ores
+// import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main() -> void {
+  make();
+}
+```
+
+Identifiers in comments, quoted strings, import paths, or Symbol literals do not
+count as references. Aliased imports use the local alias, and grouped selections
+stay active when *any* imported binding is referenced. Multiline unused imports
+are commented on every physical line. Formatting a second time is stable.
+
+Importing a module can execute its initialization code, even when the imported
+name is otherwise unused. Retain an intentional side-effect import with a comment
+immediately above it or on its declaration:
+
+```ores
+// oresfmt: keep-import
+import module Bootstrap from "./bootstrap";
+```
+
+When the formatter cannot confidently parse the import grammar or an embedded
+template could contain name references, it leaves imports active rather than
+risk changing the program. All CLI safety policies and dry-run defaults apply.
+
 ## CLI
 
 ```bash
