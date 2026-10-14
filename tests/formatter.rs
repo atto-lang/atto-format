@@ -1498,3 +1498,34 @@ on 7 { return true; }
     assert!(!once.contains("on _ as remaining"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
+
+
+#[test]
+fn transparent_type_aliases_preserve_generic_targets_and_canonicalize_visibility() {
+    let source = r#"pub define type alias Pair<K, V> as Entry<K, V>;
+define type alias Two<A, B> as Tuple[A, B];
+type Old = Entry<int, string>;
+type alias = int;
+define type alias = string;
+"#;
+    let formatted = format_source(source).expect("format aliases");
+    assert!(formatted.contains("define pub type alias Pair<K, V> as Entry<K, V>;"), "{formatted}");
+    assert!(formatted.contains("define type alias Two<A, B> as Tuple[A, B];"), "{formatted}");
+    assert!(formatted.contains("type Old = Entry<int, string>;"), "{formatted}");
+    assert!(formatted.contains("type alias = int;"), "{formatted}");
+    assert!(formatted.contains("define type alias = string;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn comments_and_literals_cannot_reorder_type_alias_words() {
+    let source = r#"// pub define type alias Fake as Entry;
+const string example = "pub define type alias Fake as Entry";
+pub define /* comment */ type alias Real as Entry;
+"#;
+    let formatted = format_source(source).expect("format alias comments");
+    assert!(formatted.contains("// pub define type alias Fake as Entry;"));
+    assert!(formatted.contains("\"pub define type alias Fake as Entry\""));
+    assert!(formatted.contains("pub define /* comment */ type alias Real as Entry;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
