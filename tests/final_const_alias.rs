@@ -11,9 +11,18 @@ end
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("pub final int number: 5"), "{formatted}");
-    assert!(formatted.contains("final bool enabled: true;"), "{formatted}");
-    assert!(formatted.contains("private final string label: \"a:b // literal\""), "{formatted}");
-    assert!(formatted.contains("final int compatible = 7;"), "{formatted}");
+    assert!(
+        formatted.contains("final bool enabled: true;"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("private final string label: \"a:b // literal\""),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final int compatible = 7;"),
+        "{formatted}"
+    );
     assert!(!formatted.contains("final const"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
     assert!(is_formatted(&formatted).unwrap());
@@ -39,19 +48,43 @@ end
 end
 "#;
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("final const int computed: calculate()"), "{formatted}");
-    assert!(formatted.contains("final const int arithmetic: 1 + 2"), "{formatted}");
-    assert!(formatted.contains("final const int negative: -5"), "{formatted}");
-    assert!(formatted.contains("final const int suffix: 5 + next()"), "{formatted}");
+    assert!(
+        formatted.contains("final const int computed: calculate()"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int arithmetic: 1 + 2"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int negative: -5"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int suffix: 5 + next()"),
+        "{formatted}"
+    );
     assert!(
         formatted.contains("final const int overflowing: 9223372036854775808"),
         "{formatted}"
     );
-    assert!(formatted.contains("final const mut Array<int> unsafe:"), "{formatted}");
-    assert!(formatted.contains("const int explicit_constant = 7;"), "{formatted}");
-    assert!(formatted.contains("final const int local: 3;"), "{formatted}");
+    assert!(
+        formatted.contains("final const mut Array<int> unsafe:"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("const int explicit_constant = 7;"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int local: 3;"),
+        "{formatted}"
+    );
     assert!(formatted.contains("const int global = 1;"), "{formatted}");
-    assert!(formatted.contains("const int module_value = 2;"), "{formatted}");
+    assert!(
+        formatted.contains("const int module_value = 2;"),
+        "{formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
@@ -71,11 +104,26 @@ final const int with_comment: 5; // final const int inside comment
 end
 "#;
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("// final const int commented: 5"), "{formatted}");
-    assert!(formatted.contains("final const int should_remain: 5;"), "{formatted}");
-    assert!(formatted.contains("final /* preserve */ const int internal: 3"), "{formatted}");
-    assert!(formatted.contains("final const int with_suffix: 5 + 2"), "{formatted}");
-    assert!(formatted.contains("final int with_comment: 5; // final const int inside comment"), "{formatted}");
+    assert!(
+        formatted.contains("// final const int commented: 5"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int should_remain: 5;"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final /* preserve */ const int internal: 3"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final const int with_suffix: 5 + 2"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("final int with_comment: 5; // final const int inside comment"),
+        "{formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
