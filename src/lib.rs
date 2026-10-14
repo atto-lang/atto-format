@@ -678,9 +678,36 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_defined_type_alias(line, &words))
+    .or_else(|| canonicalize_simple_module_header(line, &words))
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .unwrap_or_else(|| line.to_string())
+}
+
+/// Canonical simple, end-delimited module header: `define module M as`.
+/// Do not touch qualified/contract headers, brace bodies, comments or strings.
+fn canonicalize_simple_module_header(line: &str, words: &[WordSpan]) -> Option<String> {
+    if words.len() != 3 || !plain_word_prefix(line, words) {
+        return None;
+    }
+    if &line[words[0].start..words[0].end] != "define"
+        || &line[words[1].start..words[1].end] != "module"
+    {
+        return None;
+    }
+    let name = &line[words[2].start..words[2].end];
+    if name.is_empty() || matches!(name, "as" | "conforms") {
+        return None;
+    }
+    let suffix = &line[words[2].end..];
+    if !suffix.trim().is_empty() && !suffix.trim_start().starts_with("//") {
+        return None;
+    }
+    let mut output = String::with_capacity(line.len() + 3);
+    output.push_str(&line[..words[2].end]);
+    output.push_str(" as");
+    output.push_str(suffix);
+    Some(output)
 }
 
 /// Order only the declaration prefix; never rewrite an alias's target,
