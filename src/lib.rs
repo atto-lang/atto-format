@@ -9,6 +9,7 @@ mod inline_blocks;
 mod keyword_blocks;
 mod match_switch;
 mod select;
+mod unused_imports;
 
 const INDENT: &str = "  ";
 
@@ -516,7 +517,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
     let mut result = out.join("\n");
     result.push('\n');
-    Ok(result)
+    Ok(unused_imports::comment_unused(&result))
 }
 
 /// Returns `true` when `source` is already in canonical form.

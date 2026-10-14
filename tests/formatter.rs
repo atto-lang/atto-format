@@ -314,7 +314,7 @@ return;
 }
 
 #[test]
-fn import_selector_spellings_remain_stable() {
+fn unused_import_selector_spellings_are_commented_not_deleted() {
     let src = r#"import * as util from "../util";
 import module Math from "../math";
 import actor Worker from "../worker";
@@ -329,12 +329,12 @@ return;
 end
 "#;
 
-    let expected = r#"import * as util from "../util";
-import module Math from "../math";
-import actor Worker from "../worker";
-import class Box from "../box";
-import types X, Y, Z from "../types";
-import types (A, B, C) from "../more-types";
+    let expected = r#"// import * as util from "../util";
+// import module Math from "../math";
+// import actor Worker from "../worker";
+// import class Box from "../box";
+// import types X, Y, Z from "../types";
+// import types (A, B, C) from "../more-types";
 
 define module App as
   pub fnc main() -> void {
