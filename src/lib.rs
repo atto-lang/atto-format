@@ -667,7 +667,6 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
     }
 }
 
-
 // A direct class member, not an actor member, nested callable, or module binding.
 // Mirror the existing scope-order logic: the most recently opened container
 // determines whether a source line is a class field.
