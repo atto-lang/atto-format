@@ -742,8 +742,14 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
             }
         }
         match close {
-            Some(pos) => pos,
-            None => return false,
+            // Conservative UTF-8 source-byte limit: Java's constant evaluator
+            // limits the decoded UTF-16 string to 65,536 code units. If the
+            // literal's raw byte length exceeds that budget, leave 'const'
+            // intact rather than potentially erasing a compiler diagnostic.
+            // This can preserve some valid escaped/non-ASCII strings, which
+            // is safe for an untyped standalone formatter.
+            Some(pos) if pos.saturating_sub(2) <= 65_536 => pos,
+            _ => return false,
         }
     } else if ty == "bool" {
         if initializer.starts_with("true") {
