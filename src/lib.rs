@@ -900,8 +900,13 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
 
     for span in prefix {
         match &line[span.start..span.end] {
-            "define" if !saw_define => saw_define = true,
-            "pub" | "private" if visibility.is_none() => {
+            // A declaration marker may follow a leading visibility modifier,
+            // but never follow the declaration kind.
+            "define" if !saw_define && kind.is_none() => saw_define = true,
+            // Visibility must precede the kind. Otherwise an invalid source
+            // such as 'define module pub Internal' could be rewritten into a
+            // valid, publicly exported module by the formatter.
+            "pub" | "private" if visibility.is_none() && kind.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
             "module" | "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
