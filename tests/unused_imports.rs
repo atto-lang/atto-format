@@ -102,8 +102,8 @@ pub fnc main(): void {
 "#;
     let formatted = canonical(src);
     assert!(formatted.contains("// import types ("));
-    assert!(formatted.contains("//   One,"));
-    assert!(formatted.contains("//   Two"));
+    assert!(formatted.contains("// One,"));
+    assert!(formatted.contains("// Two"));
     assert!(formatted.contains("// ) from \"./types\";"));
     assert!(formatted.contains("namespace app;"));
 }
