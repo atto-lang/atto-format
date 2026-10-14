@@ -680,7 +680,11 @@ fn in_direct_class_container(define_stack: &[DefineFrame], brace_stack: &[BraceF
         .map(|frame| (frame.order, frame.kind == BraceKind::Class));
     match (latest_define, latest_brace) {
         (Some((a, value)), Some((b, other))) => {
-            if a > b { value } else { other }
+            if a > b {
+                value
+            } else {
+                other
+            }
         }
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
@@ -760,7 +764,10 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
             return false;
         }
     } else {
-        let end = initializer.bytes().take_while(|b| b.is_ascii_digit() || *b == b'_').count();
+        let end = initializer
+            .bytes()
+            .take_while(|b| b.is_ascii_digit() || *b == b'_')
+            .count();
         if end == 0 {
             return false;
         }
