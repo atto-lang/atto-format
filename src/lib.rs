@@ -843,13 +843,11 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
 
     for span in prefix {
         match &line[span.start..span.end] {
-            // Modifiers placed after 'class' are invalid and must not be
-            // moved into a valid declaration by formatting.
-            "define" if !saw_define && !saw_class => saw_define = true,
-            "pub" | "private" if visibility.is_none() && !saw_class => {
+            "define" if !saw_define => saw_define = true,
+            "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
-            "abstract" if !is_abstract && !saw_class => is_abstract = true,
+            "abstract" if !is_abstract => is_abstract = true,
             "class" if !saw_class => saw_class = true,
             _ => return None,
         }
@@ -902,13 +900,12 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
 
     for span in prefix {
         match &line[span.start..span.end] {
-            // A declaration marker may follow a leading visibility modifier,
-            // but never follow the declaration kind.
-            "define" if !saw_define && kind.is_none() => saw_define = true,
-            // Visibility must precede the kind. Otherwise an invalid source
-            // such as 'define module pub Internal' could be rewritten into a
-            // valid, publicly exported module by the formatter.
-            "pub" | "private" if visibility.is_none() && kind.is_none() => {
+            // Legacy class/interface/contract/type forms can put visibility
+            // after their kind, or 'define' after their kind. Modules are
+            // different: 'module' must follow 'define' and all visibility
+            // modifiers. Never hoist an invalid trailing 'pub' into an export.
+            "define" if !saw_define && kind != Some("module") => saw_define = true,
+            "pub" | "private" if visibility.is_none() && kind != Some("module") => {
                 visibility = Some(&line[span.start..span.end])
             }
             "module" | "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
