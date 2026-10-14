@@ -407,8 +407,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if !structural.contains('{')
-            && let Some(kind) = end_delimited_dispatch_kind(structural)
+        if let Some(kind) = end_delimited_dispatch_kind(structural)
+            .filter(|_| !structural.contains('{'))
         {
             next_order += 1;
             define_stack.push(DefineFrame {
