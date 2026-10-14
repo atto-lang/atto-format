@@ -29,6 +29,7 @@ return 0;
   fi
 }
 
+
 fnc change(Option<int> input) -> int {
   if (input as let value) eq 15 then
     value = value + 1;
