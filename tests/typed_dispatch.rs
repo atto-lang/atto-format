@@ -26,8 +26,15 @@ fn typed_dispatch_expression_headers_balance_end_and_preserve_type_arguments() {
     ];
     for (source, fragment) in cases {
         let formatted = format_source(source).expect("typed dispatch must have a matching end");
-        assert!(formatted.contains(fragment), "lost typed dispatch header: {formatted}");
-        assert_eq!(format_source(&formatted).unwrap(), formatted, "not idempotent: {formatted}");
+        assert!(
+            formatted.contains(fragment),
+            "lost typed dispatch header: {formatted}"
+        );
+        assert_eq!(
+            format_source(&formatted).unwrap(),
+            formatted,
+            "not idempotent: {formatted}"
+        );
     }
 }
 
