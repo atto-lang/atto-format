@@ -78,3 +78,27 @@ end
     assert!(formatted.contains("final int with_comment: 5; // final const int inside comment"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn never_strips_const_from_string_beyond_compiler_budget() {
+    // The Java constexpr evaluator rejects decoded strings longer than
+    // 65,536 UTF-16 code units. Rejecting on the raw source byte length
+    // conservatively preserves the semantic diagnostic.
+    let too_large = "x".repeat(65_537);
+    let src = format!(
+        "define class C as\\nfinal const string large: \\"{}\\"\\nend\\n",
+        too_large
+    );
+    let out = format_source(&src).unwrap();
+    assert!(out.contains("final const string large:"), "const stripped on oversized field");
+    assert_eq!(format_source(&out).unwrap(), out);
+
+    let at_limit = "x".repeat(65_536);
+    let src = format!(
+        "define class C as\\nfinal const string allowed: \\"{}\\"\\nend\\n",
+        at_limit
+    );
+    let out = format_source(&src).unwrap();
+    assert!(out.contains("final string allowed:"), "safe literal not normalized");
+    assert!(!out.contains("final const string allowed:"));
+}
