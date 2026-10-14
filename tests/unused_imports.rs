@@ -2,7 +2,11 @@ use oreslang_format::{format_source, is_formatted};
 
 fn canonical(source: &str) -> String {
     let once = format_source(source).unwrap();
-    assert_eq!(format_source(&once).unwrap(), once, "formatting must be idempotent");
+    assert_eq!(
+        format_source(&once).unwrap(),
+        once,
+        "formatting must be idempotent"
+    );
     assert!(is_formatted(&once).unwrap());
     once
 }
@@ -18,9 +22,9 @@ pub fnc main(): void {
 "#;
     let formatted = canonical(src);
     assert!(formatted.contains("// import class Box from \"./box\";\n"));
-    assert!(formatted.contains(
-        "import fnc build from \"./factory\"; // the original trailing comment"
-    ));
+    assert!(
+        formatted.contains("import fnc build from \"./factory\"; // the original trailing comment")
+    );
     assert!(!formatted.contains("// import fnc build"));
 }
 
