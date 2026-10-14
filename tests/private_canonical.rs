@@ -301,6 +301,10 @@ fn malformed_module_and_type_prefixes_are_never_rewritten_into_exports() {
         "define struct private S as\nend\n",
         "define type pub Alias = int;\n",
         "define type private Alias = int;\n",
+        "define class pub Vault as\nend\n",
+        "define class private Vault as\nend\n",
+        "class define pub Vault as\nend\n",
+        "define class abstract Vault as\nend\n",
     ] {
         let formatted = format_source(source).expect("formatter must keep invalid syntax diagnosable");
         let first_line = source.lines().next().unwrap();
