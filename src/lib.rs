@@ -843,11 +843,13 @@ fn canonicalize_class_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
 
     for span in prefix {
         match &line[span.start..span.end] {
-            "define" if !saw_define => saw_define = true,
-            "pub" | "private" if visibility.is_none() => {
+            // Modifiers placed after 'class' are invalid and must not be
+            // moved into a valid declaration by formatting.
+            "define" if !saw_define && !saw_class => saw_define = true,
+            "pub" | "private" if visibility.is_none() && !saw_class => {
                 visibility = Some(&line[span.start..span.end])
             }
-            "abstract" if !is_abstract => is_abstract = true,
+            "abstract" if !is_abstract && !saw_class => is_abstract = true,
             "class" if !saw_class => saw_class = true,
             _ => return None,
         }
