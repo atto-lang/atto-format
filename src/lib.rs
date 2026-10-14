@@ -407,8 +407,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if let Some(kind) = end_delimited_dispatch_kind(structural)
-            .filter(|_| !structural.contains('{'))
+        if let Some(kind) =
+            end_delimited_dispatch_kind(structural).filter(|_| !structural.contains('{'))
         {
             next_order += 1;
             define_stack.push(DefineFrame {
@@ -583,7 +583,8 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
             // expression may own the next end. Do not mistake '==' for '='.
             let eq = lexed.iter().position(|token| token.text == "=")?;
             if lexed.get(eq + 1).is_some_and(|token| token.text == "=")
-                || eq > 0 && lexed[eq - 1].text == "=" {
+                || eq > 0 && lexed[eq - 1].text == "="
+            {
                 return None;
             }
             index = eq + 1;
@@ -591,9 +592,13 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     }
 
     match lexed.get(index)?.text {
-        "match" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => Some(DefineKind::Match),
+        "match" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => {
+            Some(DefineKind::Match)
+        }
         "switch" => Some(DefineKind::Switch),
-        "select" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => Some(DefineKind::Select),
+        "select" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => {
+            Some(DefineKind::Select)
+        }
         _ => None,
     }
 }
