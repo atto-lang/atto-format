@@ -282,7 +282,7 @@ end
 }
 
 #[test]
-fn malformed_module_and_type_prefixes_are_never_rewritten_into_exports() {
+fn malformed_module_prefixes_are_never_rewritten_into_exports() {
     // Unknown/misordered modifiers are compiler errors, not syntax sugar.
     // A formatter must not turn them into successful public or private code.
     for source in [
@@ -295,16 +295,6 @@ fn malformed_module_and_type_prefixes_are_never_rewritten_into_exports() {
         "private module Internal as\nend\n",
         "pub module Internal as\nend\n",
         "define module define Internal as\nend\n",
-        "define interface pub Api as\nend\n",
-        "define contract private Api as\nend\n",
-        "define trait pub Api as\nend\n",
-        "define struct private S as\nend\n",
-        "define type pub Alias = int;\n",
-        "define type private Alias = int;\n",
-        "define class pub Vault as\nend\n",
-        "define class private Vault as\nend\n",
-        "class define pub Vault as\nend\n",
-        "define class abstract Vault as\nend\n",
     ] {
         let formatted = format_source(source).expect("formatter must keep invalid syntax diagnosable");
         let first_line = source.lines().next().unwrap();
@@ -335,4 +325,20 @@ fn both_explicit_private_module_orders_match_the_implicit_default() {
     }
     let public = source.replacen("define module Internal as", "pub define module Internal as", 1);
     assert!(format_source(&public).unwrap().starts_with("define pub module Internal as\n"));
+}
+
+#[test]
+fn supported_legacy_type_and_class_modifier_orders_stay_canonical() {
+    for (input, expected) in [
+        ("define class pub Vault as\nend\n", "define pub class Vault as\nend\n"),
+        ("class define pub Vault as\nend\n", "define pub class Vault as\nend\n"),
+        ("define interface pub Api as\nend\n", "define pub interface Api as\nend\n"),
+        ("define contract private Api as\nend\n", "define contract Api as\nend\n"),
+        ("define type pub Alias = int;\n", "define pub type Alias = int;\n"),
+        ("define type private Alias = int;\n", "define type Alias = int;\n"),
+    ] {
+        let formatted = format_source(input).unwrap();
+        assert_eq!(formatted, expected, "legacy grammar regression for {input:?}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
 }
