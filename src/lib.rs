@@ -1436,7 +1436,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
         }
     }
     let mut words = line.split_whitespace().peekable();
-    let defined = words.peek() == Some(&&"define");
+    let defined = words.peek() == Some(&"define");
     if defined {
         words.next();
     } else if header.last() != Some(&"as") {
