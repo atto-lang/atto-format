@@ -1348,10 +1348,17 @@ fn is_type_first_class_field(line: &str, words: &[WordSpan]) -> bool {
         return false;
     }
     let type_start = words[1].start;
-    for field in words.iter().skip(2) {
+    for (index, field) in words.iter().enumerate().skip(2) {
         let suffix = line[field.end..].trim_start();
         if !suffix.starts_with(':') && !suffix.starts_with('=') {
             continue;
+        }
+        // A second visibility token must remain intact for the compiler to
+        // reject it. Otherwise "private pub int x: 1" becomes a public field.
+        if words[1..index].iter().any(|span| matches!(
+            &line[span.start..span.end], "pub" | "private"
+        )) {
+            return false;
         }
         let type_prefix = &line[type_start..field.start];
         if type_prefix.contains("/*") || type_prefix.contains("//") {
