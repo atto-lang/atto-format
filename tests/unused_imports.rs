@@ -182,9 +182,11 @@ pub fnc main(): void {
 }
 "#;
     let formatted = canonical(src);
-    assert!(formatted.contains(
-        "// import class Éclair from \"https://example.invalid/oresfmt: keep-import\";"
-    ));
+    assert!(
+        formatted.contains(
+            "// import class Éclair from \"https://example.invalid/oresfmt: keep-import\";"
+        )
+    );
     assert!(formatted.contains("\nimport class Météo from"));
 }
 
