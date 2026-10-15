@@ -192,6 +192,30 @@ class ParityHarnessTests(unittest.TestCase):
         self.assertFalse(result["ok"], result)
         self.assertEqual(result["fixture"], "invalid")
 
+    def test_rejects_unbounded_max_case_bytes(self):
+        # Cap before file reads or spawning a formatter/real compiler.
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5, max_case_bytes=8 * 1024 * 1024 + 1,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_cli_rejects_unbounded_max_case_bytes(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        with self.assertRaises(SystemExit) as raised:
+            main([
+                "--formatter", f"{sys.executable} {self.formatter}",
+                "--java-command", self.command,
+                "--llvm-command", self.command,
+                "--cases", str(self.path),
+                "--max-case-bytes", str(8 * 1024 * 1024 + 1),
+            ])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_rejects_formatter_erasure(self):
         case = self.path / "case.ores"
         case.write_text("allowed", encoding="utf-8")
