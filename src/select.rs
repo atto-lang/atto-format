@@ -202,7 +202,9 @@ fn invalid_legacy_arm_header(
             "(" | "[" => nesting.push(tokens[i].text),
             ")" | "]" => {
                 if !pop_matching(&mut nesting, tokens[i].text) {
-                    return true;
+                    // Preserve the established delimiter diagnostic from
+                    // the unbraced-body parser below.
+                    return false;
                 }
             }
             "=" if nesting.is_empty() && tokens.get(i + 1).is_some_and(|t| t.text == ">") => {
@@ -212,13 +214,12 @@ fn invalid_legacy_arm_header(
                 let Some(end) = matching_brace(tokens, i) else {
                     return true; // unclosed pattern/body
                 };
-                if end + 2 < limit
-                    && tokens[end + 1].text == "="
-                    && tokens[end + 2].text == ">"
-                {
+                if end + 2 < limit && tokens[end + 1].text == "=" && tokens[end + 2].text == ">" {
                     return true; // '{fields} => {body}' is never an arm.
                 }
-                if !read_binding { return false; }
+                if !read_binding {
+                    return false;
+                }
                 // '{' can be the legacy body, but not the right-hand side of
                 // an unfinished 'name: {record}' type annotation.
                 return i > start && tokens[i - 1].text == ":";
@@ -226,8 +227,9 @@ fn invalid_legacy_arm_header(
             ";" if nesting.is_empty() => return false,
             ":" if nesting.is_empty()
                 && read_binding
-                && (i == start + 1 || (i == start + 2
-                    && matches!(tokens[start].text, "const" | "val" | "let"))) =>
+                && (i == start + 1
+                    || (i == start + 2
+                        && matches!(tokens[start].text, "const" | "val" | "let"))) =>
             {
                 return true; // typed 'name: T' without the required arrow
             }
