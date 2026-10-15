@@ -1521,7 +1521,10 @@ fnc use(): int {
 }
 "#;
     let once = format_source(source).unwrap();
-    assert!(once.contains("choose<A, B=int, C=B, D=Array<C>, E=string>"), "{once}");
+    assert!(
+        once.contains("choose<A, B=int, C=B, D=Array<C>, E=string>"),
+        "{once}"
+    );
     assert!(once.contains("choose<A=int, D=Array<string>>(7)"), "{once}");
     assert!(once.contains("choose<E=bool, A=int>(7)"), "{once}");
     assert!(once.contains("choose<int, _>(7)"), "{once}");
