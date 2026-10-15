@@ -46,3 +46,19 @@ fn legacy_future_camel_case_names_remain_source_compatible() {
     assert!(once.contains(".onSuccess("), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
 }
+
+#[test]
+fn existing_ternary_and_as_question_cast_do_not_become_postfix_propagation() {
+    let source = r#"fnc ternary(bool valid): int {
+  return valid ? 3 : 4;
+}
+fnc optional_cast(Any v): Option<int> {
+  return v as? int;
+}
+"#;
+    let once = format_source(source).expect("existing valid question syntax should format");
+    assert!(once.contains("?"), "ternary delimiter lost: {once}");
+    assert!(once.contains(":"), "ternary alternative lost: {once}");
+    assert!(once.contains("as? int"), "optional cast was rewritten: {once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
