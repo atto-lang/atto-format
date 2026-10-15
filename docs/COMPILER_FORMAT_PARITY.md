@@ -24,10 +24,30 @@ python3 scripts/check_compiler_parity.py \
   --llvm-command '/path/to/oreslang-llvmc {source}'
 ```
 
-Replace `JAVA_COMPILER_COMMAND` with an actual configured Java compiler
-invocation that exits zero for admitted source and nonzero on rejection.
-No default Java CLI is assumed; don't treat an `oreslang` interpreter run
-as compile-only unless explicitly configured to be so.
+Use the real Java launcher `dev.oreslang.launcher.OresMain --check`
+with its built classpath (or a reviewed packaged equivalent). Its `--check`
+mode invokes `LinkedProgramRunner.validate` without running guest `main()`.
+For example, after building the Java repository with its GraalVM dependencies:
+
+```sh
+  --java-command 'java -cp /path/to/java/classes:/path/to/dependencies/* dev.oreslang.launcher.OresMain --check {source}' \\
+  --llvm-command '/path/to/oreslang-llvmc {source}'
+```
+
+The example lines above are command *arguments* for the Python harness,
+not a separate shell command. Set the Java classpath and native compiler
+binary paths explicitly. The LLVM compiler emits LLVM IR on success; the
+harness captures that output without executing a guest program.
+
+The Java `--check` command performs linked validation (including semantic
+and import checks), while the LLVM command also performs supported-subset
+lowering to IR. Consequently, this is **compiler admission parity**, not a
+pure grammar-parser or normalized-AST comparison.
+
+Exit code 0 means accepted, 1 means ordinary compiler rejection, 2 is a
+broken compiler invocation, negative status means a signal/crash, and any
+other exit status is treated as a tool failure. Timeouts or unavailable
+compiler binaries also fail closed.
 
 The harness creates fresh temporary source files, does **not** execute
 generated guest binaries, never invokes a shell, and records only compiler
