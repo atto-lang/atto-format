@@ -300,10 +300,16 @@ fn replace_atomically(
             name.to_string_lossy(),
             std::process::id()
         ));
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path);
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        // Newly created source files must not become world-readable even
+        // briefly before the destination's original mode is restored.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&temp_path);
         let mut file = match file {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
