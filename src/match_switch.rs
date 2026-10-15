@@ -89,6 +89,18 @@ pub(crate) fn normalize(source: &str) -> String {
                     "[" => brackets += 1,
                     "]" => brackets = brackets.saturating_sub(1),
                     "{" if parens == 0 && brackets == 0 => {
+                        // The first brace in 'on Foo as {v} -> { ... }'
+                        // is a *record pattern*, not an executable block.
+                        // Only skip a balanced shape if '->' follows it.
+                        if let Some(shape_end) = matching_brace(&lexed, body) {
+                            if shape_end + 2 < close
+                                && lexed[shape_end + 1].text == "-"
+                                && lexed[shape_end + 2].text == ">"
+                            {
+                                body = shape_end + 1;
+                                continue;
+                            }
+                        }
                         // An inline 'structural { ... }' pattern shape is
                         // not the arm body; keep it intact and scan onward.
                         if body > arm && lexed[body - 1].text == "structural" {
@@ -120,32 +132,18 @@ pub(crate) fn normalize(source: &str) -> String {
                 }
                 inserted.insert(lexed[start].start, "default");
             }
+            // Canonical Java/GraalVM match syntax uses 'on _ ->' for its
+            // catch-all; never silently rewrite it to switch's 'default'.
+            // Migrate only the legacy 'on default' spelling to 'on _'.
             if matches!(kind, Kind::Match)
                 && lexed[start].text == "on"
                 && start + 1 < body
-                && matches!(lexed[start + 1].text, "_" | "default")
-            // The tokenizer ignores comments. Keep intervening trivia
-            // exactly as authored, including line and block comments.
+                && lexed[start + 1].text == "default"
             {
-                // When a comment appears between 'on' and the wildcard,
-                // place canonical 'default' on a fresh line immediately.
-                // Otherwise a second formatting pass would split the line
-                // again, violating formatter idempotence.
-                if !source[lexed[start].end..lexed[start + 1].start]
-                    .trim()
-                    .is_empty()
-                {
-                    break_before(source, lexed[start + 1].start, &mut edits);
-                }
-                for pos in lexed[start].start..lexed[start].end {
+                for pos in lexed[start + 1].start..lexed[start + 1].end {
                     removed.insert(pos);
                 }
-                if lexed[start + 1].text == "_" {
-                    for pos in lexed[start + 1].start..lexed[start + 1].end {
-                        removed.insert(pos);
-                    }
-                    inserted.insert(lexed[start + 1].start, "default");
-                }
+                inserted.insert(lexed[start + 1].start, "_");
             }
             let mut next = end + 1;
             while next < close && matches!(lexed[next].text, "," | ";") {
@@ -200,7 +198,7 @@ mod tests {
         let output = normalize(input);
         assert!(output.contains("select { default: { return; }, }"));
         assert!(output.contains("on Tag as (a, b) {"));
-        assert!(output.contains("default {"));
+        assert!(output.contains("on _ {"));
         assert!(output.contains("\"case } , ;\""));
     }
 
@@ -220,11 +218,11 @@ match msg over {
 "#;
         let output = normalize(source);
         assert!(output.contains("default {"), "{output}");
-        assert!(output.contains("default as remaining {"), "{output}");
+        assert!(output.contains("on _ as remaining {"), "{output}");
         assert!(output.contains("on Thing.Tuple as (_, item) {"), "{output}");
         assert!(output.contains("default {"), "{output}");
         assert!(!output.contains("on default"), "{output}");
-        assert!(!output.contains("on _ as"), "{output}");
+        assert!(output.contains("on _ as"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 
@@ -242,8 +240,7 @@ match msg over {
 }
 "#;
         let output = normalize(source);
-        assert!(output.contains("/*why*/ \ndefault as item"), "{output}");
-        assert!(!output.contains("on /*why*/ _"), "{output}");
+        assert!(output.contains("on /*why*/ _ as item"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 

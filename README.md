@@ -12,7 +12,7 @@ identical behavior.
 - static `select`, `nb select`, and `try select` arms are indented one level;
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
-- braced `switch` `_` fallback and `match ... over` `on _` / `on default` fallback spellings are formatted as `default`, while tuple-pattern `_` discards are preserved;
+- braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
