@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_compiler_parity import audit_case, command_argv, main
+from check_compiler_parity import audit_case, command_argv, execute, main
 
 
 class ParityHarnessTests(unittest.TestCase):
@@ -91,6 +91,37 @@ class ParityHarnessTests(unittest.TestCase):
             command_argv('compiler --check "{source}"', self.path / "input.ores"),
             ["compiler", "--check", str(self.path / "input.ores")],
         )
+
+    def test_compiler_rejection_distinct_from_broken_invocation(self):
+        expected_codes = ((0, "accept"), (1, "reject"),
+                          (2, "usage"), (4, "error"))
+        for exit_code, expected_status in expected_codes:
+            with self.subTest(exit_code=exit_code):
+                argv = [sys.executable, "-c",
+                        f"import sys; sys.exit({exit_code})"]
+                actual, _ = execute(argv, 5)
+                self.assertEqual(actual, expected_status)
+
+    def test_synthetic_reject_script_exits_cleanly(self):
+        # Do not let an accidentally invalid mock count as a compiler reject.
+        reject = self.path / "clean_reject.py"
+        reject.write_text("import sys\\nsys.exit(1)\\n", encoding="utf-8")
+        result, diagnostics = execute([sys.executable, str(reject)], 5)
+        self.assertEqual(result, "reject")
+        self.assertEqual(diagnostics, b"")
+
+    def test_usage_errors_cannot_fake_successful_rejection(self):
+        case = self.path / "usage.ores"
+        case.write_text("allowed", encoding="utf-8")
+        bad = self.path / "bad_cli.py"
+        bad.write_text("import sys\\nsys.exit(2)\\n", encoding="utf-8")
+        broken_command = f'"{sys.executable}" "{bad}" {{source}}'
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            broken_command, broken_command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["backends"]["java"]["original"], "usage")
 
     def test_cli_fails_closed_when_no_compiler_accepts(self):
         case = self.path / "case.ores"
