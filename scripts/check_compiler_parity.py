@@ -7,6 +7,7 @@ not proof of equivalent semantics or a successful parser round-trip.
 """
 import argparse
 import json
+import stat
 import shlex
 import subprocess
 import tempfile
@@ -24,10 +25,13 @@ def command_argv(template, source):
 
 def execute(argv, timeout):
     try:
-        result = subprocess.run(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=timeout, check=False,
-        )
+        with tempfile.TemporaryFile() as diagnostics:
+            result = subprocess.run(
+                argv, stdout=subprocess.DEVNULL, stderr=diagnostics,
+                timeout=timeout, check=False,
+            )
+            diagnostics.seek(0)
+            diagnostic_tail = diagnostics.read(4000)
     except subprocess.TimeoutExpired:
         return "timeout", b""
     except OSError as exc:
@@ -43,11 +47,28 @@ def execute(argv, timeout):
         status = "crashed"
     else:
         status = "error"
-    return status, result.stderr[:4000]
+    return status, diagnostic_tail
 
 
-def audit_case(path, formatter, java_command, llvm_command, timeout):
-    original = path.read_bytes()
+def audit_case(path, formatter, java_command, llvm_command, timeout,
+               max_case_bytes=1024 * 1024):
+    # Never submit symlinks, special files or unbounded fixtures to compilers.
+    # Check both reported size and actual bytes to catch files growing mid-read.
+    try:
+        if path.is_symlink():
+            raise ValueError("fixture is a symlink")
+        details = path.stat()
+        if not stat.S_ISREG(details.st_mode):
+            raise ValueError("fixture is not a regular file")
+        if details.st_size > max_case_bytes:
+            raise ValueError("fixture exceeds byte limit")
+        with path.open("rb") as source:
+            original = source.read(max_case_bytes + 1)
+        if len(original) > max_case_bytes:
+            raise ValueError("fixture exceeds byte limit")
+    except (OSError, ValueError) as exc:
+        return {"case": path.name, "ok": False,
+                "fixture": "invalid", "detail": str(exc)}
     with tempfile.TemporaryDirectory(prefix="oresfmt-parity-") as directory:
         root = Path(directory)
         original_path = root / "original" / path.name
@@ -69,6 +90,17 @@ def audit_case(path, formatter, java_command, llvm_command, timeout):
                     "formatter": "reject",
                     "detail": formatted.stderr[:4000].decode(
                         "utf-8", errors="replace")}
+        # A broken formatter must not erase a program or inject malformed text
+        # and be rescued by permissive compiler command-line wrappers.
+        if (len(formatted.stdout) > max_case_bytes * 2
+                or (original.strip() and not formatted.stdout.strip())):
+            return {"case": path.name, "ok": False,
+                    "formatter": "invalid_output"}
+        try:
+            formatted.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"case": path.name, "ok": False,
+                    "formatter": "invalid_utf8"}
         formatted_path.write_bytes(formatted.stdout)
 
         # A second formatter pass must be identical before any compiler checks.
@@ -115,6 +147,8 @@ def main(argv=None):
                         default=Path(__file__).resolve().parent.parent /
                         "tests" / "compiler_parity_cases")
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--max-case-bytes", type=int, default=1024 * 1024,
+                        help="maximum input fixture bytes (default: 1 MiB)")
     parser.add_argument("--allow-zero-shared-accepted", action="store_true",
                         help="diagnostic only: permit no jointly accepted fixtures")
     parser.add_argument("--allow-backend-divergence", action="store_true",
@@ -126,8 +160,11 @@ def main(argv=None):
         parser.error("no .ores cases were found; refusing a vacuous pass")
     if args.timeout <= 0:
         parser.error("timeout must be positive")
+    if args.max_case_bytes <= 0:
+        parser.error("max-case-bytes must be positive")
     results = [audit_case(path, shlex.split(args.formatter),
-                          args.java_command, args.llvm_command, args.timeout)
+                          args.java_command, args.llvm_command, args.timeout,
+                          args.max_case_bytes)
                for path in cases]
     shared = sum(case.get("shared_supported", False) for case in results)
     ok = all(case["ok"] for case in results)
