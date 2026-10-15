@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_compiler_parity import audit_case, command_argv, execute, main
+from check_compiler_parity import audit_case, command_argv, execute, main, run_process
 
 
 class ParityHarnessTests(unittest.TestCase):
@@ -83,6 +83,18 @@ class ParityHarnessTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"], result)
         self.assertEqual(result["backends"]["java"]["original"], "unavailable")
+
+    def test_empty_formatter_argv_fails_closed(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        status, returncode, stdout, stderr = run_process([], 5, stdout_limit=16)
+        self.assertEqual(status, "unavailable")
+        self.assertIsNone(returncode)
+        self.assertEqual(stdout, b"")
+        self.assertIn(b"empty process command", stderr)
+        result = audit_case(case, [], self.command, self.command, 5)
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["formatter"], "unavailable")
 
     def test_command_template_requires_explicit_source(self):
         with self.assertRaises(ValueError):
