@@ -556,10 +556,10 @@ fn canonicalize_legacy_catchall(
         }
         DefineKind::Match if starts_word(line, "on") => {
             let rest = line[2..].trim_start();
-            if starts_word(rest, "_") {
-                format!("default{}", &rest[1..])
-            } else if starts_word(rest, "default") {
-                rest.to_owned()
+            // 'on _' is the only canonical catch-all spelling for match.
+            // Do not turn it into the switch-only 'default' keyword.
+            if starts_word(rest, "default") {
+                format!("on _{}", &rest["default".len()..])
             } else {
                 line.to_owned()
             }
