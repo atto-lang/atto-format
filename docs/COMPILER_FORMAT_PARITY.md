@@ -36,8 +36,9 @@ For example, after building the Java repository with its GraalVM dependencies:
 
 The example lines above are command *arguments* for the Python harness,
 not a separate shell command. Set the Java classpath and native compiler
-binary paths explicitly. The LLVM compiler emits LLVM IR on success; the
-harness captures that output without executing a guest program.
+binary paths explicitly. The LLVM compiler emits LLVM IR on success; the harness discards its
+standard output rather than retaining generated IR, and never executes a
+guest program.
 
 The Java `--check` command performs linked validation (including semantic
 and import checks), while the LLVM command also performs supported-subset
@@ -51,7 +52,14 @@ compiler binaries also fail closed.
 
 The harness creates fresh temporary source files, does **not** execute
 generated guest binaries, never invokes a shell, and records only compiler
-accept/reject/timeout/unavailable status. It fails if the formatter is not
+accept/reject/timeout/unavailable status. Fixture inputs must be regular,
+non-symlink files containing valid UTF-8. Input size defaults to 1 MiB,
+configurable with `--max-case-bytes`. Both formatter passes are limited to
+twice that many stdout bytes and terminated immediately on overflow or
+timeout; compiler stdout is discarded, while stderr is drained and retained
+only up to 4,000 bytes. Child processes receive closed stdin. On POSIX,
+timeouts and output-flood failures terminate the entire spawned process group
+rather than leaving a child or descendant running. It fails if the formatter is not
 idempotent, if either compiler changes its acceptance decision after
 formatting, or if either backend times out or cannot run. By default the command also **requires at least one fixture to be accepted by
 both compilers**, and requires both compilers to agree on each fixture's
@@ -70,6 +78,11 @@ tests harness behavior with deliberately simulated compiler commands. This
 is a **harness self-test only**. Actual Java/LLVM cross-backend admission
 requires independently built compiler binaries and the command above; those
 are not silently substituted or fetched across private organizations.
+
+Resource controls here are a fail-closed test-harness safeguard, **not** a
+general OS sandbox: a compiler may still consume CPU, disk through its own
+files, or memory until it exits or the timeout fires. Run untrusted compiler
+executables in an independently resource-limited CI environment.
 
 All fixtures should eventually be annotated with explicit backend
 capability tiers once Java and LLVM offer stable parse-only entrypoints.
