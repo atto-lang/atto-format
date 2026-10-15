@@ -44,6 +44,10 @@ def run_process(argv, timeout, stdout_limit=None):
     stdout_limit=None discards stdout for compiler admission commands.
     Neither stdout nor stderr is ever spooled without an active byte bound.
     """
+    # shlex.split("") produces an empty argv. Popen([]) raises IndexError,
+    # which used to escape the JSON/failed-gate path entirely.
+    if not argv:
+        return "unavailable", None, b"", b"empty process command"
     try:
         process = subprocess.Popen(
             argv, stdin=subprocess.DEVNULL,
