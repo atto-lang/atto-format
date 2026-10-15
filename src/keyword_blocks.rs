@@ -212,7 +212,9 @@ fn split_keyword_blocks(source: &str) -> String {
         let scanned = lex_line(line, &mut lex);
         let tokens = scanned.tokens;
         let mut cuts: Vec<usize> = Vec::new();
-        let mut saw_keyword_arm = false;
+        // A keyword if may have opened on a previous line. Every logical
+        // statement in its body still needs its own line.
+        let mut saw_keyword_arm = !frames.is_empty();
         let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
 
         for (index, token) in tokens.iter().enumerate() {
