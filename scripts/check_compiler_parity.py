@@ -42,26 +42,32 @@ def audit_case(path, formatter, java_command, llvm_command, timeout):
         original_path = root / "original.ores"
         formatted_path = root / "formatted.ores"
         original_path.write_bytes(original)
-        status, err = execute(formatter + ["--stdout", str(original_path)], timeout)
-        if status != "accept":
-            return {"case": path.name, "ok": False, "formatter": status,
-                    "detail": err.decode("utf-8", errors="replace")}
-        formatted = subprocess.run(
-            formatter + ["--stdout", str(original_path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=timeout, check=False,
-        )
+        try:
+            formatted = subprocess.run(
+                formatter + ["--stdout", str(original_path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=timeout, check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return {"case": path.name, "ok": False,
+                    "formatter": "unavailable", "detail": str(exc)}
         if formatted.returncode != 0:
-            return {"case": path.name, "ok": False, "formatter": "reject"}
+            return {"case": path.name, "ok": False,
+                    "formatter": "reject",
+                    "detail": formatted.stderr[:4000].decode(
+                        "utf-8", errors="replace")}
         formatted_path.write_bytes(formatted.stdout)
 
         # A second formatter pass must be identical before any compiler checks.
-        second = subprocess.run(
-            formatter + ["--stdout", str(formatted_path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=timeout, check=False,
-        )
-        stable = second.returncode == 0 and second.stdout == formatted.stdout
+        try:
+            second = subprocess.run(
+                formatter + ["--stdout", str(formatted_path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=timeout, check=False,
+            )
+            stable = second.returncode == 0 and second.stdout == formatted.stdout
+        except (subprocess.TimeoutExpired, OSError):
+            stable = False
         statuses = {}
         for backend, command in (("java", java_command), ("llvm", llvm_command)):
             before, _ = execute(command_argv(command, original_path), timeout)
