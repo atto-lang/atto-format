@@ -27,7 +27,8 @@ def execute(argv, timeout):
     try:
         with tempfile.TemporaryFile() as diagnostics:
             result = subprocess.run(
-                argv, stdout=subprocess.DEVNULL, stderr=diagnostics,
+                argv, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=diagnostics,
                 timeout=timeout, check=False,
             )
             diagnostics.seek(0)
@@ -76,43 +77,60 @@ def audit_case(path, formatter, java_command, llvm_command, timeout,
         original_path.parent.mkdir()
         formatted_path.parent.mkdir()
         original_path.write_bytes(original)
-        try:
-            formatted = subprocess.run(
-                formatter + ["--stdout", str(original_path)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=timeout, check=False,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            return {"case": path.name, "ok": False,
-                    "formatter": "unavailable", "detail": str(exc)}
-        if formatted.returncode != 0:
-            return {"case": path.name, "ok": False,
-                    "formatter": "reject",
-                    "detail": formatted.stderr[:4000].decode(
-                        "utf-8", errors="replace")}
+        # Spool output to disk so a faulty formatter cannot allocate
+        # unbounded Python memory before we enforce the output-byte ceiling.
+        with tempfile.TemporaryFile() as first_output, tempfile.TemporaryFile() as errors:
+            try:
+                formatted = subprocess.run(
+                    formatter + ["--stdout", str(original_path)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=first_output, stderr=errors,
+                    timeout=timeout, check=False,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                return {"case": path.name, "ok": False,
+                        "formatter": "unavailable", "detail": str(exc)}
+            if formatted.returncode != 0:
+                errors.seek(0)
+                return {"case": path.name, "ok": False,
+                        "formatter": "reject",
+                        "detail": errors.read(4000).decode(
+                            "utf-8", errors="replace")}
+            if first_output.tell() > max_case_bytes * 2:
+                return {"case": path.name, "ok": False,
+                        "formatter": "invalid_output"}
+            first_output.seek(0)
+            formatted_bytes = first_output.read()
+
         # A broken formatter must not erase a program or inject malformed text
         # and be rescued by permissive compiler command-line wrappers.
-        if (len(formatted.stdout) > max_case_bytes * 2
-                or (original.strip() and not formatted.stdout.strip())):
+        if original.strip() and not formatted_bytes.strip():
             return {"case": path.name, "ok": False,
                     "formatter": "invalid_output"}
         try:
-            formatted.stdout.decode("utf-8")
+            formatted_bytes.decode("utf-8")
         except UnicodeDecodeError:
             return {"case": path.name, "ok": False,
                     "formatter": "invalid_utf8"}
-        formatted_path.write_bytes(formatted.stdout)
+        formatted_path.write_bytes(formatted_bytes)
 
-        # A second formatter pass must be identical before any compiler checks.
-        try:
-            second = subprocess.run(
-                formatter + ["--stdout", str(formatted_path)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=timeout, check=False,
-            )
-            stable = second.returncode == 0 and second.stdout == formatted.stdout
-        except (subprocess.TimeoutExpired, OSError):
-            stable = False
+        # A second formatter pass must be identical before compiler checks.
+        with tempfile.TemporaryFile() as second_output:
+            try:
+                second = subprocess.run(
+                    formatter + ["--stdout", str(formatted_path)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=second_output, stderr=subprocess.DEVNULL,
+                    timeout=timeout, check=False,
+                )
+                if second_output.tell() > max_case_bytes * 2:
+                    stable = False
+                else:
+                    second_output.seek(0)
+                    stable = (second.returncode == 0
+                              and second_output.read() == formatted_bytes)
+            except (subprocess.TimeoutExpired, OSError):
+                stable = False
         statuses = {}
         for backend, command in (("java", java_command), ("llvm", llvm_command)):
             before, _ = execute(command_argv(command, original_path), timeout)
