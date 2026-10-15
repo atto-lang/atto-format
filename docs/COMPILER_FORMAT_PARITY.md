@@ -2,7 +2,9 @@
 
 The formatter is not a semantic compiler. It cannot prove that two programs
 have identical runtime behavior. This harness offers a **narrower, honest gate**:
-the original and formatted source must retain the same acceptance status in\neach independently provided compiler; the two compilers must agree on\nadmission for shared-subset fixtures; and formatting must be idempotent.
+the original and formatted source must retain the same acceptance status in
+each independently provided compiler; the two compilers must agree on
+admission for shared-subset fixtures; and formatting must be idempotent.
 
 The fixtures in `tests/compiler_parity_cases` are deliberately restricted to
 the small scalar intersection of the current Java/GraalVM and LLVM frontends,
@@ -19,8 +21,7 @@ cargo build --bins
 python3 scripts/check_compiler_parity.py \
   --formatter './target/debug/oresfmt' \
   --java-command 'JAVA_COMPILER_COMMAND {source}' \
-  --llvm-command '/path/to/oreslang-llvmc {source}' \
-  
+  --llvm-command '/path/to/oreslang-llvmc {source}'
 ```
 
 Replace `JAVA_COMPILER_COMMAND` with an actual configured Java compiler
@@ -32,7 +33,11 @@ The harness creates fresh temporary source files, does **not** execute
 generated guest binaries, never invokes a shell, and records only compiler
 accept/reject/timeout/unavailable status. It fails if the formatter is not
 idempotent, if either compiler changes its acceptance decision after
-formatting, or if either backend times out or cannot run. By default the command also **requires at least one fixture to be accepted by\nboth compilers**, and requires both compilers to agree on each fixture's\nadmission status. Incompatible backends are not silently treated as passing.\nFor non-gating diagnostic inventories only, `--allow-zero-shared-accepted`\nand `--allow-backend-divergence` explicitly relax these checks.
+formatting, or if either backend times out or cannot run. By default the command also **requires at least one fixture to be accepted by
+both compilers**, and requires both compilers to agree on each fixture's
+admission status. Incompatible backends are not silently treated as passing.
+For non-gating diagnostic inventories only, `--allow-zero-shared-accepted`
+and `--allow-backend-divergence` explicitly relax these checks.
 
 An individual backend rejecting both forms is reported as unsupported, not
 as proof of semantic equivalence. Compiler acceptance parity alone is **not**
