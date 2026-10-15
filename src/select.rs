@@ -186,6 +186,47 @@ fn slim_arrow_before_select_body(
     None
 }
 
+/// Reject malformed executable arrows and incomplete typed binding headers
+/// instead of wrapping tokens that belong to the header into a synthetic body.
+/// This check is restricted to the token range after the *readiness colon*.
+fn invalid_legacy_arm_header(
+    tokens: &[Token<'_>],
+    start: usize,
+    limit: usize,
+    read_binding: bool,
+) -> bool {
+    let mut i = start;
+    let mut nesting = Vec::new();
+    let mut saw_binding = false;
+    while i < limit {
+        match tokens[i].text {
+            "(" | "[" => nesting.push(tokens[i].text),
+            ")" | "]" => {
+                if !pop_matching(&mut nesting, tokens[i].text) {
+                    return true;
+                }
+            }
+            "=" if nesting.is_empty() && tokens.get(i + 1).is_some_and(|t| t.text == ">") => {
+                return true; // '=>' never delimits an executable select arm.
+            }
+            "{" if nesting.is_empty() => {
+                if !read_binding { return false; }
+                // '{' can be the legacy body, but not the right-hand side of
+                // an unfinished 'name: {record}' type annotation.
+                return saw_binding && i > start && tokens[i - 1].text == ":";
+            }
+            ";" if nesting.is_empty() => return false,
+            ":" if nesting.is_empty() && saw_binding => return true,
+            "val" | "const" | "let" if nesting.is_empty() && i == start => {
+                saw_binding = true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
     let tokens = tokens(source);
     let mut edits = BTreeMap::<usize, String>::new();
@@ -325,6 +366,12 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     (body, tokens[body - 1].end)
                 } else {
+                    if invalid_legacy_arm_header(&tokens, header + 1, close, read || await_future) {
+                        return Err(error(
+                            tokens[arm].start,
+                            "invalid select arm header: typed bindings require '->', and executable '=>' is forbidden",
+                        ));
+                    }
                     let mut body = header + 1;
                     if (read || await_future)
                         && tokens
