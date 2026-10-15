@@ -45,3 +45,28 @@ fn a_slim_arrow_must_lead_directly_to_a_braced_body() {
     let err = format_source("do select { when readch channel: int x -> consume(x); }").unwrap_err();
     assert!(err.message().contains("braced arm body"), "{err}");
 }
+
+#[test]
+fn fat_arrows_and_dangling_typed_read_headers_fail_closed() {
+    for invalid in [
+        "do select { when readch channel: int n => { consume(n); } }",
+        "do select { when readch channel: let {x} => { consume(x); } }",
+        "do select { when writech output, 1: => { sent(); } }",
+        "do select { default: => {} }",
+        "do select { when readch channel: const payload: {x: int} { consume(payload); } }",
+        "do select { when readch channel: payload: {x: int} { consume(payload); } }",
+    ] {
+        assert!(
+            format_source(invalid).is_err(),
+            "malformed executable arm formatted silently: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn legacy_unbraced_body_keeps_nested_expressions() {
+    let input = "select { when readch channel: val x process(x ? first : second); default: }\\n";
+    let output = format_source(input).unwrap();
+    assert!(output.contains("process(x ? first : second);"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
