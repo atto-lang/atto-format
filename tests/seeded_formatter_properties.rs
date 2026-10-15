@@ -8,7 +8,10 @@ struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {
         // 64-bit LCG: repeatable on every Rust target, including MSRV 1.85.
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0
     }
 
@@ -53,19 +56,19 @@ fn case(seed: u64) -> String {
     } else {
         format!("if nested; then first(); second(); fi")
     };
-    format!(
-        "fnc generated() -> int {{\nif ready; then{gap}{inner}\nfi\nreturn {value};\n}}\n"
-    )
+    format!("fnc generated() -> int {{\nif ready; then{gap}{inner}\nfi\nreturn {value};\n}}\n")
 }
 
 #[test]
 fn seeded_conditional_cases_preserve_structure_and_reach_fixed_point() {
     for seed in 0..512_u64 {
         let input = case(seed);
-        let formatted = format_source(&input)
-            .unwrap_or_else(|error| panic!("seed {seed}: initial format failed: {error:?}\n{input}"));
-        let twice = format_source(&formatted)
-            .unwrap_or_else(|error| panic!("seed {seed}: second format failed: {error:?}\n{formatted}"));
+        let formatted = format_source(&input).unwrap_or_else(|error| {
+            panic!("seed {seed}: initial format failed: {error:?}\n{input}")
+        });
+        let twice = format_source(&formatted).unwrap_or_else(|error| {
+            panic!("seed {seed}: second format failed: {error:?}\n{formatted}")
+        });
         assert_eq!(twice, formatted, "seed {seed}: not idempotent");
         assert_eq!(
             significant(&input),
@@ -96,7 +99,10 @@ fn guards_continued_returns_with_skipped_trivia() {
     for separator in ["\n", "\n\n", "\n// note\n", "\n\n// note\n"] {
         let input = format!("fnc f() -> int {{\nreturn item{separator}  .value()\n}}\n");
         let formatted = format_source(&input).unwrap();
-        assert!(!formatted.contains("return item;"), "{separator:?}: {formatted}");
+        assert!(
+            !formatted.contains("return item;"),
+            "{separator:?}: {formatted}"
+        );
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }
