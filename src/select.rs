@@ -175,9 +175,7 @@ fn slim_arrow_before_select_body(
                     && tokens[end + 2].text == ">")
                     .then_some(end + 1);
             }
-            "-" if nesting.is_empty()
-                && i + 1 < limit && tokens[i + 1].text == ">" =>
-            {
+            "-" if nesting.is_empty() && i + 1 < limit && tokens[i + 1].text == ">" => {
                 return Some(i);
             }
             ";" if nesting.is_empty() => return None,
@@ -327,40 +325,40 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     (body, tokens[body - 1].end)
                 } else {
-                let mut body = header + 1;
-                if (read || await_future)
-                    && tokens
-                        .get(body)
-                        .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
-                {
-                    if !tokens.get(body + 1).is_some_and(|t| {
-                        t.text
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_alphabetic() || c == '_')
-                            && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    }) {
-                        return Err(error(
-                            tokens[arm].start,
-                            if read {
-                                "readch select arm binding requires a name"
-                            } else {
-                                "await select arm binding requires a name"
-                            },
-                        ));
+                    let mut body = header + 1;
+                    if (read || await_future)
+                        && tokens
+                            .get(body)
+                            .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
+                    {
+                        if !tokens.get(body + 1).is_some_and(|t| {
+                            t.text
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_alphabetic() || c == '_')
+                                && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        }) {
+                            return Err(error(
+                                tokens[arm].start,
+                                if read {
+                                    "readch select arm binding requires a name"
+                                } else {
+                                    "await select arm binding requires a name"
+                                },
+                            ));
+                        }
+                        body += 2; // binding kind and name
+                        if tokens.get(body).is_some_and(|t| t.text == ";") {
+                            removed.insert(tokens[body].start);
+                            body += 1;
+                        }
                     }
-                    body += 2; // binding kind and name
-                    if tokens.get(body).is_some_and(|t| t.text == ";") {
-                        removed.insert(tokens[body].start);
-                        body += 1;
-                    }
-                }
-                let header_end = if body > 0 && tokens[body - 1].text == ";" {
-                    tokens[body - 2].end
-                } else {
-                    tokens[body - 1].end
-                };
-                (body, header_end)
+                    let header_end = if body > 0 && tokens[body - 1].text == ";" {
+                        tokens[body - 2].end
+                    } else {
+                        tokens[body - 1].end
+                    };
+                    (body, header_end)
                 }
             };
             if body < close && tokens[body].text == "{" {
