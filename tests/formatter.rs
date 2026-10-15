@@ -434,7 +434,7 @@ fi
 "#;
     let expected = r#"shared actor Cleaner {
   pub compact() -> void {
-    if ready then
+    if ready; then
       actor.gc();
     else
       return;
@@ -587,7 +587,7 @@ fi
 }
 "#;
     let formatted = format_source(valid).unwrap();
-    assert!(formatted.contains("  if ready then"));
+    assert!(formatted.contains("  if ready; then"));
     assert!(formatted.contains("    while busy; do"));
     assert!(formatted.contains("  fi"));
 
@@ -628,13 +628,13 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0 then
+  if handler_id < 0; then
     return Err("handler_id must be non-negative");
   fi
-  if !pattern.is_valid() then
+  if !pattern.is_valid(); then
     return Err("invalid route pattern");
   fi
-  if pattern.size() > self.max_segments_value then
+  if pattern.size() > self.max_segments_value; then
     return Err("route pattern exceeds max_segments");
   fi
 }
@@ -717,7 +717,7 @@ fi
     let expected = r#"fnc choose(int value) -> int {
   if value < 0 then
     return -1;
-  elif value == 0 then
+  elif value == 0; then
     return 0;
   elif value == 1 then
     return 1;
@@ -742,7 +742,7 @@ fi
 "#;
     let expected = r#"fnc text() -> String {
   // elseif fake; do
-  if ready then
+  if ready; then
     return "else if nope do";
   else
     return "then";
@@ -950,9 +950,9 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0 then
+  if handler_id < 0; then
     return Err("handler_id must be non-negative");
-  elif !pattern.is_valid() then
+  elif !pattern.is_valid(); then
     return Err("invalid route pattern");
   elif pattern.size() > self.max_segments_value then
     return Err("route pattern exceeds max_segments");

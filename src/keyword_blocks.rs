@@ -110,6 +110,15 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
         )
 }
 
+// A contextual identifier used as a call, index, or member is not
+// a control-flow delimiter.
+fn is_keyword_delimiter(tokens: &[Token<'_>], index: usize) -> bool {
+    let prev = index.checked_sub(1).and_then(|i| tokens.get(i));
+    let next = tokens.get(index + 1);
+    !prev.is_some_and(|token| token.text == ".")
+        && !next.is_some_and(|token| matches!(token.text, "(" | "[" | "."))
+}
+
 fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
@@ -132,7 +141,7 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
             "{" if parens == 0 && brackets == 0 => return false,
             "then" | "do" if parens == 0 && brackets == 0 => {
                 let absolute = start + offset;
-                if absolute == 0 || tokens[absolute - 1].text != "." {
+                if is_keyword_delimiter(tokens, absolute) {
                     return true;
                 }
             }
@@ -185,6 +194,7 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
         || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
+        || next.starts_with("/*")
         || ["on", "when", "case", "default", "as", "is", "with", "over"]
             .iter()
             .any(|word| crate::starts_word(next, word))
@@ -202,7 +212,9 @@ fn split_keyword_blocks(source: &str) -> String {
         let scanned = lex_line(line, &mut lex);
         let tokens = scanned.tokens;
         let mut cuts: Vec<usize> = Vec::new();
-        let mut saw_keyword_arm = false;
+        // A keyword if may have opened on a previous line. Every logical
+        // statement in its body still needs its own line.
+        let mut saw_keyword_arm = !frames.is_empty();
         let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
 
         for (index, token) in tokens.iter().enumerate() {
@@ -234,7 +246,7 @@ fn split_keyword_blocks(source: &str) -> String {
                 "then" | "do"
                     if frames.last() == Some(&Phase::Header)
                         && index > 0
-                        && tokens[index - 1].text != "." =>
+                        && is_keyword_delimiter(&tokens, index) =>
                 {
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Body;
@@ -244,14 +256,22 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "elif" | "elseif"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
-                "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "else"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
@@ -266,6 +286,7 @@ fn split_keyword_blocks(source: &str) -> String {
                     }
                 }
                 "fi" if frames.last() == Some(&Phase::Body)
+                    && is_keyword_delimiter(&tokens, index)
                     && (statement_boundary(&tokens, index)
                         || inline_return_before(&tokens, index)
                         || tokens
@@ -371,7 +392,12 @@ fn terminate_simple_returns(source: &str) -> String {
             }
             invalid |= parens < 0 || brackets < 0;
         }
-        let next = lines.get(index + 1).map_or("", |line| line.trim_start());
+        let next = lines
+            .iter()
+            .skip(index + 1)
+            .map(|line| line.trim_start())
+            .find(|line| !line.is_empty() && !line.starts_with("//"))
+            .unwrap_or("");
         let definitely_complete = bare_return
             || (simple_expression_return
                 && !return_expression_is_multiline(tokens, next)

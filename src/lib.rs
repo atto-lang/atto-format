@@ -181,10 +181,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             .collect();
         let structural = structural_content.trim_start();
 
-        let starts_end = starts_word(structural, "end");
-        let starts_fi = starts_word(structural, "fi");
-        let starts_done = starts_word(structural, "done");
-        let branch_line = starts_word(structural, "else") || starts_word(structural, "elif");
+        let starts_end = starts_block_keyword(structural, "end");
+        let starts_fi = starts_block_keyword(structural, "fi");
+        let starts_done = starts_block_keyword(structural, "done");
+        let branch_line =
+            starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
@@ -614,6 +615,16 @@ fn starts_word(line: &str, word: &str) -> bool {
         .is_none_or(|c| !is_ident_char(c))
 }
 
+// Contextual names such as fi(), else(), and done() are ordinary calls,
+// not structural keyword lines. Preserve them even after inline expansion.
+fn starts_block_keyword(line: &str, word: &str) -> bool {
+    starts_word(line, word)
+        && !matches!(
+            line[word.len()..].trim_start().chars().next(),
+            Some('(' | '[' | '.')
+        )
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
@@ -627,9 +638,9 @@ fn leading_closing_braces(line: &str) -> usize {
 
 fn is_closer_line(line: &str) -> bool {
     line.starts_with('}')
-        || starts_word(line, "end")
-        || starts_word(line, "fi")
-        || starts_word(line, "done")
+        || starts_block_keyword(line, "end")
+        || starts_block_keyword(line, "fi")
+        || starts_block_keyword(line, "done")
 }
 
 fn ends_statement(line: &str) -> bool {
@@ -1594,11 +1605,15 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 let before = prefix.trim_end();
                 // The branch introducer is syntactic. A semicolon immediately
                 // before then/do is legacy punctuation, not a statement end.
-                // The canonical spelling is "if condition then" on one line.
-                // Replace the optional semicolon and all whitespace between
-                // the condition and branch marker in one lexical rewrite.
-                let replacement_start = before.trim_end_matches(';').trim_end().len();
-                let replacement = " then".to_string();
+                // Preserve an explicit conditional separator while
+                // normalizing all surrounding whitespace and the then marker.
+                let has_separator = before.ends_with(';');
+                let replacement_start = if has_separator {
+                    before.trim_end_matches(';').trim_end().len()
+                } else {
+                    before.len()
+                };
+                let replacement = if has_separator { "; then" } else { " then" }.to_string();
                 replacements.push((replacement_start, last.end, replacement));
             }
         }
