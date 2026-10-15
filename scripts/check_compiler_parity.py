@@ -32,7 +32,18 @@ def execute(argv, timeout):
         return "timeout", b""
     except OSError as exc:
         return "unavailable", str(exc).encode("utf-8", errors="replace")
-    return ("accept" if result.returncode == 0 else "reject"), result.stderr[:4000]
+    if result.returncode == 0:
+        status = "accept"
+    elif result.returncode == 1:
+        status = "reject"
+    elif result.returncode == 2:
+        # Java --check and LLVM compiler CLI reserve this for usage errors.
+        status = "usage"
+    elif result.returncode < 0:
+        status = "crashed"
+    else:
+        status = "error"
+    return status, result.stderr[:4000]
 
 
 def audit_case(path, formatter, java_command, llvm_command, timeout):
@@ -77,7 +88,7 @@ def audit_case(path, formatter, java_command, llvm_command, timeout):
             statuses[backend] = {"original": before, "formatted": after}
         ok = stable and all(
             result["original"] == result["formatted"]
-            and result["original"] not in ("timeout", "unavailable")
+            and result["original"] in ("accept", "reject")
             for result in statuses.values()
         )
         return {"case": path.name, "ok": ok, "idempotent": stable,
