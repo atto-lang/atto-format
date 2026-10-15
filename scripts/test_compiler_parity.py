@@ -227,5 +227,75 @@ class ParityHarnessTests(unittest.TestCase):
         self.assertEqual(diagnostics, b"")
 
 
+    def test_invalid_utf8_fixture_fails_before_compiler(self):
+        case = self.path / "case.ores"
+        case.write_bytes(b"\xff")
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_rejects_fifo_fixture_without_blocking(self):
+        import os
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("POSIX FIFOs required")
+        case = self.path / "pipe.ores"
+        os.mkfifo(case)
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_formatter_output_flood_is_killed_at_limit(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        flooder = self.path / "flooder.py"
+        flooder.write_text(
+            "import sys\nwhile True:\n"
+            " sys.stdout.buffer.write(b'x' * 65536)\n"
+            " sys.stdout.buffer.flush()\n", encoding="utf-8",
+        )
+        result = audit_case(
+            case, [sys.executable, str(flooder)],
+            self.command, self.command, 3, max_case_bytes=32,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["formatter"], "invalid_output")
+
+    def test_compiler_stderr_flood_is_bounded(self):
+        status, diagnostics = execute(
+            [sys.executable, "-c",
+             "import sys; sys.stderr.write('x' * 1000000)"], 5,
+        )
+        self.assertEqual(status, "accept")
+        self.assertEqual(len(diagnostics), 4000)
+
+    def test_compiler_timeout_is_not_rejection(self):
+        status, _ = execute(
+            [sys.executable, "-c", "import time; time.sleep(5)"], 0.2,
+        )
+        self.assertEqual(status, "timeout")
+
+    def test_second_pass_expansion_fails_idempotence(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        second = self.path / "second.py"
+        second.write_text(
+            "import sys\n"
+            "print('x' * 200 if 'formatted' in sys.argv[-1] else 'allowed')\n",
+            encoding="utf-8",
+        )
+        result = audit_case(
+            case, [sys.executable, str(second)],
+            self.command, self.command, 5, max_case_bytes=32,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertFalse(result["idempotent"])
+
+
 if __name__ == "__main__":
     unittest.main()
