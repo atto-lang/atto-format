@@ -309,14 +309,14 @@ pub(super) fn comment_unused(source: &str) -> String {
     let references: HashSet<&str> = all[at..].iter().filter_map(Token::name).collect();
     let mut comment = vec![false; lines.len()];
     for import in imports {
-        let keep = lines[import.first..=import.last]
-            .iter()
-            .any(|line| trailing_marker(line, "oresfmt: keep-import"))
+        // The trailing directive belongs only on the declaration's final
+        // physical line. A selector-level comment inside a multiline import
+        // must never authorize disabling an otherwise effectful import.
+        let final_line = lines[import.last];
+        let keep = trailing_marker(final_line, "oresfmt: keep-import")
             || (import.first > 0
                 && dedicated_marker(lines[import.first - 1], "oresfmt: keep-import"));
-        let pure = lines[import.first..=import.last]
-            .iter()
-            .any(|line| trailing_marker(line, "oresfmt: pure-import"))
+        let pure = trailing_marker(final_line, "oresfmt: pure-import")
             || (import.first > 0
                 && dedicated_marker(lines[import.first - 1], "oresfmt: pure-import"));
         // An unreferenced source import can still trigger the target module's
