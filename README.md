@@ -119,13 +119,19 @@ instead of being rewritten. This prevents indentation, trailing-whitespace, or
 line-ending normalization from changing literal runtime bytes while parser-backed
 literal preservation is still being completed.
 
-## Unused imports
+## Unused imports and module initialization safety
 
-For Oreslang (.ores) source, the formatter keeps import declarations in the file
-but comments out declarations with no lexical use of any of their local bindings.
-It never deletes an import, silently trims a selector list, or changes an alias.
+Oreslang source imports participate in the compiler's dependency graph. Importing
+a source module can execute its `init()` hook, even when no selected binding is
+referenced; removing the import edge can therefore change program behavior.
+**The formatter preserves unreviewed imports by default.** It never deletes
+imports. Once a developer has verified that an import is safe to deactivate,
+put an exact `// oresfmt: pure-import` marker immediately above that import
+(or as an exact trailing comment on the import's final line). The formatter
+then comments out the whole unused import, leaving the declaration readable:
 
 ```ores
+// oresfmt: pure-import
 import class Box from "./box";
 import fnc make from "./factory";
 
@@ -137,6 +143,7 @@ pub fnc main(): void {
 becomes:
 
 ```ores
+// oresfmt: pure-import
 // import class Box from "./box";
 import fnc make from "./factory";
 
@@ -145,24 +152,30 @@ pub fnc main() -> void {
 }
 ```
 
-Identifiers in comments, quoted strings, import paths, or Symbol literals do not
-count as references. Aliased imports use the local alias, and grouped selections
-stay active when *any* imported binding is referenced. Multiline unused imports
-are commented on every physical line. Formatting a second time is stable.
+The purity marker is a **human assertion, not a compiler certificate**:
+use it only after checking direct and transitive module initialization.
+Without the marker, an apparently unused import remains active. This applies
+to every import kind, including Java host imports, until a compiler-proven
+side-effect analysis is available. Lexical reference detection still excludes
+comments, quoted strings, import paths, and Symbol literals; aliases are
+resolved by local name and grouped imports remain active when any binding is
+referenced. Unsupported grammar or ambiguous embedded templates fail closed.
 
-Importing a module can execute its initialization code, even when the imported
-name is otherwise unused. Retain an intentional side-effect import with a comment
-immediately above it as a dedicated comment line, or at the end of its own
-import declaration as an exact trailing comment:
+Use `// oresfmt: keep-import` for intentionally effectful imports or imports
+that must stay active even if a conflicting purity marker is present.
+`keep-import` always wins. Both markers apply only to one declaration and
+idempotent formatting preserves the original text as comments. Neither CLI
+dry-run nor check mode modifies files; `--write` retains the full filesystem
+and Git safety preflight. See the example:
 
 ```ores
 // oresfmt: keep-import
 import module Bootstrap from "./bootstrap";
 ```
 
-When the formatter cannot confidently parse the import grammar or an embedded
-template could contain name references, it leaves imports active rather than
-risk changing the program. All CLI safety policies and dry-run defaults apply.
+The long-term goal is compiler-derived import-effect certification from both
+backends, at which point the formatter can comment certified unused imports
+without manual assertions.
 
 ## CLI
 

@@ -1,7 +1,8 @@
 //! Conservative unused-import commenting for the canonical Oreslang formatter.
 //!
-//! Imports may have initialization side effects. Retain intentionally
-//! unreferenced imports with a preceding '// oresfmt: keep-import' marker.
+//! Source imports participate in linked-module initialization, even when
+//! their names are not referenced. Only an explicitly reviewed pure import
+//! may be commented out. A keep-import marker always takes precedence.
 
 use std::collections::HashSet;
 
@@ -237,13 +238,18 @@ struct Import {
 
 // The opt-out is intentionally attached to one import. A marker appearing in
 // prose or as a trailing comment on an earlier import must not retain another.
-fn dedicated_keep_marker(line: &str) -> bool {
-    line.trim() == "// oresfmt: keep-import"
+fn dedicated_marker(line: &str, marker: &str) -> bool {
+    line.trim()
+        .strip_prefix("//")
+        .is_some_and(|comment| comment.trim() == marker)
 }
 
-fn trailing_keep_marker(line: &str) -> bool {
+fn trailing_marker(line: &str, marker: &str) -> bool {
+    // A trailing marker must be after the import's terminal ';'. The import
+    // grammar requires its path to be quoted, so URLs containing '//' cannot
+    // masquerade as this directive.
     line.rsplit_once("//")
-        .is_some_and(|(_, suffix)| suffix.trim() == "oresfmt: keep-import")
+        .is_some_and(|(_, suffix)| suffix.trim() == marker)
 }
 
 pub(super) fn comment_unused(source: &str) -> String {
@@ -305,9 +311,19 @@ pub(super) fn comment_unused(source: &str) -> String {
     for import in imports {
         let keep = lines[import.first..=import.last]
             .iter()
-            .any(|line| trailing_keep_marker(line))
-            || (import.first > 0 && dedicated_keep_marker(lines[import.first - 1]));
-        if !keep
+            .any(|line| trailing_marker(line, "oresfmt: keep-import"))
+            || (import.first > 0
+                && dedicated_marker(lines[import.first - 1], "oresfmt: keep-import"));
+        let pure = lines[import.first..=import.last]
+            .iter()
+            .any(|line| trailing_marker(line, "oresfmt: pure-import"))
+            || (import.first > 0
+                && dedicated_marker(lines[import.first - 1], "oresfmt: pure-import"));
+        // An unreferenced source import can still trigger the target module's
+        // init hook, including through transitive/cyclic dependencies. Lexical
+        // absence alone is not proof that disabling the import is safe.
+        if pure
+            && !keep
             && !import
                 .bindings
                 .iter()

@@ -121,7 +121,7 @@ fn write_allows_clean_tracked_file() {
 #[test]
 fn unused_import_check_dry_run_and_write_are_consistent() {
     let repo = TempRepo::new("unused-import-cli");
-    let source = "import class Old from \"./old\";\nimport class Used from \"./used\";\npub fnc main(): void {\n  Used();\n  return;\n}\n";
+    let source = "// oresfmt: pure-import\nimport class Old from \"./old\";\nimport class Used from \"./used\";\npub fnc main(): void {\n  Used();\n  return;\n}\n";
     let target = repo.write("example.ores", source);
     repo.commit_all("baseline");
 
@@ -137,7 +137,7 @@ fn unused_import_check_dry_run_and_write_are_consistent() {
     let write = repo.run(&["--write", "example.ores"]);
     assert!(write.status.success());
     let formatted = fs::read_to_string(&target).unwrap();
-    assert!(formatted.starts_with("// import class Old from"));
+    assert!(formatted.contains("\n// import class Old from"));
     assert!(formatted.contains("\nimport class Used from"));
     assert!(formatted.contains("  Used();"));
     assert!(repo.run(&["--check", "example.ores"]).status.success());

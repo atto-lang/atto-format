@@ -13,7 +13,8 @@ fn canonical(source: &str) -> String {
 
 #[test]
 fn comments_unused_imports_but_preserves_their_source_text() {
-    let src = r#"import class Box from "./box";
+    let src = r#"// oresfmt: pure-import
+import class Box from "./box";
 import fnc build from "./factory"; // the original trailing comment
 pub fnc main(): void {
   build();
@@ -30,9 +31,12 @@ pub fnc main(): void {
 
 #[test]
 fn comments_aliases_by_local_name_not_original_name() {
-    let src = r#"import class ArrayList as JList from "java:java.util.ArrayList";
+    let src = r#"// oresfmt: pure-import
+import class ArrayList as JList from "java:java.util.ArrayList";
 import fnc abs as jabs from "java:java.lang.Math";
+// oresfmt: pure-import
 import * as utilities from "./util";
+// oresfmt: pure-import
 import module * as services from "./services";
 pub fnc main(): int {
   return jabs(-4);
@@ -49,6 +53,7 @@ pub fnc main(): int {
 fn grouped_imports_remain_active_when_any_member_is_referenced() {
     let src = r#"import types (One, Two, Three) from "./types";
 import fnc {run, stop} from "./other";
+// oresfmt: pure-import
 import types A, B, C from "./more";
 pub fnc main(): void {
   val One x;
@@ -64,7 +69,9 @@ pub fnc main(): void {
 
 #[test]
 fn ignores_appearances_in_comments_strings_paths_and_symbols() {
-    let src = r#"import class Phantom from "./Phantom";
+    let src = r#"// oresfmt: pure-import
+import class Phantom from "./Phantom";
+// oresfmt: pure-import
 import type Hidden from "./Hidden";
 pub fnc main(): void {
   // Phantom and Hidden are mentioned, but not referenced.
@@ -96,6 +103,7 @@ pub fnc main(): void {
 #[test]
 fn namespace_header_and_multiline_imports_are_supported() {
     let src = r#"namespace app;
+// oresfmt: pure-import
 import types (
   One,
   Two
@@ -136,18 +144,22 @@ end
 
 #[test]
 fn keep_marker_applies_to_exactly_one_import() {
-    let src = r#"import class First from "./one"; // oresfmt: keep-import
+    let src = r#"// oresfmt: pure-import
+import class First from "./one"; // oresfmt: keep-import
+// oresfmt: pure-import
 import class Second from "./two";
+// oresfmt: pure-import
 import class Third from "./three"; // discussion about keep-import
 // oresfmt: keep-import
 import class Fourth from "./four";
+// oresfmt: pure-import
 import class Fifth from "./five";
 pub fnc main(): void {
   return;
 }
 "#;
     let formatted = canonical(src);
-    assert!(formatted.starts_with("import class First"));
+    assert!(formatted.contains("\nimport class First"));
     assert!(formatted.contains("// import class Second from"));
     assert!(formatted.contains("// import class Third from"));
     assert!(formatted.contains("\nimport class Fourth from"));
@@ -157,10 +169,12 @@ pub fnc main(): void {
 #[test]
 fn unrelated_prose_and_blank_lines_do_not_activate_keep_marker() {
     let src = r#"// Discussion: oresfmt: keep-import
+// oresfmt: pure-import
 import class Old from "./old";
 
 // oresfmt: keep-import
 
+// oresfmt: pure-import
 import class Other from "./other";
 pub fnc main(): void {
   return;
@@ -174,6 +188,7 @@ pub fnc main(): void {
 #[test]
 fn quoted_slashes_and_unicode_source_offsets_are_safe() {
     let src = r#"// café 雪 🎉
+// oresfmt: pure-import
 import class Éclair from "https://example.invalid/oresfmt: keep-import";
 import class Météo from "./weather";
 pub fnc main(): void {
@@ -227,7 +242,9 @@ pub fnc main(): void {
 fn large_header_with_many_imports_is_deterministic() {
     let mut src = String::new();
     for i in 0..512 {
-        src.push_str(&format!("import class Imported{i} from \"./deps/{i}\";\n"));
+        src.push_str(&format!(
+            "// oresfmt: pure-import\nimport class Imported{i} from \"./deps/{i}\";\n"
+        ));
     }
     src.push_str("pub fnc main(): void {\n  Imported511();\n  return;\n}\n");
     let formatted = canonical(&src);
@@ -235,4 +252,75 @@ fn large_header_with_many_imports_is_deterministic() {
     assert!(formatted.contains("// import class Imported510 from"));
     assert!(formatted.contains("\nimport class Imported511 from"));
     assert_eq!(formatted.matches("// import class ").count(), 511);
+}
+
+#[test]
+fn default_preserves_unused_source_imports_that_may_initialize_modules() {
+    let src = r#"import fnc unused_fn from "./initializes";
+import class Other from "./might-init";
+import module Bootstrap from "./boot";
+pub routine main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.starts_with("import fnc unused_fn"));
+    assert!(formatted.contains("\nimport class Other from"));
+    assert!(formatted.contains("\nimport module Bootstrap from"));
+    assert!(!formatted.contains("// import"));
+}
+
+#[test]
+fn keep_import_wins_over_explicit_purity_for_initialization() {
+    let src = r#"// oresfmt: pure-import
+import module Init from "./init"; // oresfmt: keep-import
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("\nimport module Init from"));
+    assert!(!formatted.contains("// import module Init"));
+}
+
+#[test]
+fn pure_marker_in_unrelated_prose_does_not_comment_an_import() {
+    let src = r#"// Discussion: oresfmt: pure-import
+import class Keep from "./keep";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("\nimport class Keep from"));
+}
+
+#[test]
+fn exact_trailing_pure_marker_allows_commenting_an_unused_import() {
+    let src = r#"import class Reviewed from "./reviewed"; // oresfmt: pure-import
+import class Unreviewed from "./unknown";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("// import class Reviewed from"));
+    assert!(formatted.contains("\nimport class Unreviewed from"));
+}
+
+#[test]
+fn import_in_cyclic_dependency_remains_active_without_purity_assertion() {
+    // Java ImportGraph initializationGroups includes this edge even if
+    // only_for_init is never referenced in this file.
+    let src = r#"import fnc only_for_init from "./cyclic.ores";
+pub fnc init(): void {
+  return;
+}
+pub routine main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("import fnc only_for_init from \"./cyclic.ores\";"));
+    assert!(!formatted.contains("// import fnc only_for_init"));
 }
