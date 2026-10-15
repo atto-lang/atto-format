@@ -347,11 +347,19 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
     let repo = TempRepo::new("non-utf8-path");
     let name = OsString::from_vec(b"sample-\xff.ores".to_vec());
     let path = repo.root.join(&name);
-    fs::write(&path, UNFORMATTED).unwrap();
+    let created = fs::write(&path, UNFORMATTED);
     let args = [OsStr::new("--check"), OsStr::new("--"), name.as_os_str()];
 
     let output = repo.run_os(&args);
 
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+    if let Err(error) = created {
+        // APFS rejects invalid UTF-8 names before the CLI can inspect them.
+        // Still exercise OsString argument handling and require a clean error.
+        assert_eq!(error.raw_os_error(), Some(92)); // EILSEQ on Darwin
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!path.exists());
+    } else {
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+    }
 }
