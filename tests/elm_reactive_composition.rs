@@ -62,3 +62,24 @@ fnc optional_cast(Any v): Option<int> {
     assert!(once.contains("as? int"), "optional cast was rewritten: {once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
+
+#[test]
+fn postfix_question_mark_preserves_typed_short_circuit_and_ternary() {
+    let source = r#"fnc forward(Result<int, String> incoming): Result<int, String> {
+  val int n = incoming?;
+  return Ok(n);
+}
+fnc optional(Option<int> incoming): Option<int> {
+  val int n = incoming?;
+  return Some(n);
+}
+fnc choice(bool flag): int {
+  return flag?1:2;
+}
+"#;
+    let once = format_source(source).expect("postfix ? must be preserved or format must fail closed");
+    for fragment in ["incoming?;", "flag", "?", ":"] {
+        assert!(once.contains(fragment), "question operator lost {fragment}: {once}");
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
