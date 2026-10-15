@@ -152,7 +152,8 @@ are commented on every physical line. Formatting a second time is stable.
 
 Importing a module can execute its initialization code, even when the imported
 name is otherwise unused. Retain an intentional side-effect import with a comment
-immediately above it or on its declaration:
+immediately above it as a dedicated comment line, or at the end of its own
+import declaration as an exact trailing comment:
 
 ```ores
 // oresfmt: keep-import
