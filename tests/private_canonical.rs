@@ -4,35 +4,89 @@ fn canonical(input: &str, expected: &str) {
     let formatted = format_source(input).unwrap();
     assert_eq!(formatted, expected, "input: {input:?}");
     assert_eq!(format_source(&formatted).unwrap(), formatted, "idempotence");
-    assert!(is_formatted(&formatted).unwrap(), "canonical text should pass --check");
+    assert!(
+        is_formatted(&formatted).unwrap(),
+        "canonical text should pass --check"
+    );
     if input != expected {
-        assert!(!is_formatted(input).unwrap(), "private spelling should not pass --check");
+        assert!(
+            !is_formatted(input).unwrap(),
+            "private spelling should not pass --check"
+        );
     }
 }
 
 #[test]
 fn strips_private_from_named_declarations_but_keeps_define_and_pub() {
     for (input, expected) in [
-        ("define private class Box as\nend\n", "define class Box as\nend\n"),
-        ("private define class Box as\nend\n", "define class Box as\nend\n"),
+        (
+            "define private class Box as\nend\n",
+            "define class Box as\nend\n",
+        ),
+        (
+            "private define class Box as\nend\n",
+            "define class Box as\nend\n",
+        ),
         ("private class Box as\nend\n", "class Box as\nend\n"),
-        ("define private trait T as\nend\n", "define trait T as\nend\n"),
+        (
+            "define private trait T as\nend\n",
+            "define trait T as\nend\n",
+        ),
         ("private trait T as\nend\n", "trait T as\nend\n"),
-        ("define private struct S as\nend\n", "define struct S as\nend\n"),
+        (
+            "define private struct S as\nend\n",
+            "define struct S as\nend\n",
+        ),
         ("private struct S as\nend\n", "struct S as\nend\n"),
-        ("define private interface I as\nend\n", "define interface I as\nend\n"),
-        ("define private contract C as\nend\n", "define contract C as\nend\n"),
-        ("define private module Service as\nend\n", "define module Service as\nend\n"),
-        ("private define module Service as\nend\n", "define module Service as\nend\n"),
-        ("pub define module Service as\nend\n", "define pub module Service as\nend\n"),
-        ("define pub module Service as\nend\n", "define pub module Service as\nend\n"),
-        ("define private type Alias = int;\n", "define type Alias = int;\n"),
+        (
+            "define private interface I as\nend\n",
+            "define interface I as\nend\n",
+        ),
+        (
+            "define private contract C as\nend\n",
+            "define contract C as\nend\n",
+        ),
+        (
+            "define private module Service as\nend\n",
+            "define module Service as\nend\n",
+        ),
+        (
+            "private define module Service as\nend\n",
+            "define module Service as\nend\n",
+        ),
+        (
+            "pub define module Service as\nend\n",
+            "define pub module Service as\nend\n",
+        ),
+        (
+            "define pub module Service as\nend\n",
+            "define pub module Service as\nend\n",
+        ),
+        (
+            "define private type Alias = int;\n",
+            "define type Alias = int;\n",
+        ),
         ("private type Alias = int;\n", "type Alias = int;\n"),
-        ("pub define class Box as\nend\n", "define pub class Box as\nend\n"),
-        ("define pub class Box as\nend\n", "define pub class Box as\nend\n"),
-        ("define private actor Worker as\nend\n", "define actor Worker as\nend\n"),
-        ("private define actor Worker as\nend\n", "define actor Worker as\nend\n"),
-        ("define pub actor Worker as\nend\n", "define pub actor Worker as\nend\n"),
+        (
+            "pub define class Box as\nend\n",
+            "define pub class Box as\nend\n",
+        ),
+        (
+            "define pub class Box as\nend\n",
+            "define pub class Box as\nend\n",
+        ),
+        (
+            "define private actor Worker as\nend\n",
+            "define actor Worker as\nend\n",
+        ),
+        (
+            "private define actor Worker as\nend\n",
+            "define actor Worker as\nend\n",
+        ),
+        (
+            "define pub actor Worker as\nend\n",
+            "define pub actor Worker as\nend\n",
+        ),
         ("pub type Exported = int;\n", "pub type Exported = int;\n"),
     ] {
         canonical(input, expected);
@@ -42,13 +96,30 @@ fn strips_private_from_named_declarations_but_keeps_define_and_pub() {
 #[test]
 fn strips_private_from_functions_and_actor_callables() {
     for (input, expected) in [
-        ("private fnc work(): void {\n}\n", "fnc work() -> void {\n}\n"),
-        ("private static fnc create(): int {\n}\n", "static fnc create() -> int {\n}\n"),
-        ("private async fnc load(): void {\n}\n", "async fnc load() -> void {\n}\n"),
-        ("private routine stop(): void {\n}\n", "routine stop() -> void {\n}\n"),
-        ("private actor fnc send(): void {\n}\n", "actor fnc send() -> void {\n}\n"),
-        ("private untrusted actor fnc receive(): void {\n}\n",
-         "untrusted actor fnc receive() -> void {\n}\n"),
+        (
+            "private fnc work(): void {\n}\n",
+            "fnc work() -> void {\n}\n",
+        ),
+        (
+            "private static fnc create(): int {\n}\n",
+            "static fnc create() -> int {\n}\n",
+        ),
+        (
+            "private async fnc load(): void {\n}\n",
+            "async fnc load() -> void {\n}\n",
+        ),
+        (
+            "private routine stop(): void {\n}\n",
+            "routine stop() -> void {\n}\n",
+        ),
+        (
+            "private actor fnc send(): void {\n}\n",
+            "actor fnc send() -> void {\n}\n",
+        ),
+        (
+            "private untrusted actor fnc receive(): void {\n}\n",
+            "untrusted actor fnc receive() -> void {\n}\n",
+        ),
     ] {
         canonical(input, expected);
     }
@@ -116,7 +187,10 @@ end
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("  val int secret = 1;"), "{formatted}");
     assert!(formatted.contains("  fnc hidden() -> int {"), "{formatted}");
-    assert!(formatted.contains("  pub val int exposed = 2;"), "{formatted}");
+    assert!(
+        formatted.contains("  pub val int exposed = 2;"),
+        "{formatted}"
+    );
     assert!(!formatted.contains("private "));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -134,7 +208,10 @@ fn conflicting_or_obscured_prefixes_stay_for_compiler_errors() {
         "val String text = \"private fnc example()\";\n",
     ] {
         let once = format_source(input).unwrap();
-        assert!(once.contains("private"), "rewrote invalid/opaque input: {input} -> {once}");
+        assert!(
+            once.contains("private"),
+            "rewrote invalid/opaque input: {input} -> {once}"
+        );
         assert_eq!(format_source(&once).unwrap(), once);
     }
 }
@@ -175,8 +252,10 @@ fn type_first_field_modifier_conflicts_must_not_be_legalized() {
     ] {
         let source = format!("define class Vault as\n{declaration}\nend\n");
         let formatted = format_source(&source).unwrap();
-        assert!(formatted.contains(declaration),
-            "visibility conflict erased: {source:?} -> {formatted:?}");
+        assert!(
+            formatted.contains(declaration),
+            "visibility conflict erased: {source:?} -> {formatted:?}"
+        );
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }
@@ -201,7 +280,10 @@ return;
         "private fnc nested()",
         "private class Nested as",
     ] {
-        assert!(got.contains(preserved), "compiler diagnostic erased: {preserved:?} in {got}");
+        assert!(
+            got.contains(preserved),
+            "compiler diagnostic erased: {preserved:?} in {got}"
+        );
     }
     assert_eq!(format_source(&got).unwrap(), got);
 }
@@ -216,7 +298,10 @@ end
 end
 "#;
     let formatted = format_source(input).unwrap();
-    assert!(formatted.contains("private define module Inner as"), "{formatted}");
+    assert!(
+        formatted.contains("private define module Inner as"),
+        "{formatted}"
+    );
     assert!(formatted.contains("private class Nested as"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -233,7 +318,10 @@ fn module_modifier_conflicts_and_comments_are_not_rewritten() {
         "val String text = \"private define module Service as\";\n",
     ] {
         let got = format_source(input).unwrap();
-        assert!(got.contains("private"), "unexpected rewrite: {input:?} -> {got}");
+        assert!(
+            got.contains("private"),
+            "unexpected rewrite: {input:?} -> {got}"
+        );
         assert_eq!(format_source(&got).unwrap(), got);
     }
 }
@@ -296,7 +384,8 @@ fn malformed_module_prefixes_are_never_rewritten_into_exports() {
         "pub module Internal as\nend\n",
         "define module define Internal as\nend\n",
     ] {
-        let formatted = format_source(source).expect("formatter must keep invalid syntax diagnosable");
+        let formatted =
+            format_source(source).expect("formatter must keep invalid syntax diagnosable");
         let first_line = source.lines().next().unwrap();
         assert!(
             formatted.lines().any(|line| line == first_line),
@@ -320,25 +409,57 @@ fn both_explicit_private_module_orders_match_the_implicit_default() {
     ] {
         let variant = source.replacen("define module Internal as", header, 1);
         let formatted = format_source(&variant).unwrap();
-        assert_eq!(baseline, formatted, "{header} should be semantically identical");
+        assert_eq!(
+            baseline, formatted,
+            "{header} should be semantically identical"
+        );
         assert_eq!(formatted, format_source(&formatted).unwrap());
     }
-    let public = source.replacen("define module Internal as", "pub define module Internal as", 1);
-    assert!(format_source(&public).unwrap().starts_with("define pub module Internal as\n"));
+    let public = source.replacen(
+        "define module Internal as",
+        "pub define module Internal as",
+        1,
+    );
+    assert!(
+        format_source(&public)
+            .unwrap()
+            .starts_with("define pub module Internal as\n")
+    );
 }
 
 #[test]
 fn supported_legacy_type_and_class_modifier_orders_stay_canonical() {
     for (input, expected) in [
-        ("define class pub Vault as\nend\n", "define pub class Vault as\nend\n"),
-        ("class define pub Vault as\nend\n", "define pub class Vault as\nend\n"),
-        ("define interface pub Api as\nend\n", "define pub interface Api as\nend\n"),
-        ("define contract private Api as\nend\n", "define contract Api as\nend\n"),
-        ("define type pub Alias = int;\n", "define pub type Alias = int;\n"),
-        ("define type private Alias = int;\n", "define type Alias = int;\n"),
+        (
+            "define class pub Vault as\nend\n",
+            "define pub class Vault as\nend\n",
+        ),
+        (
+            "class define pub Vault as\nend\n",
+            "define pub class Vault as\nend\n",
+        ),
+        (
+            "define interface pub Api as\nend\n",
+            "define pub interface Api as\nend\n",
+        ),
+        (
+            "define contract private Api as\nend\n",
+            "define contract Api as\nend\n",
+        ),
+        (
+            "define type pub Alias = int;\n",
+            "define pub type Alias = int;\n",
+        ),
+        (
+            "define type private Alias = int;\n",
+            "define type Alias = int;\n",
+        ),
     ] {
         let formatted = format_source(input).unwrap();
-        assert_eq!(formatted, expected, "legacy grammar regression for {input:?}");
+        assert_eq!(
+            formatted, expected,
+            "legacy grammar regression for {input:?}"
+        );
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }
