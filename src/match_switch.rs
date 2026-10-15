@@ -218,11 +218,11 @@ match msg over {
 "#;
         let output = normalize(source);
         assert!(output.contains("default {"), "{output}");
-        assert!(output.contains("default as remaining {"), "{output}");
+        assert!(output.contains("on _ as remaining {"), "{output}");
         assert!(output.contains("on Thing.Tuple as (_, item) {"), "{output}");
         assert!(output.contains("default {"), "{output}");
         assert!(!output.contains("on default"), "{output}");
-        assert!(!output.contains("on _ as"), "{output}");
+        assert!(output.contains("on _ as"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 
@@ -240,8 +240,7 @@ match msg over {
 }
 "#;
         let output = normalize(source);
-        assert!(output.contains("/*why*/ \ndefault as item"), "{output}");
-        assert!(!output.contains("on /*why*/ _"), "{output}");
+        assert!(output.contains("on /*why*/ _ as item"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 
