@@ -315,11 +315,17 @@ return;
 
 #[test]
 fn unused_import_selector_spellings_are_commented_not_deleted() {
-    let src = r#"import * as util from "../util";
+    let src = r#"// oresfmt: pure-import
+import * as util from "../util";
+// oresfmt: pure-import
 import module Math from "../math";
+// oresfmt: pure-import
 import actor Worker from "../worker";
+// oresfmt: pure-import
 import class Box from "../box";
+// oresfmt: pure-import
 import types X, Y, Z from "../types";
+// oresfmt: pure-import
 import types (A, B, C) from "../more-types";
 
 define module App as
@@ -329,11 +335,17 @@ return;
 end
 "#;
 
-    let expected = r#"// import * as util from "../util";
+    let expected = r#"// oresfmt: pure-import
+// import * as util from "../util";
+// oresfmt: pure-import
 // import module Math from "../math";
+// oresfmt: pure-import
 // import actor Worker from "../worker";
+// oresfmt: pure-import
 // import class Box from "../box";
+// oresfmt: pure-import
 // import types X, Y, Z from "../types";
+// oresfmt: pure-import
 // import types (A, B, C) from "../more-types";
 
 define module App as
