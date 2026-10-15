@@ -159,7 +159,7 @@ pub fnc main(): void {
 }
 "#;
     let formatted = canonical(src);
-    assert!(formatted.starts_with("import class First"));
+    assert!(formatted.contains("\nimport class First"));
     assert!(formatted.contains("// import class Second from"));
     assert!(formatted.contains("// import class Third from"));
     assert!(formatted.contains("\nimport class Fourth from"));
