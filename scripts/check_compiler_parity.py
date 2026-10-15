@@ -7,10 +7,14 @@ not proof of equivalent semantics or a successful parser round-trip.
 """
 import argparse
 import json
+import os
+import selectors
+import signal
 import stat
 import shlex
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -23,51 +27,130 @@ def command_argv(template, source):
     return argv
 
 
-def execute(argv, timeout):
+def _kill_process_group(process):
+    """Stop the direct child and descendants that inherited its process group."""
     try:
-        with tempfile.TemporaryFile() as diagnostics:
-            result = subprocess.run(
-                argv, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=diagnostics,
-                timeout=timeout, check=False,
-            )
-            diagnostics.seek(0)
-            diagnostic_tail = diagnostics.read(4000)
-    except subprocess.TimeoutExpired:
-        return "timeout", b""
-    except OSError as exc:
-        return "unavailable", str(exc).encode("utf-8", errors="replace")
-    if result.returncode == 0:
-        status = "accept"
-    elif result.returncode == 1:
-        status = "reject"
-    elif result.returncode == 2:
-        # Java --check and LLVM compiler CLI reserve this for usage errors.
-        status = "usage"
-    elif result.returncode < 0:
-        status = "crashed"
-    else:
-        status = "error"
-    return status, diagnostic_tail
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        elif process.poll() is None:
+            process.kill()
+    except ProcessLookupError:
+        pass
 
+
+def run_process(argv, timeout, stdout_limit=None):
+    """Capture bounded output and diagnostics; kill a producer at its byte limit.
+
+    stdout_limit=None discards stdout for compiler admission commands.
+    Neither stdout nor stderr is ever spooled without an active byte bound.
+    """
+    try:
+        process = subprocess.Popen(
+            argv, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if stdout_limit is not None else subprocess.DEVNULL,
+            stderr=subprocess.PIPE, start_new_session=(os.name == "posix"),
+        )
+    except OSError as exc:
+        return "unavailable", None, b"", str(exc).encode("utf-8", errors="replace")
+
+    output = bytearray()
+    diagnostics = bytearray()
+    deadline = time.monotonic() + timeout
+    status = "exited"
+    selector = selectors.DefaultSelector()
+    try:
+        streams = []
+        if process.stdout is not None:
+            streams.append(("stdout", process.stdout))
+        streams.append(("stderr", process.stderr))
+        for name, stream in streams:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, name)
+
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                status = "timeout"
+                break
+            ready = selector.select(remaining)
+            if not ready:
+                status = "timeout"
+                break
+            for key, _ in ready:
+                chunk = os.read(key.fileobj.fileno(), 65536)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
+                    continue
+                if key.data == "stdout":
+                    if len(output) + len(chunk) > stdout_limit:
+                        status = "output_limit"
+                        break
+                    output.extend(chunk)
+                elif len(diagnostics) < 4000:
+                    diagnostics.extend(chunk[:4000 - len(diagnostics)])
+            if status != "exited":
+                break
+        if status == "exited":
+            remaining = deadline - time.monotonic()
+            try:
+                process.wait(timeout=max(0, remaining))
+            except subprocess.TimeoutExpired:
+                status = "timeout"
+    except OSError as exc:
+        status = "unavailable"
+        diagnostics = bytearray(str(exc).encode("utf-8", errors="replace")[:4000])
+    finally:
+        if status != "exited":
+            _kill_process_group(process)
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        selector.close()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+    return status, process.returncode, bytes(output), bytes(diagnostics)
+
+
+def execute(argv, timeout):
+    status, returncode, _, diagnostics = run_process(argv, timeout)
+    if status != "exited":
+        return status, diagnostics
+    if returncode == 0:
+        return "accept", diagnostics
+    if returncode == 1:
+        return "reject", diagnostics
+    if returncode == 2:
+        return "usage", diagnostics
+    if returncode < 0:
+        return "crashed", diagnostics
+    return "error", diagnostics
 
 def audit_case(path, formatter, java_command, llvm_command, timeout,
                max_case_bytes=1024 * 1024):
     # Never submit symlinks, special files or unbounded fixtures to compilers.
     # Check both reported size and actual bytes to catch files growing mid-read.
     try:
+        # Reject symlinks at open time, not only in a racy prior stat call.
+        # O_NONBLOCK prevents a swapped-in FIFO from hanging the harness.
         if path.is_symlink():
             raise ValueError("fixture is a symlink")
-        details = path.stat()
-        if not stat.S_ISREG(details.st_mode):
-            raise ValueError("fixture is not a regular file")
-        if details.st_size > max_case_bytes:
-            raise ValueError("fixture exceeds byte limit")
-        with path.open("rb") as source:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as source:
+            details = os.fstat(source.fileno())
+            if not stat.S_ISREG(details.st_mode):
+                raise ValueError("fixture is not a regular file")
+            if details.st_size > max_case_bytes:
+                raise ValueError("fixture exceeds byte limit")
             original = source.read(max_case_bytes + 1)
         if len(original) > max_case_bytes:
             raise ValueError("fixture exceeds byte limit")
-    except (OSError, ValueError) as exc:
+        original.decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
         return {"case": path.name, "ok": False,
                 "fixture": "invalid", "detail": str(exc)}
     with tempfile.TemporaryDirectory(prefix="oresfmt-parity-") as directory:
@@ -77,30 +160,21 @@ def audit_case(path, formatter, java_command, llvm_command, timeout,
         original_path.parent.mkdir()
         formatted_path.parent.mkdir()
         original_path.write_bytes(original)
-        # Spool output to disk so a faulty formatter cannot allocate
-        # unbounded Python memory before we enforce the output-byte ceiling.
-        with tempfile.TemporaryFile() as first_output, tempfile.TemporaryFile() as errors:
-            try:
-                formatted = subprocess.run(
-                    formatter + ["--stdout", str(original_path)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=first_output, stderr=errors,
-                    timeout=timeout, check=False,
-                )
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                return {"case": path.name, "ok": False,
-                        "formatter": "unavailable", "detail": str(exc)}
-            if formatted.returncode != 0:
-                errors.seek(0)
-                return {"case": path.name, "ok": False,
-                        "formatter": "reject",
-                        "detail": errors.read(4000).decode(
-                            "utf-8", errors="replace")}
-            if first_output.tell() > max_case_bytes * 2:
-                return {"case": path.name, "ok": False,
-                        "formatter": "invalid_output"}
-            first_output.seek(0)
-            formatted_bytes = first_output.read()
+        # Drain pipes in bounded chunks and terminate a flood immediately.
+        format_status, exit_code, formatted_bytes, errors = run_process(
+            formatter + ["--stdout", str(original_path)],
+            timeout, stdout_limit=max_case_bytes * 2,
+        )
+        if format_status == "output_limit":
+            return {"case": path.name, "ok": False,
+                    "formatter": "invalid_output"}
+        if format_status != "exited":
+            return {"case": path.name, "ok": False,
+                    "formatter": "unavailable", "detail": format_status}
+        if exit_code != 0:
+            return {"case": path.name, "ok": False,
+                    "formatter": "reject",
+                    "detail": errors.decode("utf-8", errors="replace")}
 
         # A broken formatter must not erase a program or inject malformed text
         # and be rescued by permissive compiler command-line wrappers.
@@ -114,23 +188,13 @@ def audit_case(path, formatter, java_command, llvm_command, timeout,
                     "formatter": "invalid_utf8"}
         formatted_path.write_bytes(formatted_bytes)
 
-        # A second formatter pass must be identical before compiler checks.
-        with tempfile.TemporaryFile() as second_output:
-            try:
-                second = subprocess.run(
-                    formatter + ["--stdout", str(formatted_path)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=second_output, stderr=subprocess.DEVNULL,
-                    timeout=timeout, check=False,
-                )
-                if second_output.tell() > max_case_bytes * 2:
-                    stable = False
-                else:
-                    second_output.seek(0)
-                    stable = (second.returncode == 0
-                              and second_output.read() == formatted_bytes)
-            except (subprocess.TimeoutExpired, OSError):
-                stable = False
+        # A second pass must be byte-identical and independently bounded.
+        second_status, second_exit, second_bytes, _ = run_process(
+            formatter + ["--stdout", str(formatted_path)],
+            timeout, stdout_limit=max_case_bytes * 2,
+        )
+        stable = (second_status == "exited" and second_exit == 0
+                  and second_bytes == formatted_bytes)
         statuses = {}
         for backend, command in (("java", java_command), ("llvm", llvm_command)):
             before, _ = execute(command_argv(command, original_path), timeout)
