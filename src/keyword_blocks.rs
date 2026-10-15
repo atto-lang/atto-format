@@ -194,6 +194,7 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
         || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
+        || next.starts_with("/*")
         || ["on", "when", "case", "default", "as", "is", "with", "over"]
             .iter()
             .any(|word| crate::starts_word(next, word))
@@ -253,14 +254,22 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) && is_keyword_delimiter(&tokens, index) => {
+                "elif" | "elseif"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
-                "else" if !frames.is_empty() && statement_boundary(&tokens, index) && is_keyword_delimiter(&tokens, index) => {
+                "else"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
