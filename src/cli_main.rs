@@ -521,7 +521,9 @@ mod write_safety_tests {
             std::process::id()
         ));
         fs::create_dir_all(&root).unwrap();
-        root
+        // macOS temp_dir traverses /var -> /private/var. Resolve only our
+        // fixture root so the write guard reaches the mutation under test.
+        fs::canonicalize(root).unwrap()
     }
 
     #[test]
