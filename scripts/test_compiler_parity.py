@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_compiler_parity import audit_case, command_argv
+from check_compiler_parity import audit_case, command_argv, main
 
 
 class ParityHarnessTests(unittest.TestCase):
@@ -91,6 +91,41 @@ class ParityHarnessTests(unittest.TestCase):
             command_argv('compiler --check "{source}"', self.path / "input.ores"),
             ["compiler", "--check", str(self.path / "input.ores")],
         )
+
+    def test_cli_fails_closed_when_no_compiler_accepts(self):
+        case = self.path / "case.ores"
+        case.write_text("unsupported", encoding="utf-8")
+        result = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--java-command", self.command,
+            "--llvm-command", self.command,
+            "--cases", str(self.path),
+        ])
+        self.assertEqual(result, 1)
+
+    def test_cli_fails_closed_on_backend_disagreement(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        always_reject = self.path / "reject.py"
+        always_reject.write_text("import sys\\nsys.exit(1)\\n", encoding="utf-8")
+        result = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--java-command", self.command,
+            "--llvm-command", f"{sys.executable} {always_reject} {{source}}",
+            "--cases", str(self.path),
+        ])
+        self.assertEqual(result, 1)
+
+    def test_cli_accepts_shared_supported_case(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        result = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--java-command", self.command,
+            "--llvm-command", self.command,
+            "--cases", str(self.path),
+        ])
+        self.assertEqual(result, 0)
 
 
 if __name__ == "__main__":
