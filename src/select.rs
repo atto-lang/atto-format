@@ -224,7 +224,13 @@ fn invalid_legacy_arm_header(
                 return i > start && tokens[i - 1].text == ":";
             }
             ";" if nesting.is_empty() => return false,
-            ":" if nesting.is_empty() => return true,
+            ":" if nesting.is_empty()
+                && read_binding
+                && (i == start + 1 || (i == start + 2
+                    && matches!(tokens[start].text, "const" | "val" | "let"))) =>
+            {
+                return true; // typed 'name: T' without the required arrow
+            }
             _ => {}
         }
         i += 1;
