@@ -197,7 +197,6 @@ fn invalid_legacy_arm_header(
 ) -> bool {
     let mut i = start;
     let mut nesting = Vec::new();
-    let mut saw_binding = false;
     while i < limit {
         match tokens[i].text {
             "(" | "[" => nesting.push(tokens[i].text),
@@ -210,16 +209,22 @@ fn invalid_legacy_arm_header(
                 return true; // '=>' never delimits an executable select arm.
             }
             "{" if nesting.is_empty() => {
+                let Some(end) = matching_brace(tokens, i) else {
+                    return true; // unclosed pattern/body
+                };
+                if end + 2 < limit
+                    && tokens[end + 1].text == "="
+                    && tokens[end + 2].text == ">"
+                {
+                    return true; // '{fields} => {body}' is never an arm.
+                }
                 if !read_binding { return false; }
                 // '{' can be the legacy body, but not the right-hand side of
                 // an unfinished 'name: {record}' type annotation.
-                return saw_binding && i > start && tokens[i - 1].text == ":";
+                return i > start && tokens[i - 1].text == ":";
             }
             ";" if nesting.is_empty() => return false,
-            ":" if nesting.is_empty() && saw_binding => return true,
-            "val" | "const" | "let" if nesting.is_empty() && i == start => {
-                saw_binding = true;
-            }
+            ":" if nesting.is_empty() => return true,
             _ => {}
         }
         i += 1;
