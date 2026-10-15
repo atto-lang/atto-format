@@ -39,8 +39,10 @@ def audit_case(path, formatter, java_command, llvm_command, timeout):
     original = path.read_bytes()
     with tempfile.TemporaryDirectory(prefix="oresfmt-parity-") as directory:
         root = Path(directory)
-        original_path = root / "original.ores"
-        formatted_path = root / "formatted.ores"
+        original_path = root / "original" / path.name
+        formatted_path = root / "formatted" / path.name
+        original_path.parent.mkdir()
+        formatted_path.parent.mkdir()
         original_path.write_bytes(original)
         try:
             formatted = subprocess.run(
@@ -80,6 +82,10 @@ def audit_case(path, formatter, java_command, llvm_command, timeout):
         )
         return {"case": path.name, "ok": ok, "idempotent": stable,
                 "backends": statuses,
+                "backend_agreement": (statuses["java"]["original"] ==
+                                      statuses["llvm"]["original"] and
+                                      statuses["java"]["formatted"] ==
+                                      statuses["llvm"]["formatted"]),
                 "shared_supported": all(
                     status["original"] == "accept"
                     for status in statuses.values()
@@ -98,7 +104,10 @@ def main(argv=None):
                         default=Path(__file__).resolve().parent.parent /
                         "tests" / "compiler_parity_cases")
     parser.add_argument("--timeout", type=int, default=30)
-    parser.add_argument("--require-shared-accepted", action="store_true")
+    parser.add_argument("--allow-zero-shared-accepted", action="store_true",
+                        help="diagnostic only: permit no jointly accepted fixtures")
+    parser.add_argument("--allow-backend-divergence", action="store_true",
+                        help="diagnostic only: permit Java/LLVM admission mismatch")
     args = parser.parse_args(argv)
 
     cases = sorted(args.cases.glob("*.ores"))
@@ -111,9 +120,14 @@ def main(argv=None):
                for path in cases]
     shared = sum(case.get("shared_supported", False) for case in results)
     ok = all(case["ok"] for case in results)
-    if args.require_shared_accepted and shared == 0:
+    if shared == 0 and not args.allow_zero_shared_accepted:
+        ok = False
+    if not args.allow_backend_divergence and any(
+        case.get("backend_agreement") is False for case in results
+    ):
         ok = False
     print(json.dumps({"ok": ok, "shared_accepted": shared,
+                      "backend_agreement_required": not args.allow_backend_divergence,
                       "results": results}, indent=2))
     return 0 if ok else 1
 
