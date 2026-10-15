@@ -235,6 +235,17 @@ struct Import {
     bindings: Vec<String>,
 }
 
+// The opt-out is intentionally attached to one import. A marker appearing in
+// prose or as a trailing comment on an earlier import must not retain another.
+fn dedicated_keep_marker(line: &str) -> bool {
+    line.trim() == "// oresfmt: keep-import"
+}
+
+fn trailing_keep_marker(line: &str) -> bool {
+    line.rsplit_once("//")
+        .is_some_and(|(_, suffix)| suffix.trim() == "oresfmt: keep-import")
+}
+
 pub(super) fn comment_unused(source: &str) -> String {
     let Some(all) = tokens(source) else {
         return source.to_owned();
@@ -252,6 +263,11 @@ pub(super) fn comment_unused(source: &str) -> String {
     }
 
     let lines: Vec<&str> = source.lines().collect();
+    // Avoid O(import-count * prefix-length) newline recounting. Byte offsets
+    // from char_indices are guaranteed to lie on UTF-8 boundaries.
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(index, _)| index + 1))
+        .collect();
     let mut imports = Vec::new();
     while all.get(at).is_some_and(|t| t.word("import")) {
         let first_token = at;
@@ -260,20 +276,14 @@ pub(super) fn comment_unused(source: &str) -> String {
         };
         let first_offset = all[first_token].start;
         let last_offset = all[next - 1].end;
-        let first = source[..first_offset]
-            .bytes()
-            .filter(|b| *b == b'\n')
-            .count();
-        let last = source[..last_offset]
-            .bytes()
-            .filter(|b| *b == b'\n')
-            .count();
+        let first = line_starts.partition_point(|&offset| offset <= first_offset) - 1;
+        let last = line_starts.partition_point(|&offset| offset < last_offset) - 1;
         // Require an import to own complete physical lines, so comments cannot
         // swallow another declaration that happens to share its line.
-        let beginning = source[..first_offset].rfind('\n').map_or(0, |i| i + 1);
-        let line_end = source[last_offset..]
-            .find('\n')
-            .map_or(source.len(), |i| last_offset + i);
+        let beginning = line_starts[first];
+        let line_end = line_starts
+            .get(last + 1)
+            .map_or(source.len(), |&offset| offset - 1);
         let after = &source[last_offset..line_end];
         let standalone = source[beginning..first_offset].trim().is_empty()
             && (after.trim().is_empty() || after.trim_start().starts_with("//"));
@@ -295,8 +305,8 @@ pub(super) fn comment_unused(source: &str) -> String {
     for import in imports {
         let keep = lines[import.first..=import.last]
             .iter()
-            .any(|s| s.contains("oresfmt: keep-import"))
-            || (import.first > 0 && lines[import.first - 1].contains("oresfmt: keep-import"));
+            .any(|line| trailing_keep_marker(line))
+            || (import.first > 0 && dedicated_keep_marker(lines[import.first - 1]));
         if !keep
             && !import
                 .bindings
