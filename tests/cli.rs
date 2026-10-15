@@ -119,6 +119,31 @@ fn write_allows_clean_tracked_file() {
 }
 
 #[test]
+fn unused_import_check_dry_run_and_write_are_consistent() {
+    let repo = TempRepo::new("unused-import-cli");
+    let source = "// oresfmt: pure-import\nimport class Old from \"./old\";\nimport class Used from \"./used\";\npub fnc main(): void {\n  Used();\n  return;\n}\n";
+    let target = repo.write("example.ores", source);
+    repo.commit_all("baseline");
+
+    let dry = repo.run(&["example.ores"]);
+    assert!(dry.status.success());
+    assert_eq!(fs::read_to_string(&target).unwrap(), source);
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("would format example.ores"));
+
+    let check = repo.run(&["--check", "example.ores"]);
+    assert_eq!(check.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(&target).unwrap(), source);
+
+    let write = repo.run(&["--write", "example.ores"]);
+    assert!(write.status.success());
+    let formatted = fs::read_to_string(&target).unwrap();
+    assert!(formatted.contains("\n// import class Old from"));
+    assert!(formatted.contains("\nimport class Used from"));
+    assert!(formatted.contains("  Used();"));
+    assert!(repo.run(&["--check", "example.ores"]).status.success());
+}
+
+#[test]
 fn write_refuses_dirty_tracked_file_by_default() {
     let repo = TempRepo::new("dirty-tracked");
     let path = repo.write("sample.ores", UNFORMATTED);
@@ -322,11 +347,19 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
     let repo = TempRepo::new("non-utf8-path");
     let name = OsString::from_vec(b"sample-\xff.ores".to_vec());
     let path = repo.root.join(&name);
-    fs::write(&path, UNFORMATTED).unwrap();
+    let created = fs::write(&path, UNFORMATTED);
     let args = [OsStr::new("--check"), OsStr::new("--"), name.as_os_str()];
 
     let output = repo.run_os(&args);
 
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+    if let Err(error) = created {
+        // APFS rejects invalid UTF-8 names before the CLI can inspect them.
+        // Still exercise OsString argument handling and require a clean error.
+        assert_eq!(error.raw_os_error(), Some(92)); // EILSEQ on Darwin
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!path.exists());
+    } else {
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+    }
 }
