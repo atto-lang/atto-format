@@ -48,11 +48,10 @@ fn case(seed: u64) -> String {
     let value = rng.choose(10000);
     let other = rng.choose(10000);
     let gap = [" ", "  ", "\t", "\n"][rng.choose(4)];
-    let keyword = if rng.choose(2) == 0 { "then" } else { "then" };
     let inner = if rng.choose(2) == 0 {
-        format!("if nested; {keyword} return {value}; else return {other}; fi")
+        format!("if nested; then return {value}; else return {other}; fi")
     } else {
-        format!("if nested; {keyword} first(); second(); fi")
+        format!("if nested; then first(); second(); fi")
     };
     format!(
         "fnc generated() -> int {{\nif ready; then{gap}{inner}\nfi\nreturn {value};\n}}\n"
