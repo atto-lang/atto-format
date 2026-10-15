@@ -1594,11 +1594,15 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 let before = prefix.trim_end();
                 // The branch introducer is syntactic. A semicolon immediately
                 // before then/do is legacy punctuation, not a statement end.
-                // The canonical spelling is "if condition then" on one line.
-                // Replace the optional semicolon and all whitespace between
-                // the condition and branch marker in one lexical rewrite.
-                let replacement_start = before.len();
-                let replacement = " then".to_string();
+                // Preserve an explicit conditional separator while
+                // normalizing all surrounding whitespace and the then marker.
+                let has_separator = before.ends_with(';');
+                let replacement_start = if has_separator {
+                    before.trim_end_matches(';').trim_end().len()
+                } else {
+                    before.len()
+                };
+                let replacement = if has_separator { "; then" } else { " then" }.to_string();
                 replacements.push((replacement_start, last.end, replacement));
             }
         }
