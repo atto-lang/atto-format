@@ -371,7 +371,7 @@ fn terminate_simple_returns(source: &str) -> String {
             }
             invalid |= parens < 0 || brackets < 0;
         }
-        let next = lines.get(index + 1).map_or("", |line| line.trim_start());
+        let next = lines.iter().skip(index + 1).map(|line| line.trim_start()).find(|line| !line.is_empty() && !line.starts_with("//")).unwrap_or("");
         let definitely_complete = bare_return
             || (simple_expression_return
                 && !return_expression_is_multiline(tokens, next)
