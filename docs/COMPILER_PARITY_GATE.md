@@ -32,7 +32,7 @@ The diagnostic switches `--allow-zero-shared-accepted` and `--allow-backend-dive
 
 ## Threat and execution boundaries
 
-The fixture byte limit protects against unexpectedly large input and formatter expansion. Output capture and stderr retention are bounded, but `--max-case-bytes` is operator-controlled; do not set it to an unreviewed enormous value. Child processes are terminated on timeouts/output floods. This is **not** a sandbox: run only reviewed compilers and formatter binaries in an isolated CI runner with appropriate privileges and filesystem/network restrictions.
+The fixture byte limit protects against unexpectedly large input and formatter expansion. Output capture and stderr retention are bounded. `--max-case-bytes` is operator-controlled but explicitly capped at 8 MiB (16 MiB maximum formatter stdout). Oversized limits fail before executing any child process. Child processes are terminated on timeouts/output floods. This is **not** a sandbox: run only reviewed compilers and formatter binaries in an isolated CI runner with appropriate privileges and filesystem/network restrictions.
 
 Before declaring a passing compiler-parity gate, pin the exact formatter binary and both compiler commits, verify the source Git trees, and run real accepted, rejected, malformed and ownership-sensitive fixtures. Save the JSON result alongside the input SHA manifest. Separately run Java/GraalVM and LLVM guest execution, native/AOT and language-conformance tests; source admission alone cannot establish those properties.
 
