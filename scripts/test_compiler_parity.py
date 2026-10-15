@@ -105,7 +105,7 @@ class ParityHarnessTests(unittest.TestCase):
     def test_synthetic_reject_script_exits_cleanly(self):
         # Do not let an accidentally invalid mock count as a compiler reject.
         reject = self.path / "clean_reject.py"
-        reject.write_text("import sys\\nsys.exit(1)\\n", encoding="utf-8")
+        reject.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
         result, diagnostics = execute([sys.executable, str(reject)], 5)
         self.assertEqual(result, "reject")
         self.assertEqual(diagnostics, b"")
@@ -114,7 +114,7 @@ class ParityHarnessTests(unittest.TestCase):
         case = self.path / "usage.ores"
         case.write_text("allowed", encoding="utf-8")
         bad = self.path / "bad_cli.py"
-        bad.write_text("import sys\\nsys.exit(2)\\n", encoding="utf-8")
+        bad.write_text("import sys\nsys.exit(2)\n", encoding="utf-8")
         broken_command = f'"{sys.executable}" "{bad}" {{source}}'
         result = audit_case(
             case, [sys.executable, str(self.formatter)],
@@ -138,7 +138,7 @@ class ParityHarnessTests(unittest.TestCase):
         case = self.path / "case.ores"
         case.write_text("allowed", encoding="utf-8")
         always_reject = self.path / "reject.py"
-        always_reject.write_text("import sys\\nsys.exit(1)\\n", encoding="utf-8")
+        always_reject.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
         result = main([
             "--formatter", f"{sys.executable} {self.formatter}",
             "--java-command", self.command,
