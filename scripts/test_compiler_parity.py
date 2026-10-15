@@ -158,6 +158,74 @@ class ParityHarnessTests(unittest.TestCase):
         ])
         self.assertEqual(result, 0)
 
+    def test_rejects_symlink_fixture_without_executing_compilers(self):
+        target = self.path / "other.txt"
+        target.write_text("allowed", encoding="utf-8")
+        case = self.path / "linked.ores"
+        case.symlink_to(target)
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_rejects_oversized_fixtures(self):
+        case = self.path / "large.ores"
+        case.write_text("allowed" * 40, encoding="utf-8")
+        result = audit_case(
+            case, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5, max_case_bytes=32,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_rejects_formatter_erasure(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        eraser = self.path / "eraser.py"
+        eraser.write_text("print('   ')", encoding="utf-8")
+        result = audit_case(
+            case, [sys.executable, str(eraser)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["formatter"], "invalid_output")
+
+    def test_rejects_invalid_formatter_utf8(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        malformed = self.path / "malformed.py"
+        malformed.write_text(
+            "import sys\nsys.stdout.buffer.write(bytes([255]))\n",
+            encoding="utf-8",
+        )
+        result = audit_case(
+            case, [sys.executable, str(malformed)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["formatter"], "invalid_utf8")
+
+    def test_rejects_formatter_output_above_limit(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        expanding = self.path / "expanding.py"
+        expanding.write_text("print('x' * 128)", encoding="utf-8")
+        result = audit_case(
+            case, [sys.executable, str(expanding)],
+            self.command, self.command, 5, max_case_bytes=32,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["formatter"], "invalid_output")
+
+    def test_compiler_standard_output_is_ignored(self):
+        result, diagnostics = execute(
+            [sys.executable, "-c", "print('x' * 100000); exit(0)"], 5,
+        )
+        self.assertEqual(result, "accept")
+        self.assertEqual(diagnostics, b"")
+
 
 if __name__ == "__main__":
     unittest.main()
