@@ -110,6 +110,15 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
         )
 }
 
+// A contextual identifier used as a call, index, or member is not
+// a control-flow delimiter.
+fn is_keyword_delimiter(tokens: &[Token<'_>], index: usize) -> bool {
+    let prev = index.checked_sub(1).and_then(|i| tokens.get(i));
+    let next = tokens.get(index + 1);
+    !prev.is_some_and(|token| token.text == ".")
+        && !next.is_some_and(|token| matches!(token.text, "(" | "[" | "."))
+}
+
 fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
