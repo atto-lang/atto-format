@@ -184,8 +184,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let starts_end = starts_block_keyword(structural, "end");
         let starts_fi = starts_block_keyword(structural, "fi");
         let starts_done = starts_block_keyword(structural, "done");
-        let branch_line = starts_block_keyword(structural, "else")
-            || starts_block_keyword(structural, "elif");
+        let branch_line =
+            starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
