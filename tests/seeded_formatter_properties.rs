@@ -54,7 +54,7 @@ fn case(seed: u64) -> String {
     let inner = if rng.choose(2) == 0 {
         format!("if nested; then return {value}; else return {other}; fi")
     } else {
-        format!("if nested; then first(); second(); fi")
+        "if nested; then first(); second(); fi".to_string()
     };
     format!("fnc generated() -> int {{\nif ready; then{gap}{inner}\nfi\nreturn {value};\n}}\n")
 }
