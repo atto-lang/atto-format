@@ -1,0 +1,48 @@
+use oreslang_format::{format_source, is_formatted};
+
+#[test]
+fn snake_case_composition_chains_survive_formatting() {
+    let source = r#"
+fnc option_pipe(Option<int> input): Option<int> {
+  return input.flat_map<int>(|int n| -> { return Some(n + 1); }).and_then<int>(|int n| -> { return Some(n * 2); });
+}
+
+fnc result_pipe(Result<int, string> input): Result<int, string> {
+  return input.map_err<string>(|string err| -> { return err; }).flat_map<int>(|int n| -> { return Ok(n); });
+}
+
+fnc future_pipe(Future<int> input): Future<int> {
+  return input.flat_map(|int n| -> { return next_future(n); }).on_success(|int n| -> { stdio.println(n); return; });
+}
+
+fnc observable_pipe(Observable<int> input): Observable<int> {
+  return rx_channels.filter_map(input, |int n| -> { return Some(n); });
+}
+"#;
+    let once = format_source(source).expect("composition fixture should format");
+    for marker in [
+        ".flat_map<int>(",
+        ".and_then<int>(",
+        ".map_err<string>(",
+        ".flat_map(",
+        ".on_success(",
+        "rx_channels.filter_map(",
+    ] {
+        assert!(once.contains(marker), "lost {marker}: {once}");
+    }
+    let twice = format_source(&once).expect("format must be idempotent");
+    assert_eq!(once, twice);
+    assert!(is_formatted(&twice).unwrap());
+}
+
+#[test]
+fn legacy_future_camel_case_names_remain_source_compatible() {
+    let source = r#"fnc old_future(Future<int> f): Future<int> {
+  return f.flatMap(|int n| -> { return next_future(n); }).onSuccess(|int n| -> { return; });
+}
+"#;
+    let once = format_source(source).expect("legacy Future source should format");
+    assert!(once.contains(".flatMap("), "{once}");
+    assert!(once.contains(".onSuccess("), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
