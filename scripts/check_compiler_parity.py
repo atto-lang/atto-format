@@ -18,6 +18,11 @@ import time
 from pathlib import Path
 
 
+# Bound untrusted fixture snapshots and formatter stdout even when callers
+# supply a very large --max-case-bytes value.
+MAX_CASE_BYTES_LIMIT = 8 * 1024 * 1024
+
+
 def command_argv(template, source):
     argv = [word.replace("{source}", str(source)) for word in shlex.split(template)]
     if not any("{source}" in word for word in shlex.split(template)):
@@ -135,6 +140,9 @@ def execute(argv, timeout):
 def audit_case(path, formatter, java_command, llvm_command, timeout,
                max_case_bytes=1024 * 1024):
     # Never submit symlinks, special files or unbounded fixtures to compilers.
+    if not (0 < max_case_bytes <= MAX_CASE_BYTES_LIMIT):
+        return {"case": path.name, "ok": False, "fixture": "invalid",
+                "detail": "max-case-bytes exceeds the safe harness limit"}
     # Check both reported size and actual bytes to catch files growing mid-read.
     try:
         # Reject symlinks at open time, not only in a racy prior stat call.
@@ -248,6 +256,8 @@ def main(argv=None):
         parser.error("timeout must be positive")
     if args.max_case_bytes <= 0:
         parser.error("max-case-bytes must be positive")
+    if args.max_case_bytes > MAX_CASE_BYTES_LIMIT:
+        parser.error(f"max-case-bytes must not exceed {MAX_CASE_BYTES_LIMIT}")
     results = [audit_case(path, shlex.split(args.formatter),
                           args.java_command, args.llvm_command, args.timeout,
                           args.max_case_bytes)
