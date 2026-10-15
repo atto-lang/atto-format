@@ -18,7 +18,8 @@ define class Worker as {
   }
 }
 "#;
-    let formatted = format_source(source).expect("formatter must preserve proposed effect declarations");
+    let formatted =
+        format_source(source).expect("formatter must preserve proposed effect declarations");
     assert!(formatted.contains("throws(NetworkError, DecodeError)"));
     assert!(formatted.contains("raises(AccessError)"));
     assert!(formatted.contains("panics(InvariantError)"));
@@ -31,8 +32,36 @@ define class Worker as {
 
 #[test]
 fn keeps_exception_words_inside_literals_opaque() {
-    let source = "fnc f() -> String {\n  return \"throws(Error) raises(Error) panics(Error)\";\n}\n";
+    let source =
+        "fnc f() -> String {\n  return \"throws(Error) raises(Error) panics(Error)\";\n}\n";
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("\"throws(Error) raises(Error) panics(Error)\""));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn preserves_bare_clauses_generics_and_explicit_mutable_receiver() {
+    let source = "fnc load<T>(value: T) -> T throws raises panics {\n  return value;\n}\n\ndefine class Worker as {\n  pub handle(mut self)() -> void raises(Error) {\n    raise new Error();\n  }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("throws raises panics"));
+    assert!(formatted.contains("handle(mut self)() -> void raises(Error)"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn preserves_named_pipe_and_interface_effect_signatures() {
+    let source = "fnc load = |int id| -> void throws(Error) {\n  throw new Error();\n}\n\ndefine interface Loader as\n  load(id: int) => User throws(Error) raises;\nend\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("fnc load = |int id| -> void throws(Error)"));
+    assert!(formatted.contains("=> User throws(Error) raises;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn preserves_supplied_clause_order_and_never_invents_annotations() {
+    let source = "fnc f() -> void panics(Error) raises(Error) throws(Error) {\n  panic new Error();\n}\n\nfnc g() -> void {\n  raise new Error();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("panics(Error) raises(Error) throws(Error)"));
+    assert!(formatted.contains("fnc g() -> void {"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
