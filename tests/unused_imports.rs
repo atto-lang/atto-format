@@ -324,3 +324,48 @@ pub routine main(): void {
     assert!(formatted.contains("import fnc only_for_init from \"./cyclic.ores\";"));
     assert!(!formatted.contains("// import fnc only_for_init"));
 }
+
+#[test]
+fn selector_level_marker_cannot_deactivate_multiline_import() {
+    let src = r#"import types (
+  First, // oresfmt: pure-import
+  Second
+) from "./potentially-effectful";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("import types ("));
+    assert!(formatted.contains(") from \"./potentially-effectful\";"));
+    assert!(!formatted.contains("// import types ("));
+}
+
+#[test]
+fn trailing_pure_marker_on_final_line_deactivates_reviewed_multiline_import() {
+    let src = r#"import types (
+  First,
+  Second
+) from "./confirmed-pure"; // oresfmt: pure-import
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("// import types ("));
+    assert!(formatted.contains("// ) from \"./confirmed-pure\";"));
+}
+
+#[test]
+fn selector_level_keep_marker_does_not_override_final_line_purity() {
+    let src = r#"import types (
+  First, // oresfmt: keep-import
+  Second
+) from "./confirmed-pure"; // oresfmt: pure-import
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("// import types ("));
+}
