@@ -146,6 +146,48 @@ fn pop_matching(nesting: &mut Vec<&str>, close: &str) -> bool {
     matching_open(close).is_some_and(|expected| nesting.pop() == Some(expected))
 }
 
+/// Locate a slim arrow terminating an executable select arm header, without
+/// mistaking a record destructuring pattern for the arm's statement block.
+/// Legacy arrowless bodies intentionally return None for migration compatibility.
+fn slim_arrow_before_select_body(
+    tokens: &[Token<'_>],
+    start: usize,
+    limit: usize,
+) -> Option<usize> {
+    let mut nesting = Vec::new();
+    let mut i = start;
+    while i < limit {
+        match tokens[i].text {
+            "(" | "[" => nesting.push(tokens[i].text),
+            ")" | "]" => {
+                if !pop_matching(&mut nesting, tokens[i].text) {
+                    return None;
+                }
+            }
+            "{" if nesting.is_empty() => {
+                // A record projection may begin directly at the header or
+                // follow a binding kind/type. It is a projection *only* when
+                // its balanced closing brace is immediately followed by ->.
+                // Otherwise this first brace is the legacy statement body.
+                let end = matching_brace(tokens, i)?;
+                return (end + 2 < limit
+                    && tokens[end + 1].text == "-"
+                    && tokens[end + 2].text == ">")
+                    .then_some(end + 1);
+            }
+            "-" if nesting.is_empty()
+                && i + 1 < limit && tokens[i + 1].text == ">" =>
+            {
+                return Some(i);
+            }
+            ";" if nesting.is_empty() => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
     let tokens = tokens(source);
     let mut edits = BTreeMap::<usize, String>::new();
@@ -275,6 +317,16 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 if header == close || tokens[header].text != ":" {
                     return Err(error(tokens[arm].start, "select arm requires ':'"));
                 }
+                if let Some(arrow) = slim_arrow_before_select_body(&tokens, header + 1, close) {
+                    let body = arrow + 2; // tokenizer represents '->' as '-' and '>'
+                    if tokens.get(body).is_none_or(|t| t.text != "{") {
+                        return Err(error(
+                            tokens[arrow].start,
+                            "select slim arrow '->' must be followed by a braced arm body",
+                        ));
+                    }
+                    (body, tokens[body - 1].end)
+                } else {
                 let mut body = header + 1;
                 if (read || await_future)
                     && tokens
@@ -309,6 +361,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     tokens[body - 1].end
                 };
                 (body, header_end)
+                }
             };
             if body < close && tokens[body].text == "{" {
                 let end = matching_brace(&tokens, body)
