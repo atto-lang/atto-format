@@ -239,7 +239,9 @@ struct Import {
 // The opt-out is intentionally attached to one import. A marker appearing in
 // prose or as a trailing comment on an earlier import must not retain another.
 fn dedicated_marker(line: &str, marker: &str) -> bool {
-    line.trim().strip_prefix("//").is_some_and(|comment| comment.trim() == marker)
+    line.trim()
+        .strip_prefix("//")
+        .is_some_and(|comment| comment.trim() == marker)
 }
 
 fn trailing_marker(line: &str, marker: &str) -> bool {
