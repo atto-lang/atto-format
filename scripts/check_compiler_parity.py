@@ -66,8 +66,12 @@ def run_process(argv, timeout, stdout_limit=None):
     diagnostics = bytearray()
     deadline = time.monotonic() + timeout
     status = "exited"
-    selector = selectors.DefaultSelector()
+    # Initialize the selector inside the guarded region: allocation itself may
+    # fail *after* the subprocess has started, and must not leak that child.
+    selector = None
+    reaped_normally = False
     try:
+        selector = selectors.DefaultSelector()
         streams = []
         if process.stdout is not None:
             streams.append(("stdout", process.stdout))
@@ -104,18 +108,22 @@ def run_process(argv, timeout, stdout_limit=None):
             remaining = deadline - time.monotonic()
             try:
                 process.wait(timeout=max(0, remaining))
+                reaped_normally = True
             except subprocess.TimeoutExpired:
                 status = "timeout"
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         status = "unavailable"
         diagnostics = bytearray(str(exc).encode("utf-8", errors="replace")[:4000])
     finally:
-        if status != "exited":
+        # Any incomplete path, including KeyboardInterrupt, must also stop
+        # children that inherited the process group and our output pipes.
+        if not reaped_normally:
             _kill_process_group(process)
         if process.poll() is None:
             process.kill()
         process.wait()
-        selector.close()
+        if selector is not None:
+            selector.close()
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 stream.close()
