@@ -133,3 +133,106 @@ end
     assert!(formatted.starts_with("import actor Worker"));
     assert!(!formatted.contains("// import actor Worker"));
 }
+
+#[test]
+fn keep_marker_applies_to_exactly_one_import() {
+    let src = r#"import class First from "./one"; // oresfmt: keep-import
+import class Second from "./two";
+import class Third from "./three"; // discussion about keep-import
+// oresfmt: keep-import
+import class Fourth from "./four";
+import class Fifth from "./five";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.starts_with("import class First"));
+    assert!(formatted.contains("// import class Second from"));
+    assert!(formatted.contains("// import class Third from"));
+    assert!(formatted.contains("\nimport class Fourth from"));
+    assert!(formatted.contains("// import class Fifth from"));
+}
+
+#[test]
+fn unrelated_prose_and_blank_lines_do_not_activate_keep_marker() {
+    let src = r#"// Discussion: oresfmt: keep-import
+import class Old from "./old";
+
+// oresfmt: keep-import
+
+import class Other from "./other";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.contains("// import class Old from"));
+    assert!(formatted.contains("// import class Other from"));
+}
+
+#[test]
+fn quoted_slashes_and_unicode_source_offsets_are_safe() {
+    let src = r#"// café 雪 🎉
+import class Éclair from "https://example.invalid/oresfmt: keep-import";
+import class Météo from "./weather";
+pub fnc main(): void {
+  Météo();
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(
+        formatted.contains(
+            "// import class Éclair from \"https://example.invalid/oresfmt: keep-import\";"
+        )
+    );
+    assert!(formatted.contains("\nimport class Météo from"));
+}
+
+#[test]
+fn inline_template_name_ambiguity_keeps_imports_active() {
+    let src = "import class Widget from './widget';\nfnc main() -> void {\n  val template = \u{60}Widget\u{60};\n  return;\n}\n";
+    let formatted = canonical(src);
+    assert!(formatted.starts_with("import class Widget"));
+}
+
+#[test]
+fn unknown_import_grammar_does_not_partially_comment_a_header() {
+    let src = r#"import class First from "./one";
+import feature NewSyntax from "./other";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.starts_with("import class First"));
+    assert!(formatted.contains("\nimport feature NewSyntax from"));
+}
+
+#[test]
+fn standalone_only_prevents_commenting_imports_with_other_statements() {
+    let src = r#"import class Foo from "./one"; import class Bar from "./two";
+pub fnc main(): void {
+  return;
+}
+"#;
+    let formatted = canonical(src);
+    assert!(formatted.starts_with("import class Foo from"));
+    assert!(formatted.contains("import class Bar from"));
+    assert!(!formatted.contains("// import class"));
+}
+
+#[test]
+fn large_header_with_many_imports_is_deterministic() {
+    let mut src = String::new();
+    for i in 0..512 {
+        src.push_str(&format!("import class Imported{i} from \"./deps/{i}\";\n"));
+    }
+    src.push_str("pub fnc main(): void {\n  Imported511();\n  return;\n}\n");
+    let formatted = canonical(&src);
+    assert!(formatted.contains("// import class Imported0 from"));
+    assert!(formatted.contains("// import class Imported510 from"));
+    assert!(formatted.contains("\nimport class Imported511 from"));
+    assert_eq!(formatted.matches("// import class ").count(), 511);
+}
