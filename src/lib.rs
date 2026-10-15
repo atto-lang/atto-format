@@ -727,8 +727,16 @@ fn canonicalize_declaration_line(
         .flatten())
     // Named types and modules cannot be nested inside class/actor bodies.
     // Do not erase visibility diagnostics on malformed nested declarations.
-    .or_else(|| (!instance_member).then(|| canonicalize_class_declaration(line, &words)).flatten())
-    .or_else(|| (!instance_member).then(|| canonicalize_defined_interface_or_contract(line, &words)).flatten())
+    .or_else(|| {
+        (!instance_member)
+            .then(|| canonicalize_class_declaration(line, &words))
+            .flatten()
+    })
+    .or_else(|| {
+        (!instance_member)
+            .then(|| canonicalize_defined_interface_or_contract(line, &words))
+            .flatten()
+    })
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .or_else(|| {
@@ -878,7 +886,15 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     let is_prefix_word = |word: &str| {
         matches!(
             word,
-            "define" | "module" | "interface" | "contract" | "trait" | "struct" | "type" | "pub" | "private"
+            "define"
+                | "module"
+                | "interface"
+                | "contract"
+                | "trait"
+                | "struct"
+                | "type"
+                | "pub"
+                | "private"
         )
     };
     let prefix_len = words
@@ -910,7 +926,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
             }
             "module" | "interface" | "contract" | "trait" | "struct" | "type" if kind.is_none() => {
                 kind = Some(&line[span.start..span.end])
-            },
+            }
             _ => return None,
         }
     }
@@ -1262,10 +1278,7 @@ fn canonicalize_private_instance_method(line: &str, words: &[WordSpan]) -> Optio
     if !signature {
         return None;
     }
-    let rest: Vec<&str> = modifiers
-        .into_iter()
-        .filter(|s| *s != "private")
-        .collect();
+    let rest: Vec<&str> = modifiers.into_iter().filter(|s| *s != "private").collect();
     let mut out = String::with_capacity(line.len());
     out.push_str(&line[..prefix[0].start]);
     if !rest.is_empty() {
@@ -1293,10 +1306,11 @@ fn canonicalize_private_member(
     // Symbol-key methods start with '[' rather than an identifier. Inspect
     // this spelling before the ordinary whitespace-only word-prefix check.
     let after_private = line[first.end..].trim_start();
-    if instance_member && after_private.starts_with("[Symbol.")
-        && after_private.find(']').is_some_and(|close| {
-            after_private[close + 1..].trim_start().starts_with('(')
-        })
+    if instance_member
+        && after_private.starts_with("[Symbol.")
+        && after_private
+            .find(']')
+            .is_some_and(|close| after_private[close + 1..].trim_start().starts_with('('))
     {
         let mut rewritten = String::with_capacity(line.len());
         rewritten.push_str(&line[..first.start]);
@@ -1313,8 +1327,7 @@ fn canonicalize_private_member(
     let is_explicit_method = instance_member
         && token == "method"
         && words.get(2).is_some_and(|name| {
-            plain_word_prefix(line, &words[..3])
-                && line[name.end..].trim_start().starts_with('(')
+            plain_word_prefix(line, &words[..3]) && line[name.end..].trim_start().starts_with('(')
         });
     let is_implicit_method = instance_member
         && token != "pub"
@@ -1322,8 +1335,7 @@ fn canonicalize_private_member(
         && (suffix.starts_with('(') || suffix.starts_with('<'));
     // Fields declared with name-first colon syntax are a class-only feature.
     let is_colon_field = instance_member && suffix.starts_with(':');
-    let is_type_first_field =
-        instance_member && is_type_first_class_field(line, words);
+    let is_type_first_field = instance_member && is_type_first_class_field(line, words);
 
     if !(is_binding
         || is_constructor
@@ -1359,9 +1371,10 @@ fn is_type_first_class_field(line: &str, words: &[WordSpan]) -> bool {
         }
         // A second visibility token must remain intact for the compiler to
         // reject it. Otherwise "private pub int x: 1" becomes a public field.
-        if words[1..index].iter().any(|span| matches!(
-            &line[span.start..span.end], "pub" | "private"
-        )) {
+        if words[1..index]
+            .iter()
+            .any(|span| matches!(&line[span.start..span.end], "pub" | "private"))
+        {
             return false;
         }
         let type_prefix = &line[type_start..field.start];
@@ -1376,7 +1389,9 @@ fn is_type_first_class_field(line: &str, words: &[WordSpan]) -> bool {
                 '>' if angles > 0 => angles -= 1,
                 '[' => brackets += 1,
                 ']' if brackets > 0 => brackets -= 1,
-                c if c.is_alphanumeric() || c == '_' || c.is_whitespace()
+                c if c.is_alphanumeric()
+                    || c == '_'
+                    || c.is_whitespace()
                     || matches!(c, ',' | '.' | '&' | '?' | '|' | '!') => {}
                 _ => return false,
             }
