@@ -181,10 +181,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             .collect();
         let structural = structural_content.trim_start();
 
-        let starts_end = starts_word(structural, "end");
-        let starts_fi = starts_word(structural, "fi");
-        let starts_done = starts_word(structural, "done");
-        let branch_line = starts_word(structural, "else") || starts_word(structural, "elif");
+        let starts_end = starts_block_keyword(structural, "end");
+        let starts_fi = starts_block_keyword(structural, "fi");
+        let starts_done = starts_block_keyword(structural, "done");
+        let branch_line = starts_block_keyword(structural, "else")
+            || starts_block_keyword(structural, "elif");
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
@@ -614,6 +615,16 @@ fn starts_word(line: &str, word: &str) -> bool {
         .is_none_or(|c| !is_ident_char(c))
 }
 
+// Contextual names such as fi(), else(), and done() are ordinary calls,
+// not structural keyword lines. Preserve them even after inline expansion.
+fn starts_block_keyword(line: &str, word: &str) -> bool {
+    starts_word(line, word)
+        && !matches!(
+            line[word.len()..].trim_start().chars().next(),
+            Some('(' | '[' | '.')
+        )
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
@@ -627,9 +638,9 @@ fn leading_closing_braces(line: &str) -> usize {
 
 fn is_closer_line(line: &str) -> bool {
     line.starts_with('}')
-        || starts_word(line, "end")
-        || starts_word(line, "fi")
-        || starts_word(line, "done")
+        || starts_block_keyword(line, "end")
+        || starts_block_keyword(line, "fi")
+        || starts_block_keyword(line, "done")
 }
 
 fn ends_statement(line: &str) -> bool {
