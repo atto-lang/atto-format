@@ -198,7 +198,7 @@ mod tests {
         let output = normalize(input);
         assert!(output.contains("select { default: { return; }, }"));
         assert!(output.contains("on Tag as (a, b) {"));
-        assert!(output.contains("default {"));
+        assert!(output.contains("on _ {"));
         assert!(output.contains("\"case } , ;\""));
     }
 
