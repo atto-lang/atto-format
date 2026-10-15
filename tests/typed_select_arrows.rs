@@ -26,7 +26,10 @@ when readch records: const payload: {foo: string} -> { process(payload.foo); }
 fn modern_write_and_default_arm_arrows_are_not_treated_as_unbraced_bodies() {
     let input = "do select { when writech output, build(1): -> { send(); } default: -> {} }\n";
     let actual = format_source(input).unwrap();
-    assert!(actual.contains("when writech output, build(1): -> {"), "{actual}");
+    assert!(
+        actual.contains("when writech output, build(1): -> {"),
+        "{actual}"
+    );
     assert!(actual.contains("default: -> {"), "{actual}");
     assert_eq!(format_source(&actual).unwrap(), actual);
 }
@@ -35,7 +38,10 @@ fn modern_write_and_default_arm_arrows_are_not_treated_as_unbraced_bodies() {
 fn compatibility_read_body_does_not_consume_an_inner_lambda_arrow() {
     let input = "select { case readch channel: val value { call(|x| -> x + 1); } }\n";
     let actual = format_source(input).unwrap();
-    assert!(actual.contains("when readch channel: val value {"), "{actual}");
+    assert!(
+        actual.contains("when readch channel: val value {"),
+        "{actual}"
+    );
     assert!(actual.contains("|x| -> x + 1"), "{actual}");
     assert_eq!(format_source(&actual).unwrap(), actual);
 }
