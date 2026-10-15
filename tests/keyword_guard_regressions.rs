@@ -39,3 +39,21 @@ fn single_line_return_without_continuation_gets_terminator() {
     assert!(output.contains("return compute(1);"), "{output}");
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn statements_on_later_if_body_lines_are_always_separated() {
+    let input = "fnc run() {\nif ready; then\nfirst(); second();\nfi\n}\n";
+    let expected = "fnc run() {\n  if ready; then\n    first();\n    second();\n  fi\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn nested_if_later_line_statements_are_separated() {
+    let input = "fnc run() {\nif outer; then\nif inner; then\none(); two();\nfi\nfi\n}\n";
+    let expected = "fnc run() {\n  if outer; then\n    if inner; then\n      one();\n      two();\n    fi\n  fi\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
