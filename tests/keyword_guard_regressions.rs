@@ -15,3 +15,27 @@ fn return_continuations_after_blank_lines_are_not_separated() {
     let output = format_source(source).unwrap();
     assert!(!output.contains("return obj;"));
 }
+
+#[test]
+fn preserves_explicit_conditional_separator() {
+    let input = "fnc check() {\nif self.built; then return Err(\"consumed\"); fi\n}\n";
+    let output = format_source(input).unwrap();
+    assert!(output.contains("if self.built; then"), "{output}");
+    assert!(output.contains("return Err(\"consumed\");"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn comments_and_blank_lines_do_not_hide_return_continuations() {
+    let input = "fnc read() {\nreturn value\n\n// explanation\n  .decode()\n}\n";
+    let output = format_source(input).unwrap();
+    assert!(!output.contains("return value;"), "{output}");
+}
+
+#[test]
+fn single_line_return_without_continuation_gets_terminator() {
+    let input = "fnc value() {\nreturn compute(1)\n}\n";
+    let output = format_source(input).unwrap();
+    assert!(output.contains("return compute(1);"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
