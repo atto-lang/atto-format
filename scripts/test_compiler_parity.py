@@ -2,6 +2,7 @@
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from check_compiler_parity import audit_case, command_argv, execute, main, run_process
@@ -301,6 +302,33 @@ class ParityHarnessTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"], result)
         self.assertEqual(result["formatter"], "invalid_output")
+
+    def test_selector_constructor_failure_reaps_child(self):
+        # DefaultSelector() may fail after Popen() has already spawned a child.
+        with mock.patch("check_compiler_parity.selectors.DefaultSelector",
+                        side_effect=OSError("selector setup failed")):
+            status, returncode, stdout, diagnostics = run_process(
+                [sys.executable, "-c",
+                 "import time; time.sleep(10)"],
+                2, stdout_limit=64,
+            )
+        self.assertEqual(status, "unavailable")
+        self.assertIsNotNone(returncode)
+        self.assertEqual(stdout, b"")
+        self.assertIn(b"selector setup failed", diagnostics)
+
+    def test_selector_value_error_fails_closed(self):
+        with mock.patch("check_compiler_parity.selectors.DefaultSelector",
+                        side_effect=ValueError("invalid selector")):
+            status, returncode, stdout, diagnostics = run_process(
+                [sys.executable, "-c",
+                 "import time; time.sleep(10)"],
+                2, stdout_limit=64,
+            )
+        self.assertEqual(status, "unavailable")
+        self.assertIsNotNone(returncode)
+        self.assertEqual(stdout, b"")
+        self.assertIn(b"invalid selector", diagnostics)
 
     def test_compiler_stderr_flood_is_bounded(self):
         status, diagnostics = execute(
