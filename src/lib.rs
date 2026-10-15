@@ -171,7 +171,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                 let content = if raw_line.is_empty() {
                     String::new()
                 } else if block_comment_indent_shift >= 0 {
-                    format!("{}{}", " ".repeat(block_comment_indent_shift as usize), raw_line)
+                    format!(
+                        "{}{}",
+                        " ".repeat(block_comment_indent_shift as usize),
+                        raw_line
+                    )
                 } else {
                     let leading = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
                     let removed = leading.min((-block_comment_indent_shift) as usize);
