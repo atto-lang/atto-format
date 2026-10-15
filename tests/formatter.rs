@@ -1507,3 +1507,47 @@ on 7 { return true; }
     assert!(once.contains("on _ as remaining {"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
+
+#[test]
+fn generic_defaults_and_named_type_arguments_are_semantically_preserved() {
+    let source = r#"fnc choose<A, B=int, C=B, D=Array<C>, E=string>(A input): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<A=int, D=Array<string>>(7);
+  val int second = choose<E=bool, A=int>(7);
+  val int third = choose<int, _>(7);
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("choose<A, B=int, C=B, D=Array<C>, E=string>"), "{once}");
+    assert!(once.contains("choose<A=int, D=Array<string>>(7)"), "{once}");
+    assert!(once.contains("choose<E=bool, A=int>(7)"), "{once}");
+    assert!(once.contains("choose<int, _>(7)"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+    assert!(is_formatted(&once).unwrap());
+}
+
+#[test]
+fn generic_inference_hole_and_comparison_like_tokens_do_not_mutate() {
+    let source = r#"fnc choose<T=int>(): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<T=_>();
+  val int second = choose<Array<_>>();
+  val int third = choose<Option<Array<_>>>();
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    for preserved in [
+        "choose<T=_>()",
+        "choose<Array<_>>()",
+        "choose<Option<Array<_>>>()",
+    ] {
+        assert!(once.contains(preserved), "{preserved}: {once}");
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
