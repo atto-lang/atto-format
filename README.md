@@ -236,7 +236,21 @@ Additional write hardening:
 - after the full Git preflight, every file is re-read before the first write, and
   each target is revalidated again immediately before its own write; changed
   contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
-- write-safety override flags are rejected unless `--write` is active.
+- write-safety override flags are rejected unless `--write` is active;
+- writes stage formatted bytes in a private, exclusive temporary file beside the
+  destination, preserve standard filesystem mode bits, then revalidate and rename
+  the completed file into place; this avoids truncated files on short writes and
+  avoids modifying siblings that share a hard-linked inode;
+- canonical input-path aliases are processed once, and `--stdout` rejects
+  explicitly symlinked files or symlinked parent directories too.
+
+Atomicity is **per file**, not across a whole directory of files. A crash can
+leave a temporary staging file, and permissions/ACLs, ownership or extended
+metadata beyond ordinary mode bits may not be preserved by a replacement.
+Filesystem path checks are not a full hostile concurrent-directory sandbox
+without directory-handle confinement. Run on trusted local worktrees; CI and
+source-repository integration should continue to use `--check` or `--stdout`,
+not `--write`.
 
 ## Rust SDK
 
