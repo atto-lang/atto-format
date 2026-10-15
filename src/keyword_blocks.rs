@@ -141,7 +141,7 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
             "{" if parens == 0 && brackets == 0 => return false,
             "then" | "do" if parens == 0 && brackets == 0 => {
                 let absolute = start + offset;
-                if absolute == 0 || tokens[absolute - 1].text != "." {
+                if is_keyword_delimiter(tokens, absolute) {
                     return true;
                 }
             }
@@ -243,7 +243,7 @@ fn split_keyword_blocks(source: &str) -> String {
                 "then" | "do"
                     if frames.last() == Some(&Phase::Header)
                         && index > 0
-                        && tokens[index - 1].text != "." =>
+                        && is_keyword_delimiter(&tokens, index) =>
                 {
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Body;
@@ -253,14 +253,14 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) && is_keyword_delimiter(&tokens, index) => {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
-                "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "else" if !frames.is_empty() && statement_boundary(&tokens, index) && is_keyword_delimiter(&tokens, index) => {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
@@ -275,6 +275,7 @@ fn split_keyword_blocks(source: &str) -> String {
                     }
                 }
                 "fi" if frames.last() == Some(&Phase::Body)
+                    && is_keyword_delimiter(&tokens, index)
                     && (statement_boundary(&tokens, index)
                         || inline_return_before(&tokens, index)
                         || tokens
