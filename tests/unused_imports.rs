@@ -242,7 +242,9 @@ pub fnc main(): void {
 fn large_header_with_many_imports_is_deterministic() {
     let mut src = String::new();
     for i in 0..512 {
-        src.push_str(&format!("// oresfmt: pure-import\nimport class Imported{i} from \"./deps/{i}\";\n"));
+        src.push_str(&format!(
+            "// oresfmt: pure-import\nimport class Imported{i} from \"./deps/{i}\";\n"
+        ));
     }
     src.push_str("pub fnc main(): void {\n  Imported511();\n  return;\n}\n");
     let formatted = canonical(&src);
