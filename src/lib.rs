@@ -722,6 +722,27 @@ fn canonicalize_declaration_line(
         return line.to_string();
     }
 
+    // Explicit `private abstract` is an actor framework-entrypoint contract,
+    // not disposable visibility sugar. The hidden superclass controls calls
+    // even when ordinary actor members default to private. Do not rewrite
+    // such headers until compiler-approved canonicalization is defined.
+    if instance_member {
+        let protected_modifiers: Vec<&str> = words
+            .iter()
+            .map(|span| &line[span.start..span.end])
+            .take_while(|word| {
+                matches!(*word,
+                    "private" | "pub" | "abstract" | "async" | "suspend"
+                    | "suspends" | "critical" | "structural" | "trap")
+            })
+            .collect();
+        if protected_modifiers.contains(&"private")
+            && protected_modifiers.contains(&"abstract")
+        {
+            return line.to_string();
+        }
+    }
+
     (instance_member
         .then(|| canonicalize_instance_method_fnc(line, &words))
         .flatten())
@@ -2233,6 +2254,28 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_abstract_actor_entrypoints_are_not_normalized_away() {
+        // Explicit private abstract preserves runtime-only invocation authority.
+        // Never replace this with an ordinary implicit-private method.
+        for header in [
+            "private abstract receive(Mail mail): void;",
+            "abstract private receive(Mail mail): void;",
+            "private abstract fnc receive(Mail mail): void;",
+        ] {
+            let input = format!("define actor Connection as\n  {}\nend\n", header);
+            let formatted = format_source(&input).expect("private abstract actor syntax");
+            assert!(formatted.contains(header),
+                "hidden actor entrypoint lost explicit visibility: {formatted}");
+            assert_eq!(format_source(&formatted).unwrap(), formatted);
+        }
+        // Ordinary redundant private still normalizes independently.
+        let ordinary = format_source(
+            "define actor Connection as\n  private fnc ordinary(): void;\nend\n"
+        ).unwrap();
+        assert!(!ordinary.contains("private fnc ordinary"));
+    }
 
     #[test]
     fn canonicalizes_rt_yield_without_touching_generator_yield_or_literals() {
