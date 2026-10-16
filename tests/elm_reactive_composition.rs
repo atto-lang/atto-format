@@ -59,7 +59,10 @@ fnc optional_cast(Any v): Option<int> {
     let once = format_source(source).expect("existing valid question syntax should format");
     assert!(once.contains("?"), "ternary delimiter lost: {once}");
     assert!(once.contains(":"), "ternary alternative lost: {once}");
-    assert!(once.contains("as? int"), "optional cast was rewritten: {once}");
+    assert!(
+        once.contains("as? int"),
+        "optional cast was rewritten: {once}"
+    );
     assert_eq!(format_source(&once).unwrap(), once);
 }
 
@@ -77,9 +80,13 @@ fnc choice(bool flag): int {
   return flag?1:2;
 }
 "#;
-    let once = format_source(source).expect("postfix ? must be preserved or format must fail closed");
+    let once =
+        format_source(source).expect("postfix ? must be preserved or format must fail closed");
     for fragment in ["incoming?;", "flag", "?", ":"] {
-        assert!(once.contains(fragment), "question operator lost {fragment}: {once}");
+        assert!(
+            once.contains(fragment),
+            "question operator lost {fragment}: {once}"
+        );
     }
     assert_eq!(format_source(&once).unwrap(), once);
 }
