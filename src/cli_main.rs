@@ -545,6 +545,40 @@ mod pinned_directory {
         Ok(())
     }
 
+    pub(super) fn confirm_stage(
+        dir: &fs::File,
+        name: &OsStr,
+        expected: &fs::Metadata,
+        formatted: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut staged = open_relative(
+            dir,
+            name,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )?;
+        let actual = staged.metadata()?;
+        if !actual.is_file()
+            || actual.dev() != expected.dev()
+            || actual.ino() != expected.ino()
+            || actual.uid() != expected.uid()
+            || actual.gid() != expected.gid()
+            || actual.mode() != expected.mode()
+            || actual.size() != expected.size()
+            || actual.mtime() != expected.mtime()
+            || actual.mtime_nsec() != expected.mtime_nsec()
+            || actual.ctime() != expected.ctime()
+            || actual.ctime_nsec() != expected.ctime_nsec()
+        {
+            return Err("refusing staged file replaced or altered before rename".into());
+        }
+        ensure_no_extended_attributes(&staged)?;
+        if read_bounded_source(&mut staged, "staged source")? != formatted {
+            return Err("refusing staged bytes changed before rename".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn replace(dir: &fs::File, temp: &OsStr, target: &OsStr) -> io::Result<()> {
         let temp = checked_name(temp)?;
         let target = checked_name(target)?;
@@ -638,6 +672,28 @@ fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::erro
 // This is a per-file atomic replacement, NOT a multi-file transaction.
 // Symlinked parent paths are preflighted, but fully hostile concurrent
 // directory replacement requires dirfd/openat-style confinement.
+#[cfg(unix)]
+fn sync_committed_directory(
+    directory: &fs::File,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    report_committed_sync(directory.sync_all(), path)
+}
+
+#[cfg(unix)]
+fn report_committed_sync(
+    result: io::Result<()>,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    result.map_err(|error| {
+        format!(
+            "replacement already committed for {} but parent directory sync failed: {error}; inspect file before retrying",
+            path.display()
+        )
+        .into()
+    })
+}
+
 fn replace_atomically(
     path: &Path,
     original: &str,
@@ -730,6 +786,8 @@ fn replace_atomically(
             #[cfg(target_os = "linux")]
             pinned_directory::ensure_no_extended_attributes(&file)?;
             file.sync_all()?;
+            #[cfg(target_os = "linux")]
+            let staged_metadata = file.metadata()?;
             drop(file);
             // Recheck immediately before replacing the directory entry.
             revalidate_write_target(path, original)?;
@@ -741,6 +799,12 @@ fn replace_atomically(
             #[cfg(target_os = "linux")]
             {
                 pinned_directory::confirm_source(&parent_handle, name, initial_metadata, original)?;
+                pinned_directory::confirm_stage(
+                    &parent_handle,
+                    temp_path.file_name().ok_or("staging file missing basename")?,
+                    &staged_metadata,
+                    formatted,
+                )?;
                 pinned_directory::replace(
                     &parent_handle,
                     temp_path.file_name().ok_or("staging file missing basename")?,
@@ -753,7 +817,7 @@ fn replace_atomically(
             // already-synced file contents. A failed sync is reported, but
             // an already completed rename cannot be rolled back atomically.
             #[cfg(unix)]
-            parent_handle.sync_all()?;
+            sync_committed_directory(&parent_handle, path)?;
             Ok(())
         })();
         if result.is_err() {
