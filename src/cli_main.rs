@@ -1032,6 +1032,25 @@ mod write_safety_tests {
 
 
 
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_read_rejects_fifo_without_waiting_for_a_writer() {
+        let root = scratch("fifo-substitution");
+        let pipe = root.join("source.ores");
+        let status = Command::new("mkfifo").arg(&pipe).status().unwrap();
+        assert!(status.success());
+
+        let error = read_regular_source(&pipe).unwrap_err();
+        assert!(
+            error.to_string().contains("non-regular Oreslang source"),
+            "{error}"
+        );
+        let error = reject_unsupported_file_metadata(&pipe).unwrap_err();
+        assert!(error.to_string().contains("source path replaced"));
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn pinned_source_inspection_refuses_symlink_leaf_substitution() {
