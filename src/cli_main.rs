@@ -1042,6 +1042,13 @@ mod write_safety_tests {
     }
 
     #[test]
+    fn formatted_output_never_exceeds_readable_input_limit() {
+        assert!(check_formatted_size(MAX_SOURCE_BYTES as usize).is_ok());
+        let error = check_formatted_size(MAX_SOURCE_BYTES as usize + 1).unwrap_err();
+        assert!(error.to_string().contains("refusing formatted source exceeding"));
+    }
+
+    #[test]
     fn bounded_source_rejects_expanding_input() {
         let mut oversized = io::Cursor::new(vec![b'a'; MAX_SOURCE_BYTES as usize + 1]);
         let error = read_bounded_source(&mut oversized, "test source").unwrap_err();
