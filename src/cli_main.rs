@@ -1051,6 +1051,45 @@ mod write_safety_tests {
         let _ = fs::remove_dir_all(root);
     }
 
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_rename_never_follows_a_leaf_symlink_swapped_after_validation() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("rename-leaf-symlink");
+        let target = root.join("sample.ores");
+        let outside = root.join("outside.ores");
+        fs::write(&target, "before").unwrap();
+        fs::write(&outside, "outside-unchanged").unwrap();
+
+        let original = fs::symlink_metadata(&target).unwrap();
+        let parent = pinned_directory::open_parent(&root).unwrap();
+        pinned_directory::confirm_source(
+            &parent,
+            OsStr::new("sample.ores"),
+            &original,
+            "before",
+        ).unwrap();
+
+        let mut staged = pinned_directory::stage(&parent, OsStr::new("stage.tmp")).unwrap();
+        staged.write_all(b"formatted").unwrap();
+        drop(staged);
+
+        fs::rename(&target, root.join("old-sample.ores")).unwrap();
+        symlink(&outside, &target).unwrap();
+
+        pinned_directory::replace(
+            &parent,
+            OsStr::new("stage.tmp"),
+            OsStr::new("sample.ores"),
+        ).unwrap();
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "outside-unchanged");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "formatted");
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn pinned_source_inspection_refuses_symlink_leaf_substitution() {
