@@ -237,20 +237,26 @@ Additional write hardening:
   each target is revalidated again immediately before its own write; changed
   contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
 - write-safety override flags are rejected unless `--write` is active;
-- writes stage formatted bytes in a private, exclusive temporary file beside the
-  destination, preserve standard filesystem mode bits, then revalidate and rename
-  the completed file into place; this avoids truncated files on short writes and
-  avoids modifying siblings that share a hard-linked inode;
-- canonical input-path aliases are processed once, and `--stdout` rejects
-  explicitly symlinked files or symlinked parent directories too.
+- writes stage bytes in a private exclusive same-directory temporary file, copy
+  ordinary mode bits, then revalidate and rename into place; this avoids
+  truncated sources on short writes and prevents changing hard-linked siblings;
+- equivalent path spellings are processed once, and `--stdout` refuses
+  explicit leaf or ancestor symlinks.
 
-Atomicity is **per file**, not across a whole directory of files. A crash can
-leave a temporary staging file, and permissions/ACLs, ownership or extended
-metadata beyond ordinary mode bits may not be preserved by a replacement.
-Filesystem path checks are not a full hostile concurrent-directory sandbox
-without directory-handle confinement. Run on trusted local worktrees; CI and
-source-repository integration should continue to use `--check` or `--stdout`,
-not `--write`.
+On Unix, atomic replacement also refuses files with setuid, setgid or sticky
+permission bits or those whose owner/group cannot be preserved by staging.
+Extended attributes and ACLs are **not** preserved by this stdlib-only
+replacement and are still a release blocker; directory-handle confinement and
+crash durability are not established. Atomicity applies to one file only, not
+an entire input set. A crash may leave a temporary file. This is not a hostile
+filesystem sandbox; only use `--write` on reviewed trusted local worktrees.
+CI/source repository integration must use `--stdout` or `--check`.
+
+CLI exit codes are explicit: `0` means success, `1` means either a
+noncanonical `--check` input or rejected Oreslang source (with an error
+diagnostic), and `2` means CLI usage, filesystem, Git-policy or other tool
+failure. Both `oresfmt` and `oreslang-format` use the same codes. Audit
+scripts must not confuse a syntax rejection with a tool/runner failure.
 
 ## Rust SDK
 

@@ -443,3 +443,20 @@ fn atomic_write_preserves_existing_file_mode() {
     let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
 }
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_rejects_special_unix_permission_bits() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TempRepo::new("special-permissions");
+    let target = repo.write("sample.ores", UNFORMATTED);
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o1644)).unwrap();
+    repo.commit_all("baseline");
+
+    let output = repo.run(&["--write", "sample.ores"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("special Unix permission bits"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), UNFORMATTED);
+}

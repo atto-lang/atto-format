@@ -1,4 +1,4 @@
-use oreslang_format::{format_source, is_formatted};
+use oreslang_format::{FormatError, format_source, is_formatted};
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -67,7 +67,8 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("oresfmt: {err}");
-            ExitCode::from(2)
+            // Source syntax/formatting rejections are distinct from tool errors.
+            ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
         }
     }
 }
@@ -289,7 +290,19 @@ fn replace_atomically(
     use std::time::{SystemTime, UNIX_EPOCH};
 
     revalidate_write_target(path, original)?;
-    let permissions = fs::symlink_metadata(path)?.permissions();
+    let original_metadata = fs::symlink_metadata(path)?;
+    let permissions = original_metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if permissions.mode() & 0o7000 != 0 {
+            return Err(format!(
+                "refusing atomic replacement of file with special Unix permission bits: {}",
+                path.display()
+            )
+            .into());
+        }
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path.file_name().ok_or("write target has no filename")?;
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
@@ -317,6 +330,20 @@ fn replace_atomically(
         };
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             file.write_all(formatted.as_bytes())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let staged = file.metadata()?;
+                if original_metadata.uid() != staged.uid()
+                    || original_metadata.gid() != staged.gid()
+                {
+                    return Err(format!(
+                        "refusing atomic replacement that changes owner/group: {}",
+                        path.display()
+                    )
+                    .into());
+                }
+            }
             file.set_permissions(permissions.clone())?;
             file.sync_all()?;
             drop(file);
