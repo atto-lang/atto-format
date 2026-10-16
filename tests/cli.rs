@@ -195,6 +195,26 @@ fn write_refuses_untracked_file_unless_explicitly_allowed() {
 }
 
 #[test]
+fn oversized_source_refusal_keeps_earlier_files_unchanged() {
+    let repo = TempRepo::new("oversized-preflight");
+    let earlier = repo.write("a.ores", UNFORMATTED);
+    let huge = repo.root.join("z.ores");
+    let limit = 16 * 1024 * 1024;
+    fs::write(&huge, vec![b'x'; limit + 1]).unwrap();
+
+    let output = repo.run(&["--write", "--ok-to-mod-untracked-files", "."]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("refusing source exceeding"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(earlier).unwrap(), UNFORMATTED);
+    assert_eq!(fs::metadata(huge).unwrap().len(), (limit + 1) as u64);
+}
+
+#[test]
 fn write_preflights_every_change_before_touching_any_file() {
     let repo = TempRepo::new("atomic-preflight");
     let tracked = repo.write("a.ores", UNFORMATTED);
