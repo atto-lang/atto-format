@@ -250,12 +250,16 @@ attributes (including POSIX ACL xattrs) or when attribute inspection fails;
 this is a fail-closed safeguard, **not** metadata preservation. On other
 platforms, `--write` fails closed until metadata handling is validated.
 Files are checked before any write and rechecked just before their rename.
-Parent directory identity is checked before staging and again before
-replacement, and the containing directory is synchronized after rename on
-Unix. These strengthen ordinary crash durability but cannot make a multi-file
-transaction or close all concurrent races: fully directory-handle-relative
-`openat`/`renameat` confinement remains a security release blocker. Atomicity applies to one file only, not
-an entire input set. A crash may leave a temporary file. This is not a hostile
+On Linux, a directory descriptor is opened component by component with
+no symlink following. Exclusive staging, final source inspection, rename
+and failed-stage cleanup use descriptor-relative operations. The parent inode
+is checked before staging and rename, and the containing directory is
+synchronized after replacement. Parent traversal components are refused.
+These measures reduce path redirection but do not make a multi-file
+transaction: a hostile process can still move a pinned directory or replace
+the leaf between the last check and rename. A crash can leave a staging file;
+durability depends on the filesystem. Atomicity applies to one file, not
+the entire input set. A crash may leave a temporary file. This is not a hostile
 filesystem sandbox; only use `--write` on reviewed trusted local worktrees.
 CI/source repository integration must use `--stdout` or `--check`.
 
