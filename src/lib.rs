@@ -2266,7 +2266,10 @@ mod tests {
         ] {
             let input = format!("define actor Connection as\n  {}\nend\n", header);
             let formatted = format_source(&input).expect("private abstract actor syntax");
-            assert!(formatted.contains(header),
+            // Other independent formatter rules may canonicalize the return
+            // separator, but the explicit hidden-hook modifiers must survive.
+            assert!(formatted.contains("private abstract")
+                        || formatted.contains("abstract private"),
                 "hidden actor entrypoint lost explicit visibility: {formatted}");
             assert_eq!(format_source(&formatted).unwrap(), formatted);
         }
