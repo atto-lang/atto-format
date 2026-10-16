@@ -998,6 +998,47 @@ mod write_safety_tests {
         let _ = fs::remove_dir_all(root);
     }
 
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_directory_handles_are_not_redirected_by_directory_replacement() {
+        use std::ffi::OsStr;
+
+        let root = scratch("pinned-dir-swap");
+        let active = root.join("active");
+        let moved = root.join("moved");
+        let replacement = root.join("replacement");
+        fs::create_dir(&active).unwrap();
+        fs::create_dir(&replacement).unwrap();
+        fs::write(active.join("sample.ores"), "original").unwrap();
+        fs::write(replacement.join("sample.ores"), "untouched").unwrap();
+
+        let handle = pinned_directory::open_parent(&active).unwrap();
+        let identity = handle.metadata().unwrap();
+        fs::rename(&active, &moved).unwrap();
+        fs::rename(&replacement, &active).unwrap();
+
+        let changed = check_parent_identity(&active, &identity).unwrap_err();
+        assert!(changed.to_string().contains("directory replaced"));
+
+        let mut staged = pinned_directory::stage(&handle, OsStr::new("stage.tmp")).unwrap();
+        staged.write_all(b"new contents").unwrap();
+        staged.sync_all().unwrap();
+        drop(staged);
+
+        assert!(moved.join("stage.tmp").exists());
+        assert!(!active.join("stage.tmp").exists());
+
+        pinned_directory::replace(
+            &handle,
+            OsStr::new("stage.tmp"),
+            OsStr::new("sample.ores"),
+        ).unwrap();
+        assert_eq!(fs::read_to_string(moved.join("sample.ores")).unwrap(), "new contents");
+        assert_eq!(fs::read_to_string(active.join("sample.ores")).unwrap(), "untouched");
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(unix)]
     #[test]
     fn parent_guard_rejects_replaced_directory() {
