@@ -320,6 +320,22 @@ fn check_source_identity(
     Ok(())
 }
 
+#[cfg(unix)]
+fn check_parent_identity(
+    parent: &Path,
+    original: &fs::Metadata,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::MetadataExt;
+    let current = fs::symlink_metadata(parent)?;
+    if !current.is_dir() || current.dev() != original.dev() || current.ino() != original.ino() {
+        return Err(format!(
+            "refusing directory replaced during atomic preflight: {}",
+            parent.display()
+        ).into());
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::fd::AsRawFd;
@@ -407,6 +423,12 @@ fn replace_atomically(
         }
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    #[cfg(unix)]
+    let parent_handle = fs::File::open(parent)?;
+    #[cfg(unix)]
+    let parent_metadata = parent_handle.metadata()?;
+    #[cfg(unix)]
+    check_parent_identity(parent, &parent_metadata)?;
     let name = path.file_name().ok_or("write target has no filename")?;
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
@@ -455,7 +477,14 @@ fn replace_atomically(
             #[cfg(unix)]
             check_source_identity(path, initial_metadata)?;
             reject_unsupported_file_metadata(path)?;
+            #[cfg(unix)]
+            check_parent_identity(parent, &parent_metadata)?;
             fs::rename(&temp_path, path)?;
+            // Ensure the directory entry update is durable as well as the
+            // already-synced file contents. A failed sync is reported, but
+            // an already completed rename cannot be rolled back atomically.
+            #[cfg(unix)]
+            parent_handle.sync_all()?;
             Ok(())
         })();
         if result.is_err() {
