@@ -250,21 +250,30 @@ attributes (including POSIX ACL xattrs) or when attribute inspection fails;
 this is a fail-closed safeguard, **not** metadata preservation. On other
 platforms, `--write` fails closed until metadata handling is validated.
 Files are checked before any write and rechecked just before their rename.
+All CLI source reads, including stdin, are bounded to **16 MiB** so
+a growing file or an unbounded stream cannot exhaust memory. Oversized inputs
+are refused before any file in the write set is changed.
+
 On Linux, source-file reads use no-follow, nonblocking opens and verify
 the opened file is regular before consuming content. This avoids blocking on
 a FIFO/device substituted during a pathname race. The metadata inspector
 uses the same nonblocking protection; symlink leaf substitutions are refused.
-On Linux, a directory descriptor is opened component by component with
-no symlink following. Exclusive staging, final source inspection, rename
-and failed-stage cleanup use descriptor-relative operations. The parent inode
+
+On Linux, a directory descriptor is opened component by component without
+following symlinks. Exclusive staging, final source inspection, rename and
+failed-stage cleanup use descriptor-relative operations. The parent inode
 is checked before staging and rename, and the containing directory is
-synchronized after replacement. Parent traversal components are refused.
-These measures reduce path redirection but do not make a multi-file
+synchronized after replacement. Temporary-file extended attributes, including
+inherited ACLs, are checked both before writing contents and before rename.
+An advisory nonblocking parent-directory lock prevents cooperating Oresfmt
+processes from rewriting the same directory at once; **unrelated programs
+need not respect this lock**.
+
+These measures reduce pathname redirection, but do not make a multi-file
 transaction: a hostile process can still move a pinned directory or replace
-the leaf between the last check and rename. A crash can leave a staging file;
-durability depends on the filesystem. Atomicity applies to one file, not
-the entire input set. A crash may leave a temporary file. This is not a hostile
-filesystem sandbox; only use `--write` on reviewed trusted local worktrees.
+the leaf between the final check and rename. A crash may leave a staging file,
+and crash durability depends on the filesystem. This is not a hostile-filesystem
+sandbox; only use `--write` on reviewed trusted local worktrees.
 CI/source repository integration must use `--stdout` or `--check`.
 
 CLI exit codes are explicit: `0` means success, `1` means either a
