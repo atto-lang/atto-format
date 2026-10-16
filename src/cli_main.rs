@@ -999,6 +999,37 @@ mod write_safety_tests {
     }
 
 
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_source_inspection_refuses_symlink_leaf_substitution() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("pinned-leaf-substitution");
+        let target = root.join("sample.ores");
+        let other = root.join("external.ores");
+        let displaced = root.join("original.ores");
+        fs::write(&target, "before").unwrap();
+        fs::write(&other, "external-unmodified").unwrap();
+
+        let expected = fs::symlink_metadata(&target).unwrap();
+        let parent = pinned_directory::open_parent(&root).unwrap();
+        fs::rename(&target, &displaced).unwrap();
+        symlink(&other, &target).unwrap();
+
+        let result = pinned_directory::confirm_source(
+            &parent,
+            OsStr::new("sample.ores"),
+            &expected,
+            "before",
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&other).unwrap(), "external-unmodified");
+        assert_eq!(fs::read_to_string(&displaced).unwrap(), "before");
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn pinned_directory_handles_are_not_redirected_by_directory_replacement() {
