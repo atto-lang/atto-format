@@ -336,6 +336,161 @@ fn check_parent_identity(
     Ok(())
 }
 
+
+#[cfg(target_os = "linux")]
+mod pinned_directory {
+    use super::*;
+    use std::ffi::{CString, OsStr};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::raw::{c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    const O_WRONLY: c_int = 1;
+    const O_RDONLY: c_int = 0;
+    const O_CREAT: c_int = 0o100;
+    const O_EXCL: c_int = 0o200;
+    const O_NONBLOCK: c_int = 0o4000;
+    const O_DIRECTORY: c_int = 0o200000;
+    const O_NOFOLLOW: c_int = 0o400000;
+    const O_CLOEXEC: c_int = 0o2000000;
+
+    unsafe extern "C" {
+        fn openat(dirfd: c_int, pathname: *const c_char, flags: c_int, mode: u32) -> c_int;
+        fn renameat(
+            olddirfd: c_int,
+            oldpath: *const c_char,
+            newdirfd: c_int,
+            newpath: *const c_char,
+        ) -> c_int;
+        fn unlinkat(dirfd: c_int, pathname: *const c_char, flags: c_int) -> c_int;
+        fn flistxattr(fd: c_int, list: *mut c_char, size: usize) -> isize;
+    }
+
+    fn checked_name(name: &OsStr) -> io::Result<CString> {
+        CString::new(name.as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "embedded NUL in name"))
+    }
+
+    fn open_relative(dir: &fs::File, name: &OsStr, flags: c_int, mode: u32) -> io::Result<fs::File> {
+        let name = checked_name(name)?;
+        // SAFETY: name is NUL-terminated and dir is a live owned descriptor.
+        let fd = unsafe { openat(dir.as_raw_fd(), name.as_ptr(), flags, mode) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful openat returned a new owned file descriptor.
+        Ok(unsafe { fs::File::from_raw_fd(fd) })
+    }
+
+    pub(super) fn open_parent(parent: &Path) -> io::Result<fs::File> {
+        let mut dir = fs::File::open(if parent.is_absolute() { "/" } else { "." })?;
+        for component in parent.components() {
+            match component {
+                Component::RootDir | Component::CurDir => {}
+                Component::Normal(name) => {
+                    dir = open_relative(
+                        &dir,
+                        name,
+                        O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                        0,
+                    )?;
+                }
+                // Refuse parent traversal rather than resolving it through
+                // a pathname outside the pinned directory descent.
+                Component::ParentDir | Component::Prefix(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "unsafe parent directory component in write path",
+                    ));
+                }
+            }
+        }
+        Ok(dir)
+    }
+
+    pub(super) fn stage(dir: &fs::File, name: &OsStr) -> io::Result<fs::File> {
+        open_relative(
+            dir,
+            name,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            0o600,
+        )
+    }
+
+    pub(super) fn confirm_source(
+        dir: &fs::File,
+        name: &OsStr,
+        expected: &fs::Metadata,
+        original: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut source = open_relative(
+            dir,
+            name,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )?;
+        let found = source.metadata()?;
+        if !found.is_file()
+            || found.dev() != expected.dev()
+            || found.ino() != expected.ino()
+            || found.uid() != expected.uid()
+            || found.gid() != expected.gid()
+            || found.mode() != expected.mode()
+            || found.size() != expected.size()
+            || found.mtime() != expected.mtime()
+            || found.mtime_nsec() != expected.mtime_nsec()
+            || found.ctime() != expected.ctime()
+            || found.ctime_nsec() != expected.ctime_nsec()
+        {
+            return Err("refusing source inode or metadata changed via pinned directory".into());
+        }
+        // SAFETY: null list with size zero requests the byte count only.
+        let attr_count = unsafe { flistxattr(source.as_raw_fd(), std::ptr::null_mut(), 0) };
+        if attr_count < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        if attr_count != 0 {
+            return Err("refusing source with extended attributes or ACLs via pinned directory".into());
+        }
+        let mut current = String::new();
+        source.read_to_string(&mut current)?;
+        if current != original {
+            return Err("refusing source bytes changed via pinned directory".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn replace(dir: &fs::File, temp: &OsStr, target: &OsStr) -> io::Result<()> {
+        let temp = checked_name(temp)?;
+        let target = checked_name(target)?;
+        // SAFETY: descriptors are live, names are NUL-terminated, and both
+        // paths are relative to the same pinned directory descriptor.
+        let result = unsafe {
+            renameat(
+                dir.as_raw_fd(),
+                temp.as_ptr(),
+                dir.as_raw_fd(),
+                target.as_ptr(),
+            )
+        };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn cleanup(dir: &fs::File, temp: &OsStr) -> io::Result<()> {
+        let temp = checked_name(temp)?;
+        // SAFETY: descriptor is live and the temporary basename is valid.
+        let result = unsafe { unlinkat(dir.as_raw_fd(), temp.as_ptr(), 0) };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::fd::AsRawFd;
@@ -426,7 +581,9 @@ fn replace_atomically(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    let parent_handle = pinned_directory::open_parent(parent)?;
+    #[cfg(all(unix, not(target_os = "linux")))]
     let parent_handle = fs::File::open(parent)?;
     #[cfg(unix)]
     let parent_metadata = parent_handle.metadata()?;
@@ -441,16 +598,22 @@ fn replace_atomically(
             name.to_string_lossy(),
             std::process::id()
         ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        // Newly created source files must not become world-readable even
-        // briefly before the destination's original mode is restored.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options.open(&temp_path);
+        #[cfg(target_os = "linux")]
+        let file = pinned_directory::stage(
+            &parent_handle,
+            temp_path.file_name().ok_or("staging file missing basename")?,
+        );
+        #[cfg(not(target_os = "linux"))]
+        let file = {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            options.open(&temp_path)
+        };
         let mut file = match file {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -482,6 +645,16 @@ fn replace_atomically(
             reject_unsupported_file_metadata(path)?;
             #[cfg(unix)]
             check_parent_identity(parent, &parent_metadata)?;
+            #[cfg(target_os = "linux")]
+            {
+                pinned_directory::confirm_source(&parent_handle, name, initial_metadata, original)?;
+                pinned_directory::replace(
+                    &parent_handle,
+                    temp_path.file_name().ok_or("staging file missing basename")?,
+                    name,
+                )?;
+            }
+            #[cfg(not(target_os = "linux"))]
             fs::rename(&temp_path, path)?;
             // Ensure the directory entry update is durable as well as the
             // already-synced file contents. A failed sync is reported, but
@@ -491,6 +664,12 @@ fn replace_atomically(
             Ok(())
         })();
         if result.is_err() {
+            #[cfg(target_os = "linux")]
+            let _ = pinned_directory::cleanup(
+                &parent_handle,
+                temp_path.file_name().ok_or("staging file missing basename")?,
+            );
+            #[cfg(not(target_os = "linux"))]
             let _ = fs::remove_file(&temp_path);
         }
         return result;
