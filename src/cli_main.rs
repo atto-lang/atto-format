@@ -816,4 +816,22 @@ mod write_safety_tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn parent_guard_rejects_replaced_directory() {
+        let root = scratch("replaced-parent");
+        let parent = root.join("src");
+        let displaced = root.join("original-src");
+        fs::create_dir(&parent).unwrap();
+        let original = fs::symlink_metadata(&parent).unwrap();
+
+        fs::rename(&parent, &displaced).unwrap();
+        fs::create_dir(&parent).unwrap();
+
+        let err = check_parent_identity(&parent, &original).unwrap_err();
+        assert!(err.to_string().contains("directory replaced"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
 }
