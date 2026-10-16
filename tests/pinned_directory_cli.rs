@@ -77,7 +77,11 @@ fn pinned_write_completes_and_leaves_no_staging_entries() {
     fs::write(&source, INPUT).unwrap();
 
     let result = work.run(&["--write", "--ok-to-mod-untracked-files", "src/sample.ores"]);
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     assert_eq!(fs::read_to_string(&source).unwrap(), EXPECTED);
     let entries: Vec<_> = fs::read_dir(&directory)
         .unwrap()
