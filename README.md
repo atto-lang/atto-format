@@ -251,8 +251,10 @@ this is a fail-closed safeguard, **not** metadata preservation. On other
 platforms, `--write` fails closed until metadata handling is validated.
 Files are checked before any write and rechecked just before their rename.
 All CLI source reads, including stdin, are bounded to **16 MiB** so
-a growing file or an unbounded stream cannot exhaust memory. Oversized inputs
-are refused before any file in the write set is changed.
+a growing file or an unbounded stream cannot exhaust memory. The formatted
+output is subject to the same limit, preventing `--write` from producing
+a source that the formatter would subsequently refuse to read. Oversized
+inputs or outputs are rejected before any file in the write set is changed.
 
 On Linux, source-file reads use no-follow, nonblocking opens and verify
 the opened file is regular before consuming content. This avoids blocking on
