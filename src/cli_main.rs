@@ -1141,6 +1141,57 @@ mod write_safety_tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn staged_short_write_and_simulated_enospc_leave_original_unchanged() {
+        use std::ffi::OsStr;
+
+        struct FaultWriter<'a> {
+            file: &'a mut fs::File,
+            written: usize,
+            limit: usize,
+        }
+
+        impl Write for FaultWriter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.written >= self.limit {
+                    return Err(io::Error::from_raw_os_error(28)); // ENOSPC
+                }
+                // Simulate short writes, then disk exhaustion.
+                let count = bytes.len().min(2).min(self.limit - self.written);
+                let count = self.file.write(&bytes[..count])?;
+                self.written += count;
+                Ok(count)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.file.flush()
+            }
+        }
+
+        let root = scratch("simulated-enospc");
+        let original = root.join("sample.ores");
+        fs::write(&original, "original contents").unwrap();
+        let directory = pinned_directory::open_parent(&root).unwrap();
+        let mut stage = pinned_directory::stage(&directory, OsStr::new("stage.tmp")).unwrap();
+
+        let error = FaultWriter {
+            file: &mut stage,
+            written: 0,
+            limit: 5,
+        }
+        .write_all(b"this formatted source is larger than the available disk")
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(28));
+        drop(stage);
+
+        pinned_directory::cleanup(&directory, OsStr::new("stage.tmp")).unwrap();
+        assert!(!root.join("stage.tmp").exists());
+        assert_eq!(fs::read_to_string(&original).unwrap(), "original contents");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn staged_file_with_xattr_is_refused_before_rename() {
         use std::ffi::CString;
         use std::os::fd::AsRawFd;
