@@ -153,8 +153,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Err("--write cannot be used with stdin".into());
         }
 
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
+        let input = read_bounded_source(&mut io::stdin(), "stdin")?;
         let formatted = format_source(&input)?;
 
         if mode == Mode::Check {
@@ -237,6 +236,24 @@ fn select_mode(
 }
 
 
+// Limit reads even if a file grows while a live descriptor is being consumed.
+// The same upper bound applies to stdin and read-only CLI modes.
+const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_bounded_source(
+    input: &mut impl Read,
+    label: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    input.take(MAX_SOURCE_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        return Err(format!(
+            "refusing source exceeding {MAX_SOURCE_BYTES} bytes: {label}"
+        ).into());
+    }
+    Ok(String::from_utf8(bytes)?)
+}
+
 fn read_regular_source(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
@@ -256,13 +273,15 @@ fn read_regular_source(path: &Path) -> Result<String, Box<dyn std::error::Error>
                 path.display()
             ).into());
         }
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok(contents)
+        read_bounded_source(&mut file, &path.display().to_string())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Ok(fs::read_to_string(path)?)
+        let mut file = fs::File::open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(format!("refusing non-regular Oreslang source: {}", path.display()).into());
+        }
+        read_bounded_source(&mut file, &path.display().to_string())
     }
 }
 
@@ -448,6 +467,21 @@ mod pinned_directory {
         )
     }
 
+    pub(super) fn ensure_no_extended_attributes(
+        file: &fs::File,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // SAFETY: a null buffer and zero capacity only query the attribute
+        // list length for this live descriptor. Any metadata is unsupported.
+        let count = unsafe { flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0) };
+        if count < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        if count != 0 {
+            return Err("refusing staged file with inherited extended attributes or ACLs".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn confirm_source(
         dir: &fs::File,
         name: &OsStr,
@@ -475,16 +509,8 @@ mod pinned_directory {
         {
             return Err("refusing source inode or metadata changed via pinned directory".into());
         }
-        // SAFETY: null list with size zero requests the byte count only.
-        let attr_count = unsafe { flistxattr(source.as_raw_fd(), std::ptr::null_mut(), 0) };
-        if attr_count < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-        if attr_count != 0 {
-            return Err("refusing source with extended attributes or ACLs via pinned directory".into());
-        }
-        let mut current = String::new();
-        source.read_to_string(&mut current)?;
+        ensure_no_extended_attributes(&source)?;
+        let current = read_bounded_source(&mut source, "pinned source")?;
         if current != original {
             return Err("refusing source bytes changed via pinned directory".into());
         }
@@ -668,6 +694,8 @@ fn replace_atomically(
                 }
             }
             file.set_permissions(permissions.clone())?;
+            #[cfg(target_os = "linux")]
+            pinned_directory::ensure_no_extended_attributes(&file)?;
             file.sync_all()?;
             drop(file);
             // Recheck immediately before replacing the directory entry.
