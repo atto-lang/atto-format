@@ -1,4 +1,4 @@
-use oreslang_format::{FormatError, format_source, is_formatted};
+use oreslang_format::{FormatError, format_source};
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -154,7 +154,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
 
         let input = read_bounded_source(&mut io::stdin(), "stdin")?;
-        let formatted = format_source(&input)?;
+        let formatted = format_bounded_source(&input)?;
 
         if mode == Mode::Check {
             return Ok(if formatted == input {
@@ -181,7 +181,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Err("--stdout requires exactly one filesystem file".into());
         }
         let input = read_regular_source(&paths[0])?;
-        let formatted = format_source(&input)?;
+        let formatted = format_bounded_source(&input)?;
         io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -192,7 +192,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Mode::DryRun => {
             for path in files {
                 let input = read_regular_source(&path)?;
-                if !is_formatted(&input)? {
+                if format_bounded_source(&input)? != input {
                     println!("would format {}", path.display());
                 }
             }
@@ -202,7 +202,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let mut dirty = false;
             for path in files {
                 let input = read_regular_source(&path)?;
-                if !is_formatted(&input)? {
+                if format_bounded_source(&input)? != input {
                     eprintln!("needs formatting: {}", path.display());
                     dirty = true;
                 }
@@ -254,6 +254,21 @@ fn read_bounded_source(
     Ok(String::from_utf8(bytes)?)
 }
 
+fn check_formatted_size(len: usize) -> Result<(), Box<dyn std::error::Error>> {
+    if len as u64 > MAX_SOURCE_BYTES {
+        return Err(format!(
+            "refusing formatted source exceeding {MAX_SOURCE_BYTES} bytes"
+        ).into());
+    }
+    Ok(())
+}
+
+fn format_bounded_source(input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let formatted = format_source(input)?;
+    check_formatted_size(formatted.len())?;
+    Ok(formatted)
+}
+
 fn read_regular_source(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
@@ -296,7 +311,7 @@ fn write_files(
         let input = read_regular_source(&path)?;
         #[cfg(unix)]
         check_source_identity(&path, &original_metadata)?;
-        let formatted = format_source(&input)?;
+        let formatted = format_bounded_source(&input)?;
         if formatted != input {
             changes.push((path, input, formatted, original_metadata));
         }
