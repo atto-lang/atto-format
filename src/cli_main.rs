@@ -414,6 +414,7 @@ mod pinned_directory {
         ) -> c_int;
         fn unlinkat(dirfd: c_int, pathname: *const c_char, flags: c_int) -> c_int;
         fn flistxattr(fd: c_int, list: *mut c_char, size: usize) -> isize;
+        fn flock(fd: c_int, operation: c_int) -> c_int;
     }
 
     fn checked_name(name: &OsStr) -> io::Result<CString> {
@@ -456,6 +457,18 @@ mod pinned_directory {
             }
         }
         Ok(dir)
+    }
+
+    pub(super) fn try_lock_directory(dir: &fs::File) -> io::Result<()> {
+        // Advisory only: cooperating formatter instances serialize their
+        // same-directory writes, and contention fails without blocking.
+        const LOCK_EX: c_int = 2;
+        const LOCK_NB: c_int = 4;
+        // SAFETY: dir is a live file descriptor and flock reads no pointers.
+        if unsafe { flock(dir.as_raw_fd(), LOCK_EX | LOCK_NB) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     pub(super) fn stage(dir: &fs::File, name: &OsStr) -> io::Result<fs::File> {
@@ -641,6 +654,8 @@ fn replace_atomically(
         .unwrap_or_else(|| Path::new("."));
     #[cfg(target_os = "linux")]
     let parent_handle = pinned_directory::open_parent(parent)?;
+    #[cfg(target_os = "linux")]
+    pinned_directory::try_lock_directory(&parent_handle)?;
     #[cfg(all(unix, not(target_os = "linux")))]
     let parent_handle = fs::File::open(parent)?;
     #[cfg(unix)]
@@ -678,6 +693,9 @@ fn replace_atomically(
             Err(error) => return Err(error.into()),
         };
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            // Refuse inherited ACLs before exposing any staged source bytes.
+            #[cfg(target_os = "linux")]
+            pinned_directory::ensure_no_extended_attributes(&file)?;
             file.write_all(formatted.as_bytes())?;
             #[cfg(unix)]
             {
