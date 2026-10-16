@@ -769,4 +769,22 @@ mod write_safety_tests {
 
         let _ = fs::remove_dir_all(root);
     }
+    #[cfg(unix)]
+    #[test]
+    fn inode_guard_rejects_replacement_with_identical_bytes() {
+        let root = scratch("same-bytes-different-inode");
+        let path = root.join("sample.ores");
+        let moved = root.join("original.ores");
+        fs::write(&path, "before").unwrap();
+        let original = fs::symlink_metadata(&path).unwrap();
+
+        fs::rename(&path, &moved).unwrap();
+        fs::write(&path, "before").unwrap();
+
+        let err = check_source_identity(&path, &original).unwrap_err();
+        assert!(err.to_string().contains("inode or metadata changed"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
 }
