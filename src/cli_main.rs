@@ -1257,6 +1257,85 @@ mod write_safety_tests {
     }
 
 
+    #[cfg(unix)]
+    #[test]
+    fn post_commit_directory_sync_error_explains_replacement_already_happened() {
+        let error = report_committed_sync(
+            Err(io::Error::from_raw_os_error(5)),
+            Path::new("sample.ores"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("replacement already committed"));
+        assert!(error.to_string().contains("inspect file before retrying"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_stage_rejects_same_bytes_different_inode() {
+        use std::ffi::OsStr;
+
+        let root = scratch("staged-inode-swap");
+        let directory = pinned_directory::open_parent(&root).unwrap();
+        let mut original = pinned_directory::stage(&directory, OsStr::new("stage.tmp")).unwrap();
+        original.write_all(b"formatted").unwrap();
+        let identity = original.metadata().unwrap();
+        drop(original);
+
+        fs::rename(root.join("stage.tmp"), root.join("old-stage.tmp")).unwrap();
+        fs::write(root.join("stage.tmp"), "formatted").unwrap();
+
+        let error = pinned_directory::confirm_stage(
+            &directory,
+            OsStr::new("stage.tmp"),
+            &identity,
+            "formatted",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("staged file replaced or altered"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn uncooperative_leaf_replacement_after_validation_remains_unsafe() {
+        use std::ffi::OsStr;
+
+        let root = scratch("documented-destination-race");
+        let path = root.join("sample.ores");
+        fs::write(&path, "original").unwrap();
+        let identity = fs::symlink_metadata(&path).unwrap();
+        let directory = pinned_directory::open_parent(&root).unwrap();
+
+        let mut staged = pinned_directory::stage(&directory, OsStr::new("stage.tmp")).unwrap();
+        staged.write_all(b"formatted").unwrap();
+        drop(staged);
+        pinned_directory::confirm_source(
+            &directory,
+            OsStr::new("sample.ores"),
+            &identity,
+            "original",
+        )
+        .unwrap();
+
+        // Deterministic reproduction of the LIMITATION: a non-cooperating
+        // writer changes the destination after the formatter's final check.
+        fs::write(root.join("new-writer.tmp"), "concurrent edit").unwrap();
+        fs::rename(root.join("new-writer.tmp"), &path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "concurrent edit");
+
+        // renameat does not compare the destination with the checked inode.
+        // Do not claim hostile-writer safety from passing this test.
+        pinned_directory::replace(
+            &directory,
+            OsStr::new("stage.tmp"),
+            OsStr::new("sample.ores"),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "formatted");
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn pinned_rename_never_follows_a_leaf_symlink_swapped_after_validation() {
