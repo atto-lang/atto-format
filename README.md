@@ -250,6 +250,10 @@ attributes (including POSIX ACL xattrs) or when attribute inspection fails;
 this is a fail-closed safeguard, **not** metadata preservation. On other
 platforms, `--write` fails closed until metadata handling is validated.
 Files are checked before any write and rechecked just before their rename.
+On Linux, source-file reads use no-follow, nonblocking opens and verify
+the opened file is regular before consuming content. This avoids blocking on
+a FIFO/device substituted during a pathname race. The metadata inspector
+uses the same nonblocking protection; symlink leaf substitutions are refused.
 On Linux, a directory descriptor is opened component by component with
 no symlink following. Exclusive staging, final source inspection, rename
 and failed-stage cleanup use descriptor-relative operations. The parent inode
