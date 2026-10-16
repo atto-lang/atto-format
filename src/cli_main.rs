@@ -1038,6 +1038,23 @@ mod write_safety_tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn cooperating_writes_refuse_concurrent_directory_lock() {
+        let root = scratch("advisory-parent-lock");
+        let first = pinned_directory::open_parent(&root).unwrap();
+        pinned_directory::try_lock_directory(&first).unwrap();
+
+        let second = pinned_directory::open_parent(&root).unwrap();
+        let error = pinned_directory::try_lock_directory(&second).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(11)); // EWOULDBLOCK on Linux
+
+        drop(first);
+        pinned_directory::try_lock_directory(&second).unwrap();
+        drop(second);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn staged_file_with_xattr_is_refused_before_rename() {
         use std::ffi::CString;
         use std::os::fd::AsRawFd;
