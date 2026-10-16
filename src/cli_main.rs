@@ -181,7 +181,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         if !metadata.is_file() {
             return Err("--stdout requires exactly one filesystem file".into());
         }
-        let input = fs::read_to_string(&paths[0])?;
+        let input = read_regular_source(&paths[0])?;
         let formatted = format_source(&input)?;
         io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
@@ -192,7 +192,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     match mode {
         Mode::DryRun => {
             for path in files {
-                let input = fs::read_to_string(&path)?;
+                let input = read_regular_source(&path)?;
                 if !is_formatted(&input)? {
                     println!("would format {}", path.display());
                 }
@@ -202,7 +202,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Mode::Check => {
             let mut dirty = false;
             for path in files {
-                let input = fs::read_to_string(&path)?;
+                let input = read_regular_source(&path)?;
                 if !is_formatted(&input)? {
                     eprintln!("needs formatting: {}", path.display());
                     dirty = true;
@@ -236,6 +236,36 @@ fn select_mode(
     Ok(())
 }
 
+
+fn read_regular_source(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A FIFO or device substituted after path preflight must not block.
+        // Refuse symlink leaves and only consume verified regular file handles.
+        const O_NONBLOCK: i32 = 0o4000;
+        const O_NOFOLLOW: i32 = 0o400000;
+        const O_CLOEXEC: i32 = 0o2000000;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+            .open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(format!(
+                "refusing non-regular Oreslang source: {}",
+                path.display()
+            ).into());
+        }
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        Ok(contents)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(fs::read_to_string(path)?)
+    }
+}
+
 fn write_files(
     files: Vec<PathBuf>,
     policy: WritePolicy,
@@ -244,7 +274,7 @@ fn write_files(
 
     for path in files {
         let original_metadata = fs::symlink_metadata(&path)?;
-        let input = fs::read_to_string(&path)?;
+        let input = read_regular_source(&path)?;
         #[cfg(unix)]
         check_source_identity(&path, &original_metadata)?;
         let formatted = format_source(&input)?;
@@ -503,9 +533,11 @@ fn reject_unsupported_file_metadata(path: &Path) -> Result<(), Box<dyn std::erro
 
     // Linux O_NOFOLLOW: never inspect an unintended symlink destination.
     const O_NOFOLLOW: i32 = 0o400000;
+    const O_NONBLOCK: i32 = 0o4000;
+    const O_CLOEXEC: i32 = 0o2000000;
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(O_NOFOLLOW)
+        .custom_flags(O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         .open(path)?;
     let fd_metadata = file.metadata()?;
     let path_metadata = fs::symlink_metadata(path)?;
@@ -700,7 +732,7 @@ fn revalidate_write_target(
         .into());
     }
 
-    let current = fs::read_to_string(path)?;
+    let current = read_regular_source(path)?;
     if current.as_bytes() != original.as_bytes() {
         return Err(format!(
             "refusing to overwrite file changed during formatter preflight: {}",
