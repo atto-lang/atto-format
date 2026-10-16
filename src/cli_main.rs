@@ -1009,6 +1009,62 @@ mod write_safety_tests {
     }
 
     #[test]
+    fn bounded_source_rejects_expanding_input() {
+        let mut oversized = io::Cursor::new(vec![b'a'; MAX_SOURCE_BYTES as usize + 1]);
+        let error = read_bounded_source(&mut oversized, "test source").unwrap_err();
+        assert!(error.to_string().contains("refusing source exceeding"));
+
+        let mut valid = io::Cursor::new(b"hello".to_vec());
+        assert_eq!(read_bounded_source(&mut valid, "small").unwrap(), "hello");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_file_with_xattr_is_refused_before_rename() {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+        use std::os::raw::{c_char, c_int};
+        use std::ffi::c_void;
+
+        unsafe extern "C" {
+            fn fsetxattr(
+                fd: c_int,
+                name: *const c_char,
+                value: *const c_void,
+                size: usize,
+                flags: c_int,
+            ) -> c_int;
+        }
+
+        let root = scratch("staged-xattr");
+        let path = root.join("stage.tmp");
+        let stage = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        let name = CString::new("user.oresfmt.staged-security").unwrap();
+        let value = b"unexpected";
+        let status = unsafe {
+            fsetxattr(
+                stage.as_raw_fd(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+            )
+        };
+        assert_eq!(status, 0, "xattrs unavailable: {}", io::Error::last_os_error());
+
+        let error = pinned_directory::ensure_no_extended_attributes(&stage).unwrap_err();
+        assert!(error.to_string().contains("inherited extended attributes or ACLs"));
+        assert!(fs::read_to_string(&path).unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn revalidation_rejects_changed_contents() {
         let root = scratch("changed");
         let path = root.join("sample.ores");
