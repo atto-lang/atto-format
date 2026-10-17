@@ -113,7 +113,11 @@ fn write_accepts_long_valid_filename() {
     let filename = format!("{}.ores", "f".repeat(240));
     let path = repo.write(&filename, UNFORMATTED);
     let output = repo.run(&["--write", "--ok-to-mod-untracked-files", &filename]);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), FORMATTED);
 }
 
