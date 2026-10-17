@@ -84,3 +84,12 @@ fn xor_keyword_and_mixed_logical_spelling_round_trip_unchanged() {
     assert_eq!(format_source(&output).unwrap(), output);
 }
 
+
+#[test]
+fn terminal_rest_bool_parameter_syntax_round_trips() {
+    let input = "pub fnc Or(bool a, bool b, rest ...bool): bool {\nreturn a or b;\n}\n";
+    let expected = "pub fnc Or(bool a, bool b, rest ...bool): bool {\n  return a or b;\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
