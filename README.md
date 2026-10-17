@@ -256,6 +256,10 @@ output is subject to the same limit, preventing `--write` from producing
 a source that the formatter would subsequently refuse to read. Oversized
 inputs or outputs are rejected before any file in the write set is changed.
 
+Linux source reads now open the parent directory one component at a time
+without following ancestor symlinks, then open the regular-file leaf through
+the pinned parent descriptor. Staging filenames have a fixed short prefix,
+so long valid source filenames do not exceed filesystem basename limits.
 On Linux, source-file reads use no-follow, nonblocking opens and verify
 the opened file is regular before consuming content. This avoids blocking on
 a FIFO/device substituted during a pathname race. The metadata inspector
