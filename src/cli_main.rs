@@ -763,6 +763,7 @@ fn replace_atomically(
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error.into()),
         };
+        let mut renamed = false;
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             // Refuse inherited ACLs before exposing any staged source bytes.
             #[cfg(target_os = "linux")]
@@ -813,6 +814,7 @@ fn replace_atomically(
             }
             #[cfg(not(target_os = "linux"))]
             fs::rename(&temp_path, path)?;
+            renamed = true;
             // Ensure the directory entry update is durable as well as the
             // already-synced file contents. A failed sync is reported, but
             // an already completed rename cannot be rolled back atomically.
@@ -820,7 +822,7 @@ fn replace_atomically(
             sync_committed_directory(&parent_handle, path)?;
             Ok(())
         })();
-        if result.is_err() {
+        if result.is_err() && !renamed {
             #[cfg(target_os = "linux")]
             let _ = pinned_directory::cleanup(
                 &parent_handle,
