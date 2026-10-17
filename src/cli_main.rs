@@ -714,6 +714,20 @@ fn report_committed_sync(
     })
 }
 
+fn finalize_staged_replacement(
+    result: Result<(), Box<dyn std::error::Error>>,
+    committed: bool,
+    cleanup: impl FnOnce() -> io::Result<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // A post-rename failure does not roll back the committed replacement.
+    if result.is_err() && !committed {
+        if let Err(error) = cleanup() {
+            eprintln!("oresfmt: staging cleanup was incomplete: {error}");
+        }
+    }
+    result
+}
+
 fn replace_atomically(
     path: &Path,
     original: &str,
@@ -844,19 +858,22 @@ fn replace_atomically(
             sync_committed_directory(&parent_handle, path)?;
             Ok(())
         })();
-        if result.is_err() && !renamed {
+        return finalize_staged_replacement(result, renamed, || {
             #[cfg(target_os = "linux")]
-            if let Some(original_stage) = initial_stage.as_ref() {
-                let _ = pinned_directory::cleanup_owned(
-                    &parent_handle,
-                    temp_path.file_name().ok_or("staging file missing basename")?,
-                    original_stage,
-                );
+            {
+                let stage = initial_stage.as_ref().ok_or_else(|| {
+                    io::Error::other("cannot verify original staging inode for cleanup")
+                })?;
+                let name = temp_path.file_name().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "missing stage basename")
+                })?;
+                pinned_directory::cleanup_owned(&parent_handle, name, stage)
             }
             #[cfg(not(target_os = "linux"))]
-            let _ = fs::remove_file(&temp_path);
-        }
-        return result;
+            {
+                fs::remove_file(&temp_path)
+            }
+        });
     }
     Err(format!("unable to allocate unique temporary file for {}", path.display()).into())
 }
