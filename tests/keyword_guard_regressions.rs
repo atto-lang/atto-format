@@ -75,4 +75,12 @@ fn capitalized_boolean_builtins_are_not_confused_with_word_operators() {
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
 }
+#[test]
+fn xor_keyword_and_mixed_logical_spelling_round_trip_unchanged() {
+    let input = "fnc combine(bool a, bool b, bool c): bool {\nreturn a xor b ^^ c and a or b;\n}\n";
+    let expected = "fnc combine(bool a, bool b, bool c): bool {\n  return a xor b ^^ c and a or b;\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
 
