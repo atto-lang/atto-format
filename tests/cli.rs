@@ -106,6 +106,17 @@ fn check_is_nonzero_but_does_not_write() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("needs formatting"));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn write_accepts_long_valid_filename() {
+    let repo = TempRepo::new("long-filename");
+    let filename = format!("{}.ores", "f".repeat(240));
+    let path = repo.write(&filename, UNFORMATTED);
+    let output = repo.run(&["--write", "--ok-to-mod-untracked-files", &filename]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(fs::read_to_string(&path).unwrap(), FORMATTED);
+}
+
 #[test]
 fn write_allows_clean_tracked_file() {
     let repo = TempRepo::new("clean-tracked");
