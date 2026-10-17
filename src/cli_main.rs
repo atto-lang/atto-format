@@ -418,6 +418,7 @@ mod pinned_directory {
     const O_DIRECTORY: c_int = 0o200000;
     const O_NOFOLLOW: c_int = 0o400000;
     const O_CLOEXEC: c_int = 0o2000000;
+    const O_PATH: c_int = 0o10000000;
 
     unsafe extern "C" {
         fn openat(dirfd: c_int, pathname: *const c_char, flags: c_int, mode: u32) -> c_int;
@@ -596,6 +597,25 @@ mod pinned_directory {
             return Err(io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    pub(super) fn cleanup_owned(
+        dir: &fs::File,
+        temp: &OsStr,
+        expected: &fs::Metadata,
+    ) -> io::Result<()> {
+        // O_PATH inspects even a staged inode without read permission.
+        // O_NOFOLLOW makes a substituted symlink itself visible.
+        let observed = open_relative(dir, temp, O_PATH | O_NOFOLLOW | O_CLOEXEC, 0)?;
+        let meta = observed.metadata()?;
+        if !meta.is_file()
+            || meta.dev() != expected.dev()
+            || meta.ino() != expected.ino()
+        {
+            return Err(io::Error::other("refusing cleanup of replaced staging entry"));
+        }
+        // This remains advisory: there is no inode-conditional unlinkat.
+        cleanup(dir, temp)
     }
 
     pub(super) fn cleanup(dir: &fs::File, temp: &OsStr) -> io::Result<()> {
