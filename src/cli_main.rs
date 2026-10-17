@@ -783,6 +783,8 @@ fn replace_atomically(
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error.into()),
         };
+        #[cfg(target_os = "linux")]
+        let initial_stage = file.metadata().ok();
         let mut renamed = false;
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             // Refuse inherited ACLs before exposing any staged source bytes.
@@ -844,10 +846,13 @@ fn replace_atomically(
         })();
         if result.is_err() && !renamed {
             #[cfg(target_os = "linux")]
-            let _ = pinned_directory::cleanup(
-                &parent_handle,
-                temp_path.file_name().ok_or("staging file missing basename")?,
-            );
+            if let Some(original_stage) = initial_stage.as_ref() {
+                let _ = pinned_directory::cleanup_owned(
+                    &parent_handle,
+                    temp_path.file_name().ok_or("staging file missing basename")?,
+                    original_stage,
+                );
+            }
             #[cfg(not(target_os = "linux"))]
             let _ = fs::remove_file(&temp_path);
         }
