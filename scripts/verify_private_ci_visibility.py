@@ -12,8 +12,8 @@ import sys
 import urllib.error
 import urllib.request
 
-REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\\Z", re.ASCII)
-TOKEN = re.compile(r"[A-Za-z0-9._~+/-]+={0,16}\\Z", re.ASCII)
+REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z", re.ASCII)
+TOKEN = re.compile(r"[A-Za-z0-9._~+/-]+={0,16}\Z", re.ASCII)
 MAX_METADATA = 131072
 
 
