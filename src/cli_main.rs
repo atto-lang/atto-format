@@ -272,23 +272,9 @@ fn format_bounded_source(input: &str) -> Result<String, Box<dyn std::error::Erro
 fn read_regular_source(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        // A FIFO or device substituted after path preflight must not block.
-        // Refuse symlink leaves and only consume verified regular file handles.
-        const O_NONBLOCK: i32 = 0o4000;
-        const O_NOFOLLOW: i32 = 0o400000;
-        const O_CLOEXEC: i32 = 0o2000000;
-        let mut file = OpenOptions::new()
-            .read(true)
-            .custom_flags(O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
-            .open(path)?;
-        if !file.metadata()?.is_file() {
-            return Err(format!(
-                "refusing non-regular Oreslang source: {}",
-                path.display()
-            ).into());
-        }
-        read_bounded_source(&mut file, &path.display().to_string())
+        // Pin each ancestor without following symlinks. A pathname-based
+        // open with O_NOFOLLOW only protects the final component.
+        pinned_directory::read_regular_source(path)
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -473,6 +459,31 @@ mod pinned_directory {
             }
         }
         Ok(dir)
+    }
+
+    pub(super) fn read_regular_source(
+        path: &Path,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().ok_or("source path missing filename")?;
+        let directory = open_parent(parent)?;
+        let mut source = open_relative(
+            &directory,
+            name,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )?;
+        if !source.metadata()?.is_file() {
+            return Err(format!(
+                "refusing non-regular Oreslang source: {}",
+                path.display()
+            )
+            .into());
+        }
+        read_bounded_source(&mut source, &path.display().to_string())
     }
 
     pub(super) fn try_lock_directory(dir: &fs::File) -> io::Result<()> {
@@ -771,9 +782,10 @@ fn replace_atomically(
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
 
     for attempt in 0..128u32 {
+        // Keep the staging basename short even for a source at NAME_MAX.
+        // Exclusive creation and the process/time/attempt tuple avoid reuse.
         let temp_path = parent.join(format!(
-            ".{}.oresfmt-{}-{nonce}-{attempt}.tmp",
-            name.to_string_lossy(),
+            ".oresfmt-{}-{nonce}-{attempt}.tmp",
             std::process::id()
         ));
         #[cfg(target_os = "linux")]
