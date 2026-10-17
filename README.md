@@ -269,7 +269,13 @@ synchronized after replacement. Temporary-file extended attributes, including
 inherited ACLs, are checked both before writing contents and before rename.
 An advisory nonblocking parent-directory lock prevents cooperating Oresfmt
 processes from rewriting the same directory at once; **unrelated programs
-need not respect this lock**.
+need not respect this lock**. On recoverable failures before rename, cleanup
+only removes a staging entry whose inode still matches the formatter's
+original temporary file; a substituted entry is left untouched. After a
+successful rename, a directory-sync failure reports the already-committed
+replacement and never attempts cleanup of the former staging basename.
+Inode verification and unlink remain separate filesystem operations, so
+hostile concurrent substitution is not fully prevented.
 
 These measures reduce pathname redirection, but do not make a multi-file
 transaction: a hostile process can still move a pinned directory or replace
