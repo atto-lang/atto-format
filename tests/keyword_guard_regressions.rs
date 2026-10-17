@@ -57,3 +57,22 @@ fn nested_if_later_line_statements_are_separated() {
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn logical_word_operators_are_preserved_as_expression_tokens() {
+    let input = "fnc choose(bool a, bool b, bool c): bool {\nreturn a and b or c;\n}\n";
+    let expected = "fnc choose(bool a, bool b, bool c): bool {\n  return a and b or c;\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn capitalized_boolean_builtins_are_not_confused_with_word_operators() {
+    let input = "fnc choose(bool a, bool b, bool c): bool {\nreturn Or(Xor(a, b), And(a, b, c));\n}\n";
+    let expected = "fnc choose(bool a, bool b, bool c): bool {\n  return Or(Xor(a, b), And(a, b, c));\n}\n";
+    let output = format_source(input).unwrap();
+    assert_eq!(output, expected);
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
