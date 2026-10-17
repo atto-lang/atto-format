@@ -16,14 +16,56 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - run: cargo fmt --all -- --check
-      - run: cargo test --all-targets
-      - run: cargo test --doc
-      - run: python3 -m unittest discover -s scripts -p 'test_compiler_parity.py'
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-      - run: cargo build --release --bins
+      - id: fmt
+        run: cargo fmt --all -- --check
+      - id: rust_tests
+        run: cargo test --all-targets
+      - id: doctests
+        run: cargo test --doc
+      - id: mock_parity
+        run: python3 -m unittest discover -s scripts -p 'test_compiler_parity.py'
+      - id: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - id: rustdoc
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+      - id: release
+        run: cargo build --release --bins
 
+      - name: Record bounded CI receipt
+        if: always()
+        env:
+          RESULT_FMT: ${{ steps.fmt.outcome }}
+          RESULT_RUST_TESTS: ${{ steps.rust_tests.outcome }}
+          RESULT_DOCTESTS: ${{ steps.doctests.outcome }}
+          RESULT_MOCK_PARITY: ${{ steps.mock_parity.outcome }}
+          RESULT_CLIPPY: ${{ steps.clippy.outcome }}
+          RESULT_RUSTDOC: ${{ steps.rustdoc.outcome }}
+          RESULT_RELEASE: ${{ steps.release.outcome }}
+        run: |
+          mkdir -p .ci-evidence
+          {
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'job=%s\n' "$GITHUB_JOB"
+            printf 'event_sha=%s\n' "$GITHUB_SHA"
+            printf 'checked_out_commit=%s\n' "$(git rev-parse HEAD 2>/dev/null || printf unavailable)"
+            printf 'checked_out_tree=%s\n' "$(git rev-parse 'HEAD^{tree}' 2>/dev/null || printf unavailable)"
+            printf 'fmt=%s\n' "$RESULT_FMT"
+            printf 'rust_tests=%s\n' "$RESULT_RUST_TESTS"
+            printf 'doctests=%s\n' "$RESULT_DOCTESTS"
+            printf 'mock_parity=%s\n' "$RESULT_MOCK_PARITY"
+            printf 'clippy=%s\n' "$RESULT_CLIPPY"
+            printf 'rustdoc=%s\n' "$RESULT_RUSTDOC"
+            printf 'release=%s\n' "$RESULT_RELEASE"
+          } > .ci-evidence/receipt.txt
+      - name: Upload bounded CI receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: oresfmt-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-evidence/receipt.txt
+          if-no-files-found: error
+          retention-days: 7
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -34,4 +76,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
         with:
           toolchain: 1.85.0
-      - run: cargo test --all-targets
+      - id: msrv_tests
+        run: cargo test --all-targets
+      - name: Record bounded CI receipt
+        if: always()
+        env:
+          RESULT_MSRV_TESTS: ${{ steps.msrv_tests.outcome }}
+        run: |
+          mkdir -p .ci-evidence
+          {
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'job=%s\n' "$GITHUB_JOB"
+            printf 'event_sha=%s\n' "$GITHUB_SHA"
+            printf 'checked_out_commit=%s\n' "$(git rev-parse HEAD 2>/dev/null || printf unavailable)"
+            printf 'checked_out_tree=%s\n' "$(git rev-parse 'HEAD^{tree}' 2>/dev/null || printf unavailable)"
+            printf 'msrv_tests=%s\n' "$RESULT_MSRV_TESTS"
+          } > .ci-evidence/receipt.txt
+      - name: Upload bounded CI receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: oresfmt-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-evidence/receipt.txt
+          if-no-files-found: error
+          retention-days: 7
