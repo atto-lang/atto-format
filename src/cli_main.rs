@@ -1150,6 +1150,57 @@ mod write_safety_tests {
     }
 
     #[test]
+    fn postrename_sync_failure_never_deletes_reused_stage_basename() {
+        let root = scratch("postrename-stage-reuse");
+        let reused = root.join("stage.tmp");
+        fs::write(&reused, "new writer's stage").unwrap();
+        let err = finalize_staged_replacement(
+            Err(io::Error::from_raw_os_error(5).into()),
+            true,
+            || fs::remove_file(&reused),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Input/output error") || err.to_string().contains("os error 5"));
+        assert_eq!(fs::read_to_string(&reused).unwrap(), "new writer's stage");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn precommit_failure_cleans_owned_partial_stage() {
+        let root = scratch("precommit-stage");
+        let stage = root.join("stage.tmp");
+        fs::write(&stage, "partial").unwrap();
+        let result = finalize_staged_replacement(
+            Err(io::Error::from_raw_os_error(28).into()),
+            false,
+            || fs::remove_file(&stage),
+        );
+        assert!(result.is_err());
+        assert!(!stage.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn precommit_cleanup_refuses_substituted_stage_inode() {
+        use std::ffi::OsStr;
+        let root = scratch("cleanup-substitution");
+        let parent = pinned_directory::open_parent(&root).unwrap();
+        let stage = pinned_directory::stage(&parent, OsStr::new("stage.tmp")).unwrap();
+        let inode = stage.metadata().unwrap();
+        drop(stage);
+
+        fs::rename(root.join("stage.tmp"), root.join("original.tmp")).unwrap();
+        fs::write(root.join("stage.tmp"), "another writer").unwrap();
+
+        let err = pinned_directory::cleanup_owned(&parent, OsStr::new("stage.tmp"), &inode)
+            .unwrap_err();
+        assert!(err.to_string().contains("refusing cleanup of replaced staging entry"));
+        assert_eq!(fs::read_to_string(root.join("stage.tmp")).unwrap(), "another writer");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn formatted_output_never_exceeds_readable_input_limit() {
         assert!(check_formatted_size(MAX_SOURCE_BYTES as usize).is_ok());
         let error = check_formatted_size(MAX_SOURCE_BYTES as usize + 1).unwrap_err();
