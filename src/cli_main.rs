@@ -1398,6 +1398,26 @@ mod write_safety_tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn source_read_refuses_symlinked_directory_component() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("source-parent-symlink");
+        let real = root.join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("source.ores"), "real contents").unwrap();
+        let alias = root.join("alias");
+        symlink(&real, &alias).unwrap();
+
+        assert!(read_regular_source(&alias.join("source.ores")).is_err());
+        assert_eq!(
+            read_regular_source(&real.join("source.ores")).unwrap(),
+            "real contents"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn source_read_rejects_fifo_without_waiting_for_a_writer() {
         let root = scratch("fifo-substitution");
         let pipe = root.join("source.ores");
