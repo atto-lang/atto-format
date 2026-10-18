@@ -61,7 +61,7 @@ fn nested_if_later_line_statements_are_separated() {
 #[test]
 fn logical_word_operators_are_preserved_as_expression_tokens() {
     let input = "fnc choose(bool a, bool b, bool c): bool {\nreturn a and b or c;\n}\n";
-    let expected = "fnc choose(bool a, bool b, bool c): bool {\n  return a and b or c;\n}\n";
+    let expected = "fnc choose(bool a, bool b, bool c) -> bool {\n  return a and b or c;\n}\n";
     let output = format_source(input).unwrap();
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
@@ -72,7 +72,7 @@ fn capitalized_boolean_builtins_are_not_confused_with_word_operators() {
     let input =
         "fnc choose(bool a, bool b, bool c): bool {\nreturn Or(Xor(a, b), And(a, b, c));\n}\n";
     let expected =
-        "fnc choose(bool a, bool b, bool c): bool {\n  return Or(Xor(a, b), And(a, b, c));\n}\n";
+        "fnc choose(bool a, bool b, bool c) -> bool {\n  return Or(Xor(a, b), And(a, b, c));\n}\n";
     let output = format_source(input).unwrap();
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
@@ -81,7 +81,7 @@ fn capitalized_boolean_builtins_are_not_confused_with_word_operators() {
 fn xor_keyword_and_mixed_logical_spelling_round_trip_unchanged() {
     let input = "fnc combine(bool a, bool b, bool c): bool {\nreturn a xor b ^^ c and a or b;\n}\n";
     let expected =
-        "fnc combine(bool a, bool b, bool c): bool {\n  return a xor b ^^ c and a or b;\n}\n";
+        "fnc combine(bool a, bool b, bool c) -> bool {\n  return a xor b ^^ c and a or b;\n}\n";
     let output = format_source(input).unwrap();
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
@@ -90,7 +90,7 @@ fn xor_keyword_and_mixed_logical_spelling_round_trip_unchanged() {
 #[test]
 fn terminal_rest_bool_parameter_syntax_round_trips() {
     let input = "pub fnc Or(bool a, bool b, rest ...bool): bool {\nreturn a or b;\n}\n";
-    let expected = "pub fnc Or(bool a, bool b, rest ...bool): bool {\n  return a or b;\n}\n";
+    let expected = "pub fnc Or(bool a, bool b, rest ...bool) -> bool {\n  return a or b;\n}\n";
     let output = format_source(input).unwrap();
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
