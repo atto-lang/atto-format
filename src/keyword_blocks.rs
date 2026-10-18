@@ -197,9 +197,11 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
             .iter()
             .any(|prefix| next.starts_with(prefix))
         || next.starts_with("/*")
-        || ["on", "when", "case", "default", "as", "is", "with", "over", "and", "or"]
-            .iter()
-            .any(|word| crate::starts_word(next, word))
+        || [
+            "on", "when", "case", "default", "as", "is", "with", "over", "and", "or",
+        ]
+        .iter()
+        .any(|word| crate::starts_word(next, word))
 }
 
 fn split_keyword_blocks(source: &str) -> String {
@@ -376,7 +378,9 @@ fn terminate_simple_returns(source: &str) -> String {
             && !code.ends_with('<')
             && !code.ends_with('|')
             && !code.ends_with('&')
-            && !tokens.last().is_some_and(|token| matches!(token.text, "and" | "or"))
+            && !tokens
+                .last()
+                .is_some_and(|token| matches!(token.text, "and" | "or"))
             && !code.contains("->")
             && !code.contains("=>")
             && !tokens
