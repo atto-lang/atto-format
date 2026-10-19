@@ -13,6 +13,8 @@ return c["first name"];
 }
 "#;
     let output = format_source(source).expect("new closed-row expressions must format");
+    assert!(output.contains("const Row a = record"), "canonical record gained infer intent:\n{output}");
+    assert!(!output.contains("const Row a = infer record"), "formatter changed canonical record semantics:\n{output}");
     for marker in [
         "record",
         "infer struct",
