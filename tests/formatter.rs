@@ -935,3 +935,23 @@ return;
     assert!(output.contains("case readch input: const job {"));
     assert!(output.contains("case readch output: val job {"));
 }
+
+#[test]
+fn failure_signatures_and_recovery_preserve_semantics_and_are_idempotent() {
+    let source = "fnc fail(): void throws raises panics {\nraise 42;\n}\nfnc handle(): void {\ndefer || -> { recover(); };\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("throws raises panics"));
+    assert!(formatted.contains("raise 42;"));
+    assert!(formatted.contains("recover()"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn unchecked_call_markers_preserve_call_scope() {
+    let source = "fnc use(): void {\nval result = unchecked service.read(argument());\nval future = await unchecked fetch();\nval handled = trap unchecked read();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("unchecked service.read(argument())"));
+    assert!(formatted.contains("await unchecked fetch()"));
+    assert!(formatted.contains("trap unchecked read()"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}

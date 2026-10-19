@@ -8,7 +8,7 @@ use std::process::{Command, ExitCode};
 const HELP: &str = r#"oresfmt - the canonical Oreslang formatter
 
 USAGE:
-    oresfmt [--dry-run | --write | --check | --stdout] [safety flags] <path>...
+    oresfmt [--dry-run | --write | --check | --stdout | --analyze] [safety flags] <path>...
     oresfmt [--check] -
 
 MODES:
@@ -16,6 +16,8 @@ MODES:
     --write     Rewrite files in place after Git safety checks
     --check     Do not write files; exit 1 if any input is not canonical
     --stdout    Print one formatted file to stdout instead of writing it
+    --analyze   Run compiler static diagnostics without executing or modifying source
+                Uses ORESLANG_BIN (default: oreslang-core) with --analyze
 
 WRITE SAFETY:
     --ok-to-mod-dirty-files
@@ -43,6 +45,7 @@ enum Mode {
     Write,
     Check,
     Stdout,
+    Analyze,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -81,6 +84,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             "--dry-run" => select_mode(&mut mode, &mut explicit_mode, Mode::DryRun, "--dry-run")?,
             "--write" => select_mode(&mut mode, &mut explicit_mode, Mode::Write, "--write")?,
             "--check" => select_mode(&mut mode, &mut explicit_mode, Mode::Check, "--check")?,
+            "--analyze" => select_mode(&mut mode, &mut explicit_mode, Mode::Analyze, "--analyze")?,
             "--stdout" => select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?,
             "--ok-to-mod-dirty-files" => policy.allow_dirty_tracked = true,
             "--ok-to-mod-untracked-files" => policy.allow_untracked = true,
@@ -120,8 +124,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 
     if has_stdin {
-        if mode == Mode::Write {
-            return Err("--write cannot be used with stdin".into());
+        if mode == Mode::Write || mode == Mode::Analyze {
+            return Err("--write/--analyze cannot be used with stdin".into());
         }
 
         let mut input = String::new();
@@ -153,6 +157,26 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let files = collect_files(&paths)?;
 
     match mode {
+        Mode::Analyze => {
+            let executable = env::var_os("ORESLANG_BIN").unwrap_or_else(|| "oreslang-core".into());
+            let compiler = PathBuf::from(&executable);
+            let resolved = if compiler.is_absolute() || compiler.components().count() > 1 {
+                fs::canonicalize(&compiler).ok()
+            } else {
+                env::var_os("PATH").and_then(|paths| {
+                    env::split_paths(&paths).find_map(|dir| fs::canonicalize(dir.join(&compiler)).ok())
+                })
+            };
+            if resolved.is_some() && resolved == fs::canonicalize(env::current_exe()?).ok() {
+                return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
+            }
+            let mut failed = false;
+            for path in files {
+                let status = Command::new(&executable).arg("--analyze").arg(&path).status()?;
+                failed |= !status.success();
+            }
+            return Ok(if failed { ExitCode::from(1) } else { ExitCode::SUCCESS });
+        }
         Mode::DryRun => {
             for path in files {
                 let input = fs::read_to_string(&path)?;

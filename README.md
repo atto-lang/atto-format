@@ -171,3 +171,18 @@ same bytes.
 Oreslang should have one mechanically enforceable source style. This avoids
 project-specific formatter drift and gives compiler diagnostics, generated
 code, examples, editor integrations, and code review the same layout contract.
+
+### Failure analysis
+
+`oreslang-format --analyze src/` runs the compiler's static analysis for each
+selected `.ores` file without rewriting or executing source. Set `ORESLANG_BIN`
+to a compiler supporting `--analyze` (default: `oreslang-core`). Diagnostics include
+suggested `throws`, `raises`, and `panics` markers and unresolved calls. Missing
+compilers and failed checks produce a nonzero exit. Warnings remain advisory.
+Formatting preserves failure signatures and explicit `throw`, `raise`, `panic`,
+and deferred `recover()` operations; formatting does not infer or insert markers.
+
+The caller opt-out `unchecked call()` is preserved verbatim in scope, including
+`await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
+effect assumptions, never runtime failure routing or ordinary compiler checks.
+`ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
