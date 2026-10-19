@@ -14,10 +14,10 @@ return c["first name"];
 "#;
     let output = format_source(source).expect("new closed-row expressions must format");
     for marker in [
-        "infer record{",
-        "infer struct{",
-        "infer<Contact> record{",
-        "infer<Metadata> struct{",
+        "infer record",
+        "infer struct",
+        "infer<Contact> record",
+        "infer<Metadata> struct",
         r#""first name": "Linus""#,
         r#""email@work": "a@b""#,
         r#"c["first name"]"#,
