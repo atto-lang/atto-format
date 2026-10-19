@@ -110,3 +110,24 @@ return name;
     assert_eq!(format_source(&formatted).unwrap(), formatted);
     assert!(is_formatted(&formatted).unwrap());
 }
+
+
+#[test]
+fn computed_fixed_product_access_preserves_dynamic_index_syntax() {
+    let source = r#"fnc read(string key, int index) -> void {
+const row = record{x: 3.0, y: "boo"};
+const y = row[key];
+const point = infer struct{x: 1.0, y: 2.0};
+const x = point[key];
+const pair = tuple(3.0, 4.0);
+const slot = pair[index];
+return;
+}
+"#;
+    let output = format_source(source).expect("computed fixed-product access must format");
+    for marker in ["row[key]", "point[key]", "pair[index]"] {
+        assert!(output.contains(marker), "lost computed access {marker:?}:\n{output}");
+    }
+    assert_eq!(format_source(&output).unwrap(), output);
+    assert!(is_formatted(&output).unwrap());
+}
