@@ -5,8 +5,8 @@ use oreslang_format::{format_source, is_formatted};
 #[test]
 fn inferred_record_and_struct_sources_keep_their_distinct_spellings() {
     let source = r#"fnc read() -> string {
-const Person a = infer record{name: "Ada", age: 37};
-const Person b = infer struct{age: 42, name: "Grace"};
+const Row a = record{name: "Ada", age: 37};
+const Point b = infer struct{age: 42, name: "Grace"};
 const Contact c = infer<Contact> record{"first name": "Linus", "email@work": "a@b"};
 const Metadata m = infer<Metadata> struct{value: "ok"};
 return c["first name"];
@@ -14,7 +14,7 @@ return c["first name"];
 "#;
     let output = format_source(source).expect("new closed-row expressions must format");
     for marker in [
-        "infer record",
+        "record",
         "infer struct",
         "infer<Contact> record",
         "infer<Metadata> struct",
@@ -31,7 +31,7 @@ return c["first name"];
 #[test]
 fn closed_record_keys_with_braces_and_spaces_are_not_reinterpreted() {
     let source = r#"fnc read() -> string {
-const T value = infer<T> record{
+const value = record{
 "}": "brace",
 "  ": "spaces",
 "emoji🚀": "rocket"
