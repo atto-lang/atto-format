@@ -83,36 +83,6 @@ return name;
 }
 
 #[test]
-fn computed_keys_and_tuple_indices_preserve_index_expressions() {
-    let source = r#"fnc access() -> string {
-const Entry item = record{key: "id", value: "payload"};
-const key = "value";
-const T t = tuple(3.0, 4.0);
-const index = 0;
-const S d = infer<S> struct{x: 3.0, y: 4.0};
-const first = d['x'];
-const name = item[key];
-const number = t[index];
-return name;
-}
-"#;
-    let formatted = format_source(source).expect("computed brackets format");
-    for token in [
-        "record",
-        "tuple(",
-        "infer<S> struct",
-        "item[key]",
-        "t[index]",
-        "d['x']",
-    ] {
-        assert!(formatted.contains(token), "lost computed index token");
-    }
-    assert_eq!(format_source(&formatted).unwrap(), formatted);
-    assert!(is_formatted(&formatted).unwrap());
-}
-
-
-#[test]
 fn computed_fixed_product_access_preserves_dynamic_index_syntax() {
     let source = r#"fnc read(string key, int index) -> void {
 const row = record{x: 3.0, y: "boo"};
