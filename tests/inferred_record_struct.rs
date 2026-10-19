@@ -50,3 +50,32 @@ return value["}"];
     }
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn computed_keys_and_tuple_indices_preserve_index_expressions() {
+    let source = r#"fnc access() -> string {
+const Entry item = record{key: "id", value: "payload"};
+const key = "value";
+const T tupleValue = tuple(3.0, 4.0);
+const index = 0;
+const S objectValue = infer<S> struct{x: 3.0, y: 4.0};
+const first = objectValue['x'];
+const name = item[key];
+const number = tupleValue[index];
+return name;
+}
+"#;
+    let formatted = format_source(source).expect("computed brackets format");
+    for token in [
+        "record",
+        "tuple(",
+        "infer<S> struct",
+        "item[key]",
+        "tupleValue[index]",
+        "objectValue['x']",
+    ] {
+        assert!(formatted.contains(token), "lost token {token:?}:\\n{formatted}");
+    }
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+    assert!(is_formatted(&formatted).unwrap());
+}
