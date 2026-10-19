@@ -13,8 +13,14 @@ return c["first name"];
 }
 "#;
     let output = format_source(source).expect("new closed-row expressions must format");
-    assert!(output.contains("const Row a = record"), "canonical record gained infer intent:\n{output}");
-    assert!(!output.contains("const Row a = infer record"), "formatter changed canonical record semantics:\n{output}");
+    assert!(
+        output.contains("const Row a = record"),
+        "canonical record gained infer intent:\n{output}"
+    );
+    assert!(
+        !output.contains("const Row a = infer record"),
+        "formatter changed canonical record semantics:\n{output}"
+    );
     for marker in [
         "record",
         "infer struct",
@@ -24,9 +30,16 @@ return c["first name"];
         r#""email@work": "a@b""#,
         r#"c["first name"]"#,
     ] {
-        assert!(output.contains(marker), "lost source token {marker:?}:\n{output}");
+        assert!(
+            output.contains(marker),
+            "lost source token {marker:?}:\n{output}"
+        );
     }
-    assert_eq!(format_source(&output).unwrap(), output, "formatter fixed point");
+    assert_eq!(
+        format_source(&output).unwrap(),
+        output,
+        "formatter fixed point"
+    );
     assert!(is_formatted(&output).unwrap());
 }
 
@@ -48,7 +61,10 @@ return value["}"];
         r#""emoji🚀": "rocket""#,
         r#"value["}"]"#,
     ] {
-        assert!(output.contains(literal), "quoted record field changed {literal:?}:\n{output}");
+        assert!(
+            output.contains(literal),
+            "quoted record field changed {literal:?}:\n{output}"
+        );
     }
     assert_eq!(format_source(&output).unwrap(), output);
 }
@@ -76,7 +92,10 @@ return name;
         "tupleValue[index]",
         "objectValue['x']",
     ] {
-        assert!(formatted.contains(token), "lost token {token:?}:\\n{formatted}");
+        assert!(
+            formatted.contains(token),
+            "lost token {token:?}:\\n{formatted}"
+        );
     }
     assert_eq!(format_source(&formatted).unwrap(), formatted);
     assert!(is_formatted(&formatted).unwrap());
@@ -96,7 +115,10 @@ return;
 "#;
     let output = format_source(source).expect("computed fixed-product access must format");
     for marker in ["row[key]", "point[key]", "pair[index]"] {
-        assert!(output.contains(marker), "lost computed access {marker:?}:\n{output}");
+        assert!(
+            output.contains(marker),
+            "lost computed access {marker:?}:\n{output}"
+        );
     }
     assert_eq!(format_source(&output).unwrap(), output);
     assert!(is_formatted(&output).unwrap());
