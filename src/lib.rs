@@ -2949,6 +2949,14 @@ end
     }
 
     #[test]
+    fn routine_uses_the_same_end_delimited_do_formatting() {
+        let compact = "routine identity(int x) -> int do return x; end\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, "routine identity(int x) -> int do\n  return x;\nend\n");
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
     fn contract_arrows_are_executable_style_but_interfaces_stay_type_level() {
         let src = r#"define contract ModuleApi as
   fnc load(int id) => tuple (int, string);
