@@ -251,7 +251,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub let int balance = 100;
+    pub int balance: 100;
 
     pub read() -> int {
       return self.balance;
