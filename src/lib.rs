@@ -1547,7 +1547,13 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
 
 fn is_end_delimited_callable_header(structural: &str) -> bool {
     let line = structural.trim();
-    if line.contains('{') || line.ends_with(';') || contains_word(line, "actor") || contains_word(line, "isoactor") {
+    if line.contains('{')
+        || line.ends_with(';')
+        || contains_word(line, "actor")
+        || contains_word(line, "isoactor")
+        || contains_word(line, "static")
+        || contains_word(line, "abstract")
+    {
         return false;
     }
     if !(contains_word(line, "fnc") || contains_word(line, "routine")) || !line.contains('(') {
@@ -2776,6 +2782,54 @@ end
 end
 "#;
         assert!(format_source(actor_callable).is_err());
+    }
+
+    #[test]
+    fn large_tuple_return_spelling_is_preserved_and_idempotent() {
+        let slots = (0..65).map(|_| "int").collect::<Vec<_>>().join(", ");
+        let src = format!(
+            "fnc identity(tuple ({slots}) value) -> tuple ({slots})\nreturn value\nend\n"
+        );
+        let got = format_source(&src).unwrap();
+        assert!(got.contains(&format!("tuple ({slots}) value")));
+        assert!(got.contains(&format!("-> tuple ({slots})")));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn delimiter_words_inside_literals_and_comments_do_not_close_callable() {
+        let src = r#"fnc words() -> string
+const string value = "end fi"
+return value // end fi
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.contains("\"end fi\""));
+        assert!(got.contains("// end fi"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn static_or_abstract_end_delimited_free_callable_fails_closed() {
+        let top_static = r#"static fnc run() -> int
+return 1
+end
+"#;
+        assert!(format_source(top_static).is_err());
+
+        let module_static = r#"define module M as
+static fnc run() -> int
+return 1
+end
+end
+"#;
+        assert!(format_source(module_static).is_err());
+
+        let top_abstract = r#"abstract fnc run() -> int
+return 1
+end
+"#;
+        assert!(format_source(top_abstract).is_err());
     }
 
     #[test]
