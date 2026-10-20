@@ -221,9 +221,13 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
+    // Expand a compact end-delimited callable before nested dispatch
+    // normalizers insert line breaks. Otherwise a body beginning with
+    // `do select` / match / switch can be split before the outer callable
+    // frame is recognized, causing an inner brace/end to steal ownership.
+    let normalized = expand_compact_end_delimited_callables(&normalized);
     let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
-    let normalized = expand_compact_end_delimited_callables(&normalized);
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
@@ -2860,6 +2864,18 @@ end
         let got = format_source(compact).unwrap();
         assert!(got.starts_with("fnc callback() -> () => void do\n"));
         assert!(got.contains("  return factory();\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_separator_can_precede_real_do_select_body() {
+        let src = r#"fnc consume(Channel<int> incoming) -> void do do select { case readch incoming: val number { return; } } end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void do\n"));
+        assert!(got.contains("  do select {\n"));
+        assert!(got.contains("    when readch incoming: val number {\n"));
+        assert!(got.ends_with("end\n"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
