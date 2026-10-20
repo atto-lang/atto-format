@@ -2699,7 +2699,6 @@ end
   fi
 end
 
-
 define module math as
   fnc identity(int x) -> int
     return x;
