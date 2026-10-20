@@ -272,3 +272,8 @@ A separate initial advisory checker is provided by
 `oreslang-test.cli --effects`. Integration with formatter diagnostics,
 complete callable-effect inference and LSP quick fixes remains pending.
 See the proposed shared contract in oreslang-common-source.
+
+Formatter regression coverage additionally preserves block/line comments
+interleaved with staged effect signatures and keeps effect-like text inside
+comments and string literals opaque. These are lexical preservation tests:
+the formatter neither infers typed effects nor admits guest exception code.
