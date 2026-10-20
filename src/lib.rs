@@ -2914,6 +2914,18 @@ end
     }
 
     #[test]
+    fn shared_java_round_trip_corpus_formats_idempotently() {
+        let source = include_str!("../tests/fixtures/end-delimited-roundtrip.ores");
+        let once = format_source(source).unwrap();
+        let twice = format_source(&once).unwrap();
+        assert_eq!(twice, once);
+        assert!(once.contains("fnc identity(int x) -> int do\n"));
+        assert!(once.contains("fnc callback() -> () => void do\n"));
+        assert!(once.contains("fnc text() -> string /* ; do end */ do\n"));
+        assert!(once.contains("fnc double(int x) -> int do\n"));
+    }
+
+    #[test]
     fn contract_arrows_are_executable_style_but_interfaces_stay_type_level() {
         let src = r#"define contract ModuleApi as
   fnc load(int id) => tuple (int, string);
