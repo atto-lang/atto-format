@@ -1117,7 +1117,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     let is_prefix_word = |word: &str| {
         matches!(
             word,
-            "define" | "interface" | "contract" | "pub" | "private"
+            "define" | "interface" | "contract" | "pub" | "private" | "static"
         )
     };
     let prefix_len = words
@@ -1135,6 +1135,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
 
     let mut saw_define = false;
     let mut visibility: Option<&str> = None;
+    let mut is_static = false;
     let mut kind: Option<&str> = None;
 
     for span in prefix {
@@ -1143,19 +1144,23 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
             "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
+            "static" if !is_static => is_static = true,
             "interface" | "contract" if kind.is_none() => kind = Some(&line[span.start..span.end]),
             _ => return None,
         }
     }
 
     let kind = kind?;
-    if !saw_define {
+    if !saw_define || (is_static && kind != "contract") {
         return None;
     }
 
     let mut canonical = vec!["define"];
     if let Some(visibility) = visibility {
         canonical.push(visibility);
+    }
+    if is_static {
+        canonical.push("static");
     }
     canonical.push(kind);
 
@@ -2671,6 +2676,24 @@ define contract BraceContract {
             assert_eq!(got, "pub async isoactor fnc private_worker() {\n}\n");
         }
         assert_eq!(isoactor_cases, 24);
+    }
+
+    #[test]
+    fn canonicalizes_static_contract_declaration_order_without_normalizing_static_interface() {
+        let src = r#"static contract define pub Factory as
+  fnc build(int id): int;
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("define pub static contract Factory as\n"));
+        assert!(got.contains("fnc build(int id) -> int;"));
+        assert_eq!(format_source(&got).unwrap(), got);
+
+        // The formatter must not bless a nonsensical static instance-interface
+        // declaration by rewriting it into a canonical-looking form.
+        let invalid = "static interface define Bad as\nend\n";
+        let invalid_got = format_source(invalid).unwrap();
+        assert!(invalid_got.contains("static interface define Bad as"));
     }
 
     #[test]
