@@ -213,9 +213,15 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         }
 
         // A trailing comment after the callable closer remains attached to
-        // the `end` line. Other trailing syntax stays on the fail-closed path.
-        let suffix = line[end_span.end..].trim_start();
-        if !suffix.is_empty() && !suffix.starts_with("//") && !suffix.starts_with("/*") {
+        // the `end` line. Validate the whole suffix lexically rather than
+        // trusting its prefix: `end /* comment */ stray` must stay on the
+        // fail-closed path instead of being partially normalized.
+        let suffix = &line[end_span.end..];
+        let mut suffix_lex = LexState::default();
+        let visible_suffix: String = scan_visible(suffix, &mut suffix_lex)
+            .into_iter()
+            .collect();
+        if !visible_suffix.trim().is_empty() {
             output.push_str(line);
             continue;
         }
@@ -2971,6 +2977,12 @@ end
         let got = format_source(src).unwrap();
         assert!(got.contains("end // callable\n"));
         assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_rejects_visible_syntax_after_block_comment_suffix() {
+        let src = "fnc identity(int x) -> int as return x; end /* comment */ stray\n";
+        assert!(format_source(src).is_err());
     }
 
     #[test]
