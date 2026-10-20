@@ -60,7 +60,7 @@ end
 "#;
     let formatted = format_source(input).unwrap();
     assert!(formatted.contains("const int value = 5;"));
-    assert!(formatted.contains("get(): int;"));
+    assert!(formatted.contains("get() => int;"));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn leaves_suspicious_fields_and_methods_alone() {
 end
 "#;
     let formatted = format_source(input).unwrap();
-    assert!(formatted.contains("final(): int"));
+    assert!(formatted.contains("final() -> int"));
     assert!(formatted.contains("name: string = \"value\";"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -85,7 +85,11 @@ fn rejects_duplicate_mut_modifier_by_preserving_source_for_compiler() {
   val mut Map m = new Map();
 end
 "#;
-    assert!(format_source(input).unwrap().contains("val mut Map m = new Map();"));
+    assert!(
+        format_source(input)
+            .unwrap()
+            .contains("val mut Map m = new Map();")
+    );
 }
 
 #[test]
@@ -118,7 +122,7 @@ end
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("final Map<value: string> fields: build();"));
-    assert!(formatted.contains("calculate(int x): int {"));
+    assert!(formatted.contains("calculate(int x) -> int {"));
     assert!(formatted.contains("final mut Map<int, string> cache: new Map();"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
