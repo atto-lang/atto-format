@@ -164,7 +164,11 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         }
 
         let header_tail = &line[close + 1..do_span.start];
-        if !header_tail.contains("->") || header_tail.contains(';') {
+        let mut header_lex = LexState::default();
+        let visible_header: String = scan_visible(header_tail, &mut header_lex)
+            .into_iter()
+            .collect();
+        if !visible_header.contains("->") || visible_header.contains(';') {
             output.push_str(line);
             continue;
         }
@@ -2874,6 +2878,39 @@ end
         let got = format_source(src).unwrap();
         assert!(got.contains("end // callable\n"));
         assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_do_ignores_delimiters_hidden_in_comments_and_literals() {
+        let src =
+            "fnc value() -> int /* ; do end */ do /* ; end */ return 7; end // do end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc value() -> int /* ; do end */ do\n"));
+        assert!(got.contains("  /* ; end */ return 7;\n"));
+        assert!(got.ends_with("end // do end\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+
+        let string_body = "fnc text() -> string do return \"do end fi;\"; end\n";
+        let string_got = format_source(string_body).unwrap();
+        assert!(string_got.contains("  return \"do end fi;\";\n"));
+        assert_eq!(format_source(&string_got).unwrap(), string_got);
+    }
+
+    #[test]
+    fn compact_callable_do_preserves_nested_lambda_boundaries() {
+        let src =
+            "fnc make() -> () => string do return || -> { return \"do end\"; }; end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc make() -> () => string do\n"));
+        assert!(got.contains("return || -> {"));
+        assert!(got.contains("\"do end\""));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn visible_semicolon_before_callable_do_is_not_reinterpreted_as_a_body() {
+        let src = "fnc bad() -> int; do return 1; end\n";
+        assert!(format_source(src).is_err());
     }
 
     #[test]
