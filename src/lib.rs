@@ -169,10 +169,10 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             continue;
         }
 
-        // Require the function-closing `end` to be the final raw token on the
-        // line. This keeps comments and unfamiliar trailing syntax on the
-        // existing fail-closed path rather than guessing at ownership.
-        if !line[end_span.end..].trim().is_empty() {
+        // A trailing comment after the callable closer remains attached to
+        // the `end` line. Other trailing syntax stays on the fail-closed path.
+        let suffix = line[end_span.end..].trim_start();
+        if !suffix.is_empty() && !suffix.starts_with("//") && !suffix.starts_with("/*") {
             output.push_str(line);
             continue;
         }
@@ -184,7 +184,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(body);
             output.push('\n');
         }
-        output.push_str(&line[end_span.start..end_span.end]);
+        output.push_str(&line[end_span.start..]);
     }
 
     output
@@ -585,7 +585,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             indent += 1;
         } else if starts_word(structural, "if") && structural.contains('{') {
             keyword_stack.push(KeywordTerminator::FiBraced);
-        } else if opens_do_block(structural) && !branch_line {
+        } else if opens_do_block(structural) && !branch_line && !end_delimited_callable {
+            // The optional `do` after a free/module callable return type is a
+            // semantics-free header/body separator. It closes with the
+            // callable's `end`, never with `done`.
             keyword_stack.push(KeywordTerminator::Done);
             indent += 1;
         }
@@ -2853,6 +2856,23 @@ end
         let got = format_source(compact).unwrap();
         assert!(got.starts_with("fnc callback() -> () => void do\n"));
         assert!(got.contains("  return factory();\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn multiline_callable_do_never_opens_a_done_frame() {
+        let src = "fnc identity(int x) -> int do\nreturn x\nend\n";
+        let expected = "fnc identity(int x) -> int do\n  return x;\nend\n";
+        let got = format_source(src).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_do_preserves_trailing_end_comment() {
+        let src = "fnc identity(int x) -> int do return x; end // callable\n";
+        let got = format_source(src).unwrap();
+        assert!(got.contains("end // callable\n"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
