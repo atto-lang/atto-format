@@ -52,7 +52,8 @@ the full field contract.
   explicit `method name(...)` remains explicit, and `static fnc` is preserved;
   instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
-- interface/trait callable signatures use the type-level fat arrow `=>`;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; an optional semantics-free `as` may separate the complete return type from the body and permits compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
@@ -89,6 +90,20 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `struct`, actor/braced bodies, `end`, `if`/`fi`, and `do`/`done`. In particular,
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
+
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
+
+```ores
+fnc classify(int x) -> tuple (int, int, string) as
+  if x > 0 then
+    return (1, x, "positive");
+  else
+    return (0, x, "non-positive");
+  fi
+end
+```
+
+The formatter recognizes this only at file/module declaration scope and only with an explicit slim-arrow return type. A callable-header `do` is never interpreted as a `done`-terminated control-flow block; compact `do ... end` source is expanded before structural indentation. It fails closed instead of interpreting an `end`-delimited class method, static class implementation, or actor callable as a free function. The contextual `tuple (...)` spelling is preserved as a type spelling; formatting does not invent a separate tuple runtime form.
 
 Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
 `if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
