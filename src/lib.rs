@@ -168,7 +168,46 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
             .collect();
-        if !visible_header.contains("->") || visible_header.contains(';') {
+        let visible_header_words = visible_word_spans(&visible_header, LexState::default());
+        let contains_body_word = visible_header_words.iter().any(|span| {
+            matches!(
+                &visible_header[span.start..span.end],
+                "return"
+                    | "if"
+                    | "elif"
+                    | "else"
+                    | "fi"
+                    | "do"
+                    | "done"
+                    | "select"
+                    | "match"
+                    | "switch"
+                    | "const"
+                    | "let"
+                    | "val"
+                    | "for"
+                    | "while"
+                    | "loop"
+                    | "try"
+                    | "catch"
+                    | "finally"
+                    | "throw"
+                    | "raise"
+                    | "panic"
+                    | "await"
+                    | "spawn"
+                    | "break"
+                    | "continue"
+                    | "yield"
+                    | "defer"
+            )
+        });
+        if !visible_header.contains("->")
+            || visible_header.contains(';')
+            || visible_header.contains('{')
+            || visible_header.contains('}')
+            || contains_body_word
+        {
             output.push_str(line);
             continue;
         }
@@ -2959,6 +2998,12 @@ end
         assert!(got.contains("return || -> {"));
         assert!(got.contains("\"do end\""));
         assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn body_level_cast_as_cannot_impersonate_callable_separator() {
+        let src = "fnc casty() -> int return value as int; end\n";
+        assert!(format_source(src).is_err());
     }
 
     #[test]
