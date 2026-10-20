@@ -2864,6 +2864,29 @@ end
     }
 
     #[test]
+    fn next_line_do_select_remains_a_body_statement() {
+        let src = r#"fnc consume(Channel<int> incoming) -> void
+do select {
+case readch incoming: val number {
+return;
+}
+}
+end
+"#;
+        let expected = r#"fnc consume(Channel<int> incoming) -> void
+  do select {
+    case readch incoming: val number {
+      return;
+    }
+  }
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
     fn multiline_callable_do_never_opens_a_done_frame() {
         let src = "fnc identity(int x) -> int do\nreturn x\nend\n";
         let expected = "fnc identity(int x) -> int do\n  return x;\nend\n";
