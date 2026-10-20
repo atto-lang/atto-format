@@ -65,3 +65,37 @@ fn preserves_supplied_clause_order_and_never_invents_annotations() {
     assert!(formatted.contains("fnc g() -> void {"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn preserves_inline_comment_trivia_around_exception_effect_signature() {
+    // Preserve comments, exact effect spelling and idempotence, but do not
+    // silently infer a missing effect from a throw in the function body.
+    let source = r#"fnc dispatch() -> int throws(Error) /* throw contract */ raises(Error) panics(Error) {
+  // raises(Error) is a diagnostic example, not a new declaration.
+  return 42;
+}
+"#;
+    let formatted = format_source(source).expect("format staged effects and trivia");
+    assert!(formatted.contains("throws(Error)"));
+    assert!(formatted.contains("/* throw contract */"));
+    assert!(formatted.contains("raises(Error)"));
+    assert!(formatted.contains("panics(Error)"));
+    assert!(formatted.contains("// raises(Error) is a diagnostic example"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn exceptional_effect_keywords_in_comments_and_strings_do_not_create_clauses() {
+    let source = r#"fnc informational(): String {
+  // throws(Error), raises(Error), panics(Error) are only documentation.
+  return "throws(Error) raises(Error) panics(Error)";
+}
+"#;
+    let formatted = format_source(source).expect("comments and strings are opaque");
+    assert!(formatted.contains("// throws(Error), raises(Error), panics(Error)"));
+    assert!(formatted.contains("\\"throws(Error) raises(Error) panics(Error)\\""));
+    assert!(!formatted.contains("informational() -> String throws("));
+    assert!(!formatted.contains("informational() -> String raises("));
+    assert!(!formatted.contains("informational() -> String panics("));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
