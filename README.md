@@ -6,6 +6,38 @@ There is deliberately **one format and no style configuration**. The same Rust
 library powers the CLI, so editor integrations, CI, and local development use
 identical behavior.
 
+## Canonical concrete field syntax (pre-1.0)
+
+In direct class member declarations, use `final` to seal
+the member slot and `mut` to permit mutation through a referenced value.
+Local binding declarations retain `const` / `val` / `let` and `=`.
+
+```ores
+define class Foo as
+  int counter: 5;
+  final int limit: 6;
+  final mut Map cache: new Map();
+end
+```
+
+The formatter migrates typed member `let T x = value` to `T x: value`,
+`const T x = value` to `final T x: value`, and
+`val T x = value` to `final mut T x: value` (with analogous
+`const mut` and `let mut` forms). Rewrites are limited to recognized
+direct class members; ambiguous declarations are preserved for
+compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
+or lexical declarations inside callables.
+
+Uninitialized legacy class members (including `val T x;` followed by
+constructor-body initialization) are deliberately left unchanged. Rewriting
+them to `final mut T x;` would manufacture a compiler error before the
+coordinated breaking migration has removed those legacy semantics.
+
+The language's final initialization rules are compiler constraints, not
+formatter transformations. Formatting does not make an uninitialized final
+field valid, and formatter output is not proof that all backends support
+the full field contract.
+
 ## Canonical style
 
 - two spaces per indentation level, never tabs for indentation;
@@ -35,7 +67,7 @@ For example:
 
 ```ores
 pub define class User extends Entity implements Named, Serializable as
-  pub val String name;
+  pub final String name: "guest";
 end
 
 fnc pub async refresh() {

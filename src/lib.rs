@@ -214,6 +214,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
+        // Field syntax is contextual: do not rewrite local const/let/val,
+        // actor state, method bodies, or trait signatures.
+        if keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack) {
+            content = canonicalize_storage_field_line(&content, lex).unwrap_or(content);
+        }
         content =
             canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
         let mut structural_lex = lex;
@@ -754,6 +759,170 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
+}
+
+// Concrete class member slots use final (fixed binding) and mut (mutable
+// referent), while lexical bindings retain const/val/let. Do not rewrite
+// unimplemented named-struct storage, actor state, trait contracts, or
+// code nested within a callable.
+fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, DefineKind::Class)));
+    let latest_brace = brace_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, BraceKind::Class)));
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => {
+            if a > b {
+                value
+            } else {
+                other
+            }
+        }
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+// This is deliberately conservative until the formatter has a full parser:
+// only single-line, typed member declarations with recognizable prefixes and
+// an unambiguous initializer separator are normalized. Suspicious syntax,
+// nested expression prefixes, comments, and multiline signatures are left
+// unchanged for compiler diagnostics rather than rewritten by guesswork.
+// Only a top-level declaration separator may become a field initializer.
+// Named generic arguments use '=' (e.g. Box<messages=Message>) and must never
+// be mistaken for the member initializer; nested type contracts may use ':'.
+// Leave malformed, commented or callable prefixes untouched.
+fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<usize> {
+    if initial.block_comment || initial.quote.is_some() {
+        return None;
+    }
+    let mut chars = line.char_indices().peekable();
+    let mut generic_depth = 0usize;
+    while let Some((at, ch)) = chars.next() {
+        let next = chars.peek().map(|(_, c)| *c);
+        if ch == '/' && matches!(next, Some('/' | '*')) {
+            return None;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            return None; // literals never start a field declaration
+        }
+        if ch == '<' {
+            generic_depth += 1;
+            continue;
+        }
+        if ch == '>' {
+            generic_depth = generic_depth.checked_sub(1)?;
+            continue;
+        }
+        if generic_depth == 0 {
+            if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
+                return None; // callable or compound non-field prefix
+            }
+            if matches!(ch, '=' | ':' | ';') {
+                return Some(at);
+            }
+        }
+    }
+    None
+}
+
+fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
+    let separator = canonical_storage_field_separator(line, initial)?;
+    // A legacy uninitialized val field may still be filled in its class
+    // constructor. Rewriting it to final mut would manufacture an invalid
+    // declaration before the coordinated breaking constructor migration.
+    // Preserve ALL uninitialized member spellings until both compilers
+    // enforce declaration-site initialization consistently.
+    if line.as_bytes().get(separator) == Some(&b';') {
+        return None;
+    }
+    let lhs = &line[..separator];
+    if lhs
+        .chars()
+        .any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
+        || lhs.contains("//")
+        || lhs.contains("/*")
+        || lhs.contains("->")
+        || lhs.contains("=>")
+    {
+        return None;
+    }
+    let words = visible_word_spans(lhs, initial);
+    if words.len() < 2 {
+        return None;
+    }
+    let mut cursor = 0usize;
+    let visibility = match &lhs[words[cursor].start..words[cursor].end] {
+        "pub" | "private" => {
+            cursor += 1;
+            Some(&lhs[words[0].start..words[0].end])
+        }
+        _ => None,
+    };
+    if cursor >= words.len() {
+        return None;
+    }
+    let binding = match &lhs[words[cursor].start..words[cursor].end] {
+        "const" | "final" => {
+            cursor += 1;
+            Some("final")
+        }
+        "val" => {
+            cursor += 1;
+            Some("final mut")
+        }
+        "let" => {
+            cursor += 1;
+            None
+        }
+        _ => None,
+    };
+    let mut mutable = false;
+    if cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut" {
+        if binding == Some("final mut") {
+            return None; // duplicate val mut remains a compiler error
+        }
+        mutable = true;
+        cursor += 1;
+    }
+    if words.len() < cursor + 2 {
+        return None; // not a typed field (e.g. legacy name: Type)
+    }
+    let field = words.last()?;
+    if !lhs[field.end..].trim().is_empty() {
+        return None;
+    }
+    let type_and_name = lhs[words[cursor].start..field.end].trim();
+    if type_and_name.is_empty() || type_and_name.contains("::") {
+        return None;
+    }
+    // The declaration type may contain generic args, but the text before
+    // the name must not itself contain an initializer or a callable.
+    let mut prefix = String::new();
+    if let Some(vis) = visibility {
+        prefix.push_str(vis);
+        prefix.push(' ');
+    }
+    if let Some(binding) = binding {
+        prefix.push_str(binding);
+        prefix.push(' ');
+    } else if mutable {
+        prefix.push_str("mut ");
+    }
+    if mutable && binding == Some("final") {
+        prefix.push_str("mut ");
+    }
+    prefix.push_str(type_and_name);
+    if line.as_bytes().get(separator) == Some(&b';') {
+        prefix.push_str(&line[separator..]);
+    } else {
+        prefix.push(':');
+        prefix.push(' ');
+        prefix.push_str(line[separator + 1..].trim_start());
+    }
+    Some(prefix)
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
