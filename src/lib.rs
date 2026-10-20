@@ -173,11 +173,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         );
         // Field syntax is contextual: do not rewrite local const/let/val,
         // actor state, method bodies, or trait signatures.
-        if keyword_stack.is_empty()
-            && in_direct_storage_container(&define_stack, &brace_stack)
-        {
-            content = canonicalize_storage_field_line(&content, lex)
-                .unwrap_or(content);
+        if keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack) {
+            content = canonicalize_storage_field_line(&content, lex).unwrap_or(content);
         }
         content =
             canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
@@ -679,16 +676,20 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
 // unimplemented named-struct storage, actor state, trait contracts, or
 // code nested within a callable.
 fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
-    let latest_define = define_stack.last().map(|frame| (
-        frame.order,
-        matches!(frame.kind, DefineKind::Class),
-    ));
-    let latest_brace = brace_stack.last().map(|frame| (
-        frame.order,
-        matches!(frame.kind, BraceKind::Class),
-    ));
+    let latest_define = define_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, DefineKind::Class)));
+    let latest_brace = brace_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, BraceKind::Class)));
     match (latest_define, latest_brace) {
-        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((a, value)), Some((b, other))) => {
+            if a > b {
+                value
+            } else {
+                other
+            }
+        }
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
@@ -748,9 +749,13 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
         return None;
     }
     let lhs = &line[..separator];
-    if lhs.chars().any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
-        || lhs.contains("//") || lhs.contains("/*")
-        || lhs.contains("->") || lhs.contains("=>")
+    if lhs
+        .chars()
+        .any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
+        || lhs.contains("//")
+        || lhs.contains("/*")
+        || lhs.contains("->")
+        || lhs.contains("=>")
     {
         return None;
     }
