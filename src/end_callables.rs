@@ -7,17 +7,20 @@
 //! formatter can own the final `end` normally. Strings and comments are
 //! opaque.
 
-use crate::{LexState, is_end_delimited_callable_header, visible_word_spans};
+use crate::{LexState, is_end_delimited_callable_header, scan_visible, visible_word_spans};
 
 pub(crate) fn normalize(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
+    let mut lex = LexState::default();
 
     for (line_index, line) in source.split('\n').enumerate() {
         if line_index != 0 {
             out.push('\n');
         }
 
-        let words = visible_word_spans(line, LexState::default());
+        let initial = lex;
+        scan_visible(line, &mut lex);
+        let words = visible_word_spans(line, initial);
         let Some(do_span) = words.iter().find(|span| {
             &line[span.start..span.end] == "do"
                 && is_end_delimited_callable_header(line[..span.end].trim())
@@ -26,8 +29,8 @@ pub(crate) fn normalize(source: &str) -> String {
             continue;
         };
 
-        let after_do = line[do_span.end..].trim();
-        if after_do.is_empty() {
+        let has_visible_body = words.iter().any(|span| span.start >= do_span.end);
+        if !has_visible_body {
             out.push_str(line);
             continue;
         }
