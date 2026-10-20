@@ -108,7 +108,7 @@ struct LexState {
     escape: bool,
 }
 
-/// Split the compiler's compact optional-`do` end-delimited callable form
+/// Split the compiler's compact optional-`as` end-delimited callable form
 /// before the ordinary line-oriented indentation pass. This is deliberately
 /// narrow: only free/module-style `fnc`/`routine` headers with an explicit
 /// slim arrow and a final visible `end` are expanded. Unsupported actor,
@@ -146,10 +146,10 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(line);
             continue;
         };
-        let Some(do_span) = words
+        let Some(as_span) = words
             .iter()
             .copied()
-            .find(|span| span.start > close && word(*span) == "do")
+            .find(|span| span.start > close && word(*span) == "as")
         else {
             output.push_str(line);
             continue;
@@ -158,12 +158,12 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(line);
             continue;
         };
-        if do_span.end > end_span.start {
+        if as_span.end > end_span.start {
             output.push_str(line);
             continue;
         }
 
-        let header_tail = &line[close + 1..do_span.start];
+        let header_tail = &line[close + 1..as_span.start];
         let mut header_lex = LexState::default();
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
@@ -181,8 +181,8 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             continue;
         }
 
-        let body = line[do_span.end..end_span.start].trim();
-        output.push_str(line[..do_span.end].trim_end());
+        let body = line[as_span.end..end_span.start].trim();
+        output.push_str(line[..as_span.end].trim_end());
         output.push('\n');
         if !body.is_empty() {
             output.push_str(body);
@@ -593,10 +593,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             indent += 1;
         } else if starts_word(structural, "if") && structural.contains('{') {
             keyword_stack.push(KeywordTerminator::FiBraced);
-        } else if opens_do_block(structural) && !branch_line && !end_delimited_callable {
-            // The optional `do` after a free/module callable return type is a
-            // semantics-free header/body separator. It closes with the
-            // callable's `end`, never with `done`.
+        } else if opens_do_block(structural) && !branch_line {
             keyword_stack.push(KeywordTerminator::Done);
             indent += 1;
         }
@@ -2833,18 +2830,24 @@ end
     }
 
     #[test]
-    fn expands_optional_do_compact_end_delimited_callables() {
-        let compact = "fnc identity(int x) -> int do return x; end\n";
-        let expected = "fnc identity(int x) -> int do\n  return x;\nend\n";
+    fn retired_callable_do_separator_fails_closed() {
+        assert!(format_source("fnc identity(int x) -> int do return x; end\n").is_err());
+        assert!(format_source("routine identity(int x) -> int do return x; end\n").is_err());
+    }
+
+    #[test]
+    fn expands_optional_as_compact_end_delimited_callables() {
+        let compact = "fnc identity(int x) -> int as return x; end\n";
+        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
         let got = format_source(compact).unwrap();
         assert_eq!(got, expected);
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
     #[test]
-    fn expands_optional_do_compact_keyword_control_flow() {
+    fn expands_optional_as_compact_keyword_control_flow() {
         let compact =
-            "fnc classify(int x) -> int do if x > 0 then return 1; else return 0; fi end\n";
+            "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
         let expected = r#"fnc classify(int x) -> int do
   if x > 0 then
     return 1;
@@ -2859,19 +2862,19 @@ end
     }
 
     #[test]
-    fn optional_do_after_higher_order_return_type_is_preserved() {
-        let compact = "fnc callback() -> () => void do return factory(); end\n";
+    fn optional_as_after_higher_order_return_type_is_preserved() {
+        let compact = "fnc callback() -> () => void as return factory(); end\n";
         let got = format_source(compact).unwrap();
-        assert!(got.starts_with("fnc callback() -> () => void do\n"));
+        assert!(got.starts_with("fnc callback() -> () => void as\n"));
         assert!(got.contains("  return factory();\n"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
     #[test]
     fn compact_callable_expands_before_nested_match_end_ownership() {
-        let src = "fnc classify(int x) -> int do match x 1 -> { return 1; } else -> { return 0; } end end\n";
+        let src = "fnc classify(int x) -> int as match x 1 -> { return 1; } else -> { return 0; } end end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc classify(int x) -> int do\n"));
+        assert!(got.starts_with("fnc classify(int x) -> int as\n"));
         assert!(got.contains("  match x"));
         assert!(got.contains("return 1;"));
         assert!(got.contains("return 0;"));
@@ -2881,10 +2884,10 @@ end
 
     #[test]
     fn compact_separator_can_precede_real_do_select_body() {
-        let src = r#"fnc consume(Channel<int> incoming) -> void do do select { case readch incoming: val number { return; } } end
+        let src = r#"fnc consume(Channel<int> incoming) -> void as do select { case readch incoming: val number { return; } } end
 "#;
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void do\n"));
+        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void as\n"));
         assert!(got.contains("  do select {\n"));
         assert!(got.contains("    when readch incoming: val number {\n"));
         assert!(got.ends_with("end\n"));
@@ -2915,52 +2918,52 @@ end
     }
 
     #[test]
-    fn multiline_callable_do_never_opens_a_done_frame() {
-        let src = "fnc identity(int x) -> int do\nreturn x\nend\n";
-        let expected = "fnc identity(int x) -> int do\n  return x;\nend\n";
+    fn multiline_callable_as_never_opens_a_done_frame() {
+        let src = "fnc identity(int x) -> int as\nreturn x\nend\n";
+        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
         let got = format_source(src).unwrap();
         assert_eq!(got, expected);
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
     #[test]
-    fn compact_callable_do_preserves_trailing_end_comment() {
-        let src = "fnc identity(int x) -> int do return x; end // callable\n";
+    fn compact_callable_as_preserves_trailing_end_comment() {
+        let src = "fnc identity(int x) -> int as return x; end // callable\n";
         let got = format_source(src).unwrap();
         assert!(got.contains("end // callable\n"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
     #[test]
-    fn compact_callable_do_ignores_delimiters_hidden_in_comments_and_literals() {
+    fn compact_callable_as_ignores_delimiters_hidden_in_comments_and_literals() {
         let src =
-            "fnc value() -> int /* ; do end */ do /* ; end */ return 7; end // do end\n";
+            "fnc value() -> int /* ; as do end */ as /* ; end */ return 7; end // as do end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc value() -> int /* ; do end */ do\n"));
+        assert!(got.starts_with("fnc value() -> int /* ; as do end */ as\n"));
         assert!(got.contains("  /* ; end */ return 7;\n"));
         assert!(got.ends_with("end // do end\n"));
         assert_eq!(format_source(&got).unwrap(), got);
 
-        let string_body = "fnc text() -> string do return \"do end fi;\"; end\n";
+        let string_body = "fnc text() -> string as return \"do end fi;\"; end\n";
         let string_got = format_source(string_body).unwrap();
         assert!(string_got.contains("  return \"do end fi;\";\n"));
         assert_eq!(format_source(&string_got).unwrap(), string_got);
     }
 
     #[test]
-    fn compact_callable_do_preserves_nested_lambda_boundaries() {
+    fn compact_callable_as_preserves_nested_lambda_boundaries() {
         let src =
-            "fnc make() -> () => string do return || -> { return \"do end\"; }; end\n";
+            "fnc make() -> () => string as return || -> { return \"do end\"; }; end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc make() -> () => string do\n"));
+        assert!(got.starts_with("fnc make() -> () => string as\n"));
         assert!(got.contains("return || -> {"));
         assert!(got.contains("\"do end\""));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
     #[test]
-    fn visible_semicolon_before_callable_do_is_not_reinterpreted_as_a_body() {
-        let src = "fnc bad() -> int; do return 1; end\n";
+    fn visible_semicolon_before_callable_as_is_not_reinterpreted_as_a_body() {
+        let src = "fnc bad() -> int; as return 1; end\n";
         assert!(format_source(src).is_err());
     }
 
@@ -2970,17 +2973,17 @@ end
         let once = format_source(source).unwrap();
         let twice = format_source(&once).unwrap();
         assert_eq!(twice, once);
-        assert!(once.contains("fnc identity(int x) -> int do\n"));
-        assert!(once.contains("fnc callback() -> () => void do\n"));
-        assert!(once.contains("fnc text() -> string /* ; do end */ do\n"));
-        assert!(once.contains("fnc double(int x) -> int do\n"));
+        assert!(once.contains("fnc identity(int x) -> int as\n"));
+        assert!(once.contains("fnc callback() -> () => void as\n"));
+        assert!(once.contains("fnc text() -> string /* ; as do end */ as\n"));
+        assert!(once.contains("fnc double(int x) -> int as\n"));
     }
 
     #[test]
-    fn routine_uses_the_same_end_delimited_do_formatting() {
-        let compact = "routine identity(int x) -> int do return x; end\n";
+    fn routine_uses_the_same_end_delimited_as_formatting() {
+        let compact = "routine identity(int x) -> int as return x; end\n";
         let got = format_source(compact).unwrap();
-        assert_eq!(got, "routine identity(int x) -> int do\n  return x;\nend\n");
+        assert_eq!(got, "routine identity(int x) -> int as\n  return x;\nend\n");
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
