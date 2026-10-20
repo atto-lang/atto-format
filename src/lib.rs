@@ -56,6 +56,7 @@ enum DefineKind {
     Contract,
     Trait,
     Struct,
+    Callable,
     Other,
 }
 
@@ -291,11 +292,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
 
+        let mut ended_end_callable = None;
         if starts_end {
             let frame = define_stack.last().ok_or_else(|| {
                 FormatError::new(
                     line_no,
-                    "encountered `end` without a matching define or switch block",
+                    "encountered `end` without a matching define, callable, or dispatch block",
                 )
             })?;
             if brace_stack.len() != frame.brace_depth || keyword_stack.len() != frame.keyword_depth
@@ -305,13 +307,19 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     "encountered `end` before closing a nested block",
                 ));
             }
+            if frame.kind == DefineKind::Callable {
+                ended_end_callable = Some(indent);
+            }
             define_stack.pop();
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
         let closes_multiline_method =
             pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
+            && is_end_delimited_callable_header(structural);
         let callable_body = is_callable_body_header(structural, signature_context)
+            || end_delimited_callable
             || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body || callable_signature {
@@ -320,7 +328,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         if callable_body {
             content = canonicalize_callable_arrow(&content, "->", lex);
         } else if callable_signature {
-            content = canonicalize_callable_arrow(&content, "=>", lex);
+            let desired = if nearest_contract_context(&define_stack, &brace_stack) {
+                "->"
+            } else {
+                "=>"
+            };
+            content = canonicalize_callable_arrow(&content, desired, lex);
         }
 
         let brace_depth_before_line = brace_stack.len();
@@ -392,7 +405,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let closes = brace_events.iter().filter(|&&c| c == '}').count();
         let mut callable_open_available = callable_body;
         let mut container_open_available = brace_container_kind(structural);
-        let mut ended_callable = None;
+        let mut ended_callable = ended_end_callable;
         for event in brace_events {
             match event {
                 '{' => {
@@ -456,6 +469,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                 });
                 indent += 1;
             }
+        }
+
+        if end_delimited_callable {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Callable,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
         }
 
         // Switch subjects may end with an optional semicolon, but the block
@@ -550,7 +574,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     if !define_stack.is_empty() {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
-            "unterminated define or switch block (expected `end`)",
+            "unterminated define, callable, or dispatch block (expected `end`)",
         ));
     }
     if let Some(terminator) = keyword_stack.last() {
@@ -696,6 +720,25 @@ fn is_closer_line(line: &str) -> bool {
 
 fn ends_statement(line: &str) -> bool {
     line.trim_end().ends_with(';')
+}
+
+fn nearest_contract_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let mut newest: Option<(usize, bool)> = None;
+
+    for frame in defines {
+        let is_contract = frame.kind == DefineKind::Contract;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, is_contract));
+        }
+    }
+    for frame in braces {
+        let is_contract = frame.kind == BraceKind::Contract;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, is_contract));
+        }
+    }
+
+    newest.map(|(_, is_contract)| is_contract).unwrap_or(false)
 }
 
 fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
@@ -1439,7 +1482,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
 
     for word in words {
         match word {
-            "pub" | "private" | "abstract" | "shared" | "untrusted" => continue,
+            "pub" | "private" | "abstract" | "shared" | "untrusted" | "static" => continue,
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
             "actor" | "isoactor" => return Some(DefineKind::Actor),
@@ -1476,6 +1519,39 @@ fn brace_container_kind(line: &str) -> Option<BraceKind> {
     } else {
         None
     }
+}
+
+fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let mut newest: Option<(usize, bool)> = None;
+
+    for frame in defines {
+        let allowed = frame.kind == DefineKind::Module;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, allowed));
+        }
+    }
+    for frame in braces {
+        let allowed = frame.kind == BraceKind::Module;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, allowed));
+        }
+    }
+
+    newest.map(|(_, allowed)| allowed).unwrap_or(true)
+}
+
+fn is_end_delimited_callable_header(structural: &str) -> bool {
+    let line = structural.trim();
+    if line.contains('{') || line.ends_with(';') || line.contains("actor") || line.contains("isoactor") {
+        return false;
+    }
+    if !(contains_word(line, "fnc") || contains_word(line, "routine")) || !line.contains('(') {
+        return false;
+    }
+    let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+        return false;
+    };
+    line[close + 1..].trim_start().starts_with("->")
 }
 
 fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
