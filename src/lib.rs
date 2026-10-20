@@ -108,6 +108,88 @@ struct LexState {
     escape: bool,
 }
 
+/// Split the compiler's compact optional-`do` end-delimited callable form
+/// before the ordinary line-oriented indentation pass. This is deliberately
+/// narrow: only free/module-style `fnc`/`routine` headers with an explicit
+/// slim arrow and a final visible `end` are expanded. Unsupported actor,
+/// static, or abstract callable forms remain untouched so the main formatter
+/// can fail closed on them.
+fn expand_compact_end_delimited_callables(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+
+    for (line_index, line) in source.split('\n').enumerate() {
+        if line_index != 0 {
+            output.push('\n');
+        }
+
+        let initial = lex;
+        let words = visible_word_spans(line, initial);
+        let mut next_lex = lex;
+        let _ = scan_visible(line, &mut next_lex);
+        lex = next_lex;
+
+        let word = |span: WordSpan| &line[span.start..span.end];
+        let forbidden = words.iter().any(|span| {
+            matches!(word(*span), "actor" | "isoactor" | "static" | "abstract")
+        });
+        if forbidden
+            || !words
+                .iter()
+                .any(|span| matches!(word(*span), "fnc" | "routine"))
+        {
+            output.push_str(line);
+            continue;
+        }
+
+        let Some(close) = callable_parameter_close(line, line.len(), initial) else {
+            output.push_str(line);
+            continue;
+        };
+        let Some(do_span) = words
+            .iter()
+            .copied()
+            .find(|span| span.start > close && word(*span) == "do")
+        else {
+            output.push_str(line);
+            continue;
+        };
+        let Some(end_span) = words.last().copied().filter(|span| word(*span) == "end") else {
+            output.push_str(line);
+            continue;
+        };
+        if do_span.end > end_span.start {
+            output.push_str(line);
+            continue;
+        }
+
+        let header_tail = &line[close + 1..do_span.start];
+        if !header_tail.contains("->") || header_tail.contains(';') {
+            output.push_str(line);
+            continue;
+        }
+
+        // Require the function-closing `end` to be the final raw token on the
+        // line. This keeps comments and unfamiliar trailing syntax on the
+        // existing fail-closed path rather than guessing at ownership.
+        if !line[end_span.end..].trim().is_empty() {
+            output.push_str(line);
+            continue;
+        }
+
+        let body = line[do_span.end..end_span.start].trim();
+        output.push_str(line[..do_span.end].trim_end());
+        output.push('\n');
+        if !body.is_empty() {
+            output.push_str(body);
+            output.push('\n');
+        }
+        output.push_str(&line[end_span.start..end_span.end]);
+    }
+
+    output
+}
+
 /// Format Oreslang source using the one canonical style.
 ///
 /// The current formatter is intentionally configuration-free:
@@ -137,6 +219,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
     let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
+    let normalized = expand_compact_end_delimited_callables(&normalized);
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
@@ -2735,6 +2818,41 @@ define module math as
 end
 "#;
         assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn expands_optional_do_compact_end_delimited_callables() {
+        let compact = "fnc identity(int x) -> int do return x; end\n";
+        let expected = "fnc identity(int x) -> int do\n  return x;\nend\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn expands_optional_do_compact_keyword_control_flow() {
+        let compact =
+            "fnc classify(int x) -> int do if x > 0 then return 1; else return 0; fi end\n";
+        let expected = r#"fnc classify(int x) -> int do
+  if x > 0 then
+    return 1;
+  else
+    return 0;
+  fi
+end
+"#;
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn optional_do_after_higher_order_return_type_is_preserved() {
+        let compact = "fnc callback() -> () => void do return factory(); end\n";
+        let got = format_source(compact).unwrap();
+        assert!(got.starts_with("fnc callback() -> () => void do\n"));
+        assert!(got.contains("  return factory();\n"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
