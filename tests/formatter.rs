@@ -236,7 +236,7 @@ end
 fn module_owned_class_is_indented_as_a_module_member() {
     let src = r#"define module Accounts as
 define class Account as
-pub let int balance = 100;
+pub int balance: 100;
 
 pub read() => int {
 return self.balance;
