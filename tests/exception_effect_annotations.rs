@@ -93,7 +93,7 @@ fn exceptional_effect_keywords_in_comments_and_strings_do_not_create_clauses() {
 "#;
     let formatted = format_source(source).expect("comments and strings are opaque");
     assert!(formatted.contains("// throws(Error), raises(Error), panics(Error)"));
-    assert!(formatted.contains("\\"throws(Error) raises(Error) panics(Error)\\""));
+    assert!(formatted.contains("\"throws(Error) raises(Error) panics(Error)\""));
     assert!(!formatted.contains("informational() -> String throws("));
     assert!(!formatted.contains("informational() -> String raises("));
     assert!(!formatted.contains("informational() -> String panics("));
