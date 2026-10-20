@@ -1542,7 +1542,7 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
 
 fn is_end_delimited_callable_header(structural: &str) -> bool {
     let line = structural.trim();
-    if line.contains('{') || line.ends_with(';') || line.contains("actor") || line.contains("isoactor") {
+    if line.contains('{') || line.ends_with(';') || contains_word(line, "actor") || contains_word(line, "isoactor") {
         return false;
     }
     if !(contains_word(line, "fnc") || contains_word(line, "routine")) || !line.contains('(') {
@@ -2580,8 +2580,8 @@ define contract BraceContract {
 "#;
 
         let got = format_source(src).unwrap();
-        assert!(got.contains("fnc end_sig() => String;"));
-        assert!(got.contains("fnc brace_sig() => String;"));
+        assert!(got.contains("fnc end_sig() -> String;"));
+        assert!(got.contains("fnc brace_sig() -> String;"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
@@ -2671,6 +2671,89 @@ define contract BraceContract {
             assert_eq!(got, "pub async isoactor fnc private_worker() {\n}\n");
         }
         assert_eq!(isoactor_cases, 24);
+    }
+
+    #[test]
+    fn formats_end_delimited_free_and_module_callables() {
+        let src = r#"fnc classify(int x) -> int
+if x > 0 then
+return 1
+else
+return 0
+fi
+end
+
+define module math as
+fnc identity(int x) -> int
+return x
+end
+end
+"#;
+
+        let got = format_source(src).unwrap();
+        let expected = r#"fnc classify(int x) -> int
+  if x > 0 then
+    return 1;
+  else
+    return 0;
+  fi
+end
+
+
+define module math as
+  fnc identity(int x) -> int
+    return x;
+  end
+end
+"#;
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn contract_arrows_are_executable_style_but_interfaces_stay_type_level() {
+        let src = r#"define contract ModuleApi as
+  fnc load(int id) => tuple (int, string);
+end
+
+define static contract StaticApi as
+  fnc build(int id): Result<Option<tuple (int, string)>, string>;
+end
+
+define interface InstanceApi as
+  fnc run(int id) -> int;
+end
+
+define trait Retryable as
+  fnc retry(): bool;
+end
+"#;
+
+        let got = format_source(src).unwrap();
+        assert!(got.contains("fnc load(int id) -> tuple (int, string);"));
+        assert!(got.contains(
+            "fnc build(int id) -> Result<Option<tuple (int, string)>, string>;"
+        ));
+        assert!(got.contains("fnc run(int id) => int;"));
+        assert!(got.contains("fnc retry() => bool;"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn end_delimited_actor_or_class_methods_are_not_accepted_as_free_callable_frames() {
+        let class_method = r#"define class C as
+  run(int x) -> int
+    return x
+  end
+end
+"#;
+        assert!(format_source(class_method).is_err());
+
+        let actor_callable = r#"actor fnc run(int x) -> int
+  return x
+end
+"#;
+        assert!(format_source(actor_callable).is_err());
     }
 
     #[test]
