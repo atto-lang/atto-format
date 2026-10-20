@@ -2848,7 +2848,7 @@ end
     fn expands_optional_as_compact_keyword_control_flow() {
         let compact =
             "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
-        let expected = r#"fnc classify(int x) -> int do
+        let expected = r#"fnc classify(int x) -> int as
   if x > 0 then
     return 1;
   else
@@ -2941,7 +2941,7 @@ end
         let got = format_source(src).unwrap();
         assert!(got.starts_with("fnc value() -> int /* ; as do end */ as\n"));
         assert!(got.contains("  /* ; end */ return 7;\n"));
-        assert!(got.ends_with("end // do end\n"));
+        assert!(got.ends_with("end // as do end\n"));
         assert_eq!(format_source(&got).unwrap(), got);
 
         let string_body = "fnc text() -> string as return \"do end fi;\"; end\n";
