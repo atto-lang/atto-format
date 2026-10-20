@@ -2868,6 +2868,18 @@ end
     }
 
     #[test]
+    fn compact_callable_expands_before_nested_match_end_ownership() {
+        let src = "fnc classify(int x) -> int do match x 1 -> { return 1; } else -> { return 0; } end end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc classify(int x) -> int do\n"));
+        assert!(got.contains("  match x"));
+        assert!(got.contains("return 1;"));
+        assert!(got.contains("return 0;"));
+        assert!(got.ends_with("end\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
     fn compact_separator_can_precede_real_do_select_body() {
         let src = r#"fnc consume(Channel<int> incoming) -> void do do select { case readch incoming: val number { return; } } end
 "#;
