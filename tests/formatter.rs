@@ -1760,3 +1760,32 @@ end
     assert!(!got.contains("string label: \"ok\""), "{got}");
     assert_eq!(got, format_source(&got).unwrap());
 }
+
+
+#[test]
+fn quotes_and_template_interpolations_remain_byte_for_byte_intact() {
+    let src = r#"pub fnc main(): void {
+const foo1 = "abc";
+const foo2 = "'abc'";
+const foo3 = '"abc"';
+const foo4 = `'"abc"'`;
+const bar = "Mars";
+const star = "bright";
+const greeting = `${bar} is ${star}`;
+const escaped = `escaped \${notInterpolated} and \``;
+return;
+}
+"#;
+    let once = format_source(src).unwrap();
+    for fragment in [
+        r#""abc""#,
+        r#""'abc'""#,
+        r#"'"abc"'"#,
+        r#"`'"abc"'`"#,
+        r#"`${bar} is ${star}`"#,
+        r#"`escaped \${notInterpolated} and \``"#,
+    ] {
+        assert!(once.contains(fragment), "changed string literal: {fragment}; got {once}");
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
