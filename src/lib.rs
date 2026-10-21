@@ -508,14 +508,14 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let mut body_lex = LexState::default();
         let visible_body: String = scan_visible(body, &mut body_lex).into_iter().collect();
         let body_words = visible_word_spans(&visible_body, LexState::default());
-        if visible_body.trim_start().starts_with("::")
+        if visible_body.trim_start().starts_with(':')
             || body_words
                 .first()
                 .is_some_and(|span| &visible_body[span.start..span.end] == "as")
         {
             return Err(FormatError::new(
                 line_index + 1,
-                "callable body must not repeat or mix as and :: separators",
+                "callable body separator must be exactly one 'as' or one contiguous '::'",
             ));
         }
         output.push_str(line[..separator_span.end].trim_end());
@@ -3570,6 +3570,17 @@ end
             "fnc l() -> struct {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn double_colon_separator_has_exact_lexical_boundaries() {
+        for source in [
+            "fnc a() -> int ::: return 1; end\n",
+            "fnc b() -> int : : return 1; end\n",
+            "fnc c() -> int; :: return 1; end\n",
+        ] {
+            assert!(format_source(source).is_err(), "{source}");
         }
     }
 
