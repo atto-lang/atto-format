@@ -1760,3 +1760,35 @@ end
     assert!(!got.contains("string label: \"ok\""), "{got}");
     assert_eq!(got, format_source(&got).unwrap());
 }
+
+#[test]
+fn both_typed_pipe_lambda_parameter_orders_format_to_one_canonical_spelling() {
+    let source = r#"const fnc first = |string bar, string star| -> {
+  return bar + star;
+};
+const fnc second = |bar: string, star: string| -> {
+  return bar + star;
+};
+const expr = |left: Option<string>, right: string| -> left;
+"#;
+    let formatted = format_source(source).expect("format both typed lambda styles");
+    assert!(formatted.contains("const fnc first = |string bar, string star| -> {"), "{formatted}");
+    assert!(formatted.contains("const fnc second = |string bar, string star| -> {"), "{formatted}");
+    assert!(formatted.contains("const expr = |Option<string> left, string right| -> left;"), "{formatted}");
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn typed_pipe_lambda_formatting_keeps_literals_and_other_pipes_unchanged() {
+    let source = r#"const quote = "|bar: string| -> ignore";
+const flag = a | b;
+const fnc second = |bar: string| -> {
+  return bar;
+};
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains(r#"const quote = "|bar: string| -> ignore";"#), "{formatted}");
+    assert!(formatted.contains("const flag = a | b;"), "{formatted}");
+    assert!(formatted.contains("const fnc second = |string bar| -> {"), "{formatted}");
+    assert!(is_formatted(&formatted).unwrap());
+}
