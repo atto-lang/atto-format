@@ -41,6 +41,7 @@ the full field contract.
 ## Canonical style
 
 - two spaces per indentation level, never tabs for indentation;
+- callable parameter lists are expanded one parameter per line when they have 4+ parameters, or when they have 3+ parameters and either a parameter name contains at least two underscores or the combined parameter-name width exceeds 60 columns; continuation parameters are indented one additional two-space level and the closing `)` returns to the callable declaration indentation;
 - static `select`, `nb select`, and `try select` arms are indented one level;
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
