@@ -251,7 +251,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub let int balance = 100;
+    pub int balance: 100;
 
     pub read() -> int {
       return self.balance;
@@ -270,14 +270,14 @@ end
 #[test]
 fn tuple_and_fixed_sequence_metadata_remain_stable() {
     let src = r#"fnc build() => void {
-val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
 val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
 return;
 }
 "#;
 
     let expected = r#"fnc build() -> void {
-  val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+  val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
   val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
   return;
 }
@@ -1553,4 +1553,34 @@ fnc use(): int {
         assert!(once.contains(preserved), "{preserved}: {once}");
     }
     assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn typed_lambda_and_explicit_tuple_record_forms_are_stable() {
+    let source = r#"type Mapper = (int) => int;
+fnc demo(): void {
+const mapper: Mapper = |int n| -> (n * 3) as int;
+const declared = |int n|: int -> n * 3;
+const pair = tuple(4, "four");
+const singleton = tuple(7) as tuple[int];
+const point = struct{x: int, y: int}{x: 3, y: 5};
+const just_x = point as {x: int};
+return;
+}
+"#;
+    let formatted = format_source(source).expect("valid typed lambda and aggregate syntax");
+    for fragment in [
+        "|int n| -> (n * 3) as int",
+        "|int n|: int -> n * 3",
+        "tuple(4, \"four\")",
+        "tuple(7) as tuple[int]",
+        "struct{x: int, y: int}{x: 3, y: 5}",
+        "point as {x: int}",
+    ] {
+        assert!(
+            formatted.contains(fragment),
+            "formatter lost the required syntax {fragment:?}: {formatted}"
+        );
+    }
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }

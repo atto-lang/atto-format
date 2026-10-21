@@ -6,6 +6,38 @@ There is deliberately **one format and no style configuration**. The same Rust
 library powers the CLI, so editor integrations, CI, and local development use
 identical behavior.
 
+## Canonical concrete field syntax (pre-1.0)
+
+In direct class member declarations, use `final` to seal
+the member slot and `mut` to permit mutation through a referenced value.
+Local binding declarations retain `const` / `val` / `let` and `=`.
+
+```ores
+define class Foo as
+  int counter: 5;
+  final int limit: 6;
+  final mut Map cache: new Map();
+end
+```
+
+The formatter migrates typed member `let T x = value` to `T x: value`,
+`const T x = value` to `final T x: value`, and
+`val T x = value` to `final mut T x: value` (with analogous
+`const mut` and `let mut` forms). Rewrites are limited to recognized
+direct class members; ambiguous declarations are preserved for
+compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
+or lexical declarations inside callables.
+
+Uninitialized legacy class members (including `val T x;` followed by
+constructor-body initialization) are deliberately left unchanged. Rewriting
+them to `final mut T x;` would manufacture a compiler error before the
+coordinated breaking migration has removed those legacy semantics.
+
+The language's final initialization rules are compiler constraints, not
+formatter transformations. Formatting does not make an uninitialized final
+field valid, and formatter output is not proof that all backends support
+the full field contract.
+
 ## Canonical style
 
 - two spaces per indentation level, never tabs for indentation;
@@ -20,7 +52,8 @@ identical behavior.
   explicit `method name(...)` remains explicit, and `static fnc` is preserved;
   instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
-- interface/trait callable signatures use the type-level fat arrow `=>`;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; an optional semantics-free `as` may separate the complete return type from the body and permits compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
@@ -35,7 +68,7 @@ For example:
 
 ```ores
 pub define class User extends Entity implements Named, Serializable as
-  pub val String name;
+  pub final String name: "guest";
 end
 
 fnc pub async refresh() {
@@ -57,6 +90,20 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `struct`, actor/braced bodies, `end`, `if`/`fi`, and `do`/`done`. In particular,
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
+
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
+
+```ores
+fnc classify(int x) -> tuple (int, int, string) as
+  if x > 0 then
+    return (1, x, "positive");
+  else
+    return (0, x, "non-positive");
+  fi
+end
+```
+
+The formatter recognizes this only at file/module declaration scope and only with an explicit slim-arrow return type. A callable-header `do` is never interpreted as a `done`-terminated control-flow block; compact `do ... end` source is expanded before structural indentation. It fails closed instead of interpreting an `end`-delimited class method, static class implementation, or actor callable as a free function. The contextual `tuple (...)` spelling is preserved as a type spelling; formatting does not invent a separate tuple runtime form.
 
 Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
 `if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
