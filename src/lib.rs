@@ -108,6 +108,78 @@ struct LexState {
     escape: bool,
 }
 
+fn top_level_visible_type_words(text: &str) -> Vec<WordSpan> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut words = Vec::new();
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let (start, c) = chars[i];
+        match c {
+            '(' => { paren += 1; i += 1; continue; }
+            ')' => { paren = paren.saturating_sub(1); i += 1; continue; }
+            '[' => { bracket += 1; i += 1; continue; }
+            ']' => { bracket = bracket.saturating_sub(1); i += 1; continue; }
+            '{' => { brace += 1; i += 1; continue; }
+            '}' => { brace = brace.saturating_sub(1); i += 1; continue; }
+            '<' => { angle += 1; i += 1; continue; }
+            '>' if angle > 0 => { angle -= 1; i += 1; continue; }
+            _ => {}
+        }
+
+        if paren == 0 && bracket == 0 && brace == 0 && angle == 0 && is_ident_char(c) {
+            let mut end = start + c.len_utf8();
+            i += 1;
+            while i < chars.len() && is_ident_char(chars[i].1) {
+                end = chars[i].0 + chars[i].1.len_utf8();
+                i += 1;
+            }
+            words.push(WordSpan { start, end });
+            continue;
+        }
+        i += 1;
+    }
+
+    words
+}
+
+fn header_tail_has_ambiguous_bare_words(visible_header: &str) -> bool {
+    let Some(arrow) = visible_header.find("->") else {
+        return false;
+    };
+    let tail = &visible_header[arrow + 2..];
+    let words = top_level_visible_type_words(tail);
+
+    for index in 1..words.len() {
+        let previous = words[index - 1];
+        let current = words[index];
+        if !tail[previous.end..current.start].chars().all(char::is_whitespace) {
+            continue;
+        }
+
+        let previous_word = &tail[previous.start..previous.end];
+        let current_word = &tail[current.start..current.end];
+        let amp_mut = previous_word == "mut"
+            && (index >= 2
+                && &tail[words[index - 2].start..words[index - 2].end] == "borrow"
+                || tail[..previous.start].trim_end().ends_with('&'));
+        let legal_type_pair = previous_word == "type"
+            || previous_word == "borrow"
+            || amp_mut
+            || (previous_word == "typeof" && current_word == "fnc");
+
+        if !legal_type_pair {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn visible_double_colon_span(line: &str, after: usize, initial: LexState) -> Option<WordSpan> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let mut state = initial;
@@ -270,6 +342,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             || visible_header.contains('{')
             || visible_header.contains('}')
             || contains_body_word
+            || header_tail_has_ambiguous_bare_words(&visible_header)
         {
             output.push_str(line);
             continue;
@@ -3315,6 +3388,31 @@ end
     fn body_level_cast_as_cannot_impersonate_callable_separator() {
         let src = "fnc casty() -> int return value as int; end\n";
         assert!(format_source(src).is_err());
+        assert!(format_source("fnc casty() -> int value as Foo; end\n").is_err());
+    }
+
+    #[test]
+    fn body_level_static_access_cannot_impersonate_double_colon_separator() {
+        assert!(format_source("fnc bad() -> int Math::answer(); end\n").is_err());
+        assert!(format_source(
+            "routine bad() -> Result<int, string> Math::answer(); end\n"
+        ).is_err());
+    }
+
+    #[test]
+    fn separator_guard_accepts_complete_complex_return_types() {
+        for source in [
+            "fnc a() -> Result<int, string> :: return Ok(1); end\n",
+            "fnc b() -> tuple (int, string) :: return (1, \"x\"); end\n",
+            "fnc c() -> () => void :: return || -> { return; }; end\n",
+            "fnc d() -> borrow Thing :: return value; end\n",
+            "fnc e() -> borrow mut Thing :: return value; end\n",
+            "fnc f() -> & mut Thing :: return value; end\n",
+            "fnc g() -> type Thing :: return value; end\n",
+            "fnc h() -> typeof fnc(int x) => string :: return callback; end\n",
+        ] {
+            assert!(format_source(source).is_ok(), "{source}");
+        }
     }
 
     #[test]
