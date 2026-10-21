@@ -33,3 +33,4 @@ fn task_and_suspends_lambda_are_preserved_as_distinct_effects() {
     assert!(output.contains("suspends |int x| -> x"), "{output}");
     assert_eq!(format_source(&output).expect("idempotence"), output);
 }
+

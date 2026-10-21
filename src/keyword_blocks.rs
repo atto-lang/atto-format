@@ -115,7 +115,7 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
 fn is_keyword_delimiter(tokens: &[Token<'_>], index: usize) -> bool {
     let prev = index.checked_sub(1).and_then(|i| tokens.get(i));
     let next = tokens.get(index + 1);
-    !prev.is_some_and(|token| token.text == ".")
+    prev.is_none_or(|token| token.text != ".")
         && !next.is_some_and(|token| matches!(token.text, "(" | "[" | "."))
 }
 
