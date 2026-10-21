@@ -52,7 +52,7 @@ the full field contract.
   explicit `method name(...)` remains explicit, and `static fnc` is preserved;
   instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
-- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; an optional semantics-free `as` may separate the complete return type from the body and permits compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; optional semantics-free `as` or `::` may separate the complete return type from the body and permit compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
 - module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
@@ -94,7 +94,7 @@ only after the class header and is closed by its matching `end`.
 End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
 
 ```ores
-fnc classify(int x) -> tuple (int, int, string) as
+fnc classify(int x) -> tuple (int, int, string) ::
   if x > 0 then
     return (1, x, "positive");
   else
