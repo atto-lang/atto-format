@@ -350,6 +350,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             &content,
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
+            keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
         // Field syntax is contextual: do not rewrite local const/let/val,
         // actor state, method bodies, or trait signatures.
@@ -1104,7 +1105,108 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
     Some(prefix)
 }
 
-fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
+// Only erase the redundant qualifier in a proven single literal field.
+// oreslang-format is not a compiler: even apparently pure calls, references
+// and arithmetic must remain untouched until semantic constant folding exists.
+fn canonicalize_final_const_literal_field(line: &str, words: &[WordSpan]) -> Option<String> {
+    let word = |i: usize| words.get(i).map(|span| &line[span.start..span.end]);
+    let mut i = 0;
+    if matches!(word(i), Some("pub" | "private")) {
+        i += 1;
+    }
+    if word(i) != Some("final") || word(i + 1) != Some("const") {
+        return None;
+    }
+    let ty = word(i + 2)?;
+    if !matches!(ty, "int" | "bool" | "string") {
+        return None;
+    }
+    let name = *words.get(i + 3)?;
+    if !plain_word_prefix(line, &words[..=i + 3]) {
+        return None;
+    }
+    let tail = line[name.end..].trim_start();
+    let initializer = tail
+        .strip_prefix(':')
+        .or_else(|| tail.strip_prefix('='))?
+        .trim_start();
+    if !is_single_compile_time_literal(initializer, ty) {
+        return None;
+    }
+    let token = words[i + 1];
+    let mut result = String::with_capacity(line.len());
+    result.push_str(&line[..token.start]);
+    result.push_str(line[token.end..].trim_start_matches(|c: char| c.is_whitespace()));
+    Some(result)
+}
+
+// Literal-only: no evaluation, macro expansion, calls, names, or binary
+// operators. Trailing semicolons and line comments are permitted.
+fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
+    let end = if ty == "string" {
+        if !initializer.starts_with('"') {
+            return false;
+        }
+        let mut escaped = false;
+        let mut close = None;
+        for (offset, ch) in initializer.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                close = Some(offset + 1);
+                break;
+            }
+        }
+        match close {
+            // Conservative UTF-8 source-byte limit: Java's constant evaluator
+            // limits the decoded UTF-16 string to 65,536 code units. If the
+            // literal's raw byte length exceeds that budget, leave 'const'
+            // intact rather than potentially erasing a compiler diagnostic.
+            // This can preserve some valid escaped/non-ASCII strings, which
+            // is safe for an untyped standalone formatter.
+            Some(pos) if pos.saturating_sub(2) <= 65_536 => pos,
+            _ => return false,
+        }
+    } else if ty == "bool" {
+        if initializer.starts_with("true") {
+            4
+        } else if initializer.starts_with("false") {
+            5
+        } else {
+            return false;
+        }
+    } else {
+        let end = initializer
+            .bytes()
+            .take_while(|b| b.is_ascii_digit() || *b == b'_')
+            .count();
+        if end == 0 {
+            return false;
+        }
+        let digits = &initializer[..end];
+        if digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
+            return false;
+        }
+        // Only normalize a lexical integer that the compiler can represent.
+        // In particular never erase 'const' from an overflowing i64 literal.
+        if digits.replace('_', "").parse::<i64>().is_err() {
+            return false;
+        }
+        end
+    };
+    let tail = initializer[end..].trim_start();
+    let tail = tail.strip_prefix(';').unwrap_or(tail).trim_start();
+    tail.is_empty() || tail.starts_with("//")
+}
+
+fn canonicalize_declaration_line(
+    line: &str,
+    initial: LexState,
+    instance_member: bool,
+    class_member: bool,
+) -> String {
     let words = visible_word_spans(line, initial);
     if words.is_empty() {
         return line.to_string();
@@ -1113,6 +1215,11 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
     (instance_member
         .then(|| canonicalize_instance_method_fnc(line, &words))
         .flatten())
+    .or_else(|| {
+        class_member
+            .then(|| canonicalize_final_const_literal_field(line, &words))
+            .flatten()
+    })
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_defined_type_alias(line, &words))
