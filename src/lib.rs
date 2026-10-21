@@ -174,6 +174,45 @@ fn normalize_header_type_source(text: &str) -> Option<String> {
     Some(out)
 }
 
+fn type_delimiters_balanced(text: &str) -> bool {
+    let mut stack: Vec<char> = Vec::new();
+    let mut previous: Option<char> = None;
+
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' | '<' => stack.push(c),
+            ')' => {
+                if stack.pop() != Some('(') {
+                    return false;
+                }
+            }
+            ']' => {
+                if stack.pop() != Some('[') {
+                    return false;
+                }
+            }
+            '}' => {
+                if stack.pop() != Some('{') {
+                    return false;
+                }
+            }
+            '>' => {
+                if stack.last() == Some(&'<') {
+                    stack.pop();
+                } else if previous != Some('=') {
+                    // The only unmatched '>' admitted by the type grammar is
+                    // the second character of the function-type fat arrow.
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        previous = Some(c);
+    }
+
+    stack.is_empty()
+}
+
 fn top_level_type_chunks(text: &str) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start: Option<usize> = None;
@@ -310,7 +349,11 @@ fn header_tail_is_complete_type(header_source: &str) -> bool {
     let Some(arrow) = normalized.find("->") else {
         return false;
     };
-    let chunks = top_level_type_chunks(normalized[arrow + 2..].trim());
+    let type_source = normalized[arrow + 2..].trim();
+    if !type_delimiters_balanced(type_source) {
+        return false;
+    }
+    let chunks = top_level_type_chunks(type_source);
     if chunks.is_empty() {
         return false;
     }
@@ -3527,6 +3570,19 @@ end
             "fnc l() -> struct {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn separator_guard_rejects_unbalanced_or_stray_type_delimiters() {
+        for source in [
+            "fnc a() -> Result<int :: return value; end\n",
+            "fnc b() -> tuple (int, string :: return value; end\n",
+            "fnc c() -> {foo: int, bar: string :: return value; end\n",
+            "fnc d() -> struct {foo: int :: return value; end\n",
+            "fnc e() -> Thing> :: return value; end\n",
+        ] {
+            assert!(format_source(source).is_err(), "{source}");
         }
     }
 
