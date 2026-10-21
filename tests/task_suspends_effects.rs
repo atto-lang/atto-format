@@ -4,7 +4,10 @@ use oreslang_format::format_source;
 fn suspend_alias_canonicalizes_to_suspends_callable_effect() {
     let source = "suspend pub fnc load() -> int {\n  return 7;\n}\n";
     let output = format_source(source).expect("format");
-    assert!(output.contains("pub suspends fnc load() -> int {"), "{output}");
+    assert!(
+        output.contains("pub suspends fnc load() -> int {"),
+        "{output}"
+    );
     assert_eq!(format_source(&output).expect("idempotence"), output);
 }
 
@@ -12,7 +15,10 @@ fn suspend_alias_canonicalizes_to_suspends_callable_effect() {
 fn suspends_is_preserved_when_reordering_legal_declaration_modifiers() {
     let source = "suspends pub fnc run() -> int {\n  return 2;\n}\n";
     let output = format_source(source).expect("format");
-    assert!(output.contains("pub suspends fnc run() -> int {"), "{output}");
+    assert!(
+        output.contains("pub suspends fnc run() -> int {"),
+        "{output}"
+    );
     assert_eq!(format_source(&output).expect("idempotence"), output);
 }
 
@@ -33,4 +39,3 @@ fn task_and_suspends_lambda_are_preserved_as_distinct_effects() {
     assert!(output.contains("suspends |int x| -> x"), "{output}");
     assert_eq!(format_source(&output).expect("idempotence"), output);
 }
-
