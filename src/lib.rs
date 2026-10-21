@@ -303,11 +303,14 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
     true
 }
 
-fn header_tail_is_complete_type(visible_header: &str) -> bool {
-    let Some(arrow) = visible_header.find("->") else {
+fn header_tail_is_complete_type(header_source: &str) -> bool {
+    let Some(normalized) = normalize_header_type_source(header_source) else {
         return false;
     };
-    let chunks = top_level_type_chunks(visible_header[arrow + 2..].trim());
+    let Some(arrow) = normalized.find("->") else {
+        return false;
+    };
+    let chunks = top_level_type_chunks(normalized[arrow + 2..].trim());
     if chunks.is_empty() {
         return false;
     }
@@ -438,46 +441,9 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
             .collect();
-        let visible_header_words = visible_word_spans(&visible_header, LexState::default());
-        let contains_body_word = visible_header_words.iter().any(|span| {
-            matches!(
-                &visible_header[span.start..span.end],
-                "return"
-                    | "if"
-                    | "elif"
-                    | "else"
-                    | "fi"
-                    | "do"
-                    | "done"
-                    | "select"
-                    | "match"
-                    | "switch"
-                    | "const"
-                    | "let"
-                    | "val"
-                    | "for"
-                    | "while"
-                    | "loop"
-                    | "try"
-                    | "catch"
-                    | "finally"
-                    | "throw"
-                    | "raise"
-                    | "panic"
-                    | "await"
-                    | "spawn"
-                    | "break"
-                    | "continue"
-                    | "yield"
-                    | "defer"
-            )
-        });
         if !visible_header.contains("->")
             || visible_header.contains(';')
-            || visible_header.contains('{')
-            || visible_header.contains('}')
-            || contains_body_word
-            || !header_tail_is_complete_type(&visible_header)
+            || !header_tail_is_complete_type(header_tail)
         {
             output.push_str(line);
             continue;
@@ -3555,6 +3521,10 @@ end
             "fnc f() -> & mut Thing :: return value; end\n",
             "fnc g() -> type Thing :: return value; end\n",
             "fnc h() -> typeof fnc(int x) => string :: return callback; end\n",
+            "fnc i() -> &mut Thing :: return value; end\n",
+            "fnc j() -> \"ok value\" :: return \"ok value\"; end\n",
+            "fnc k() -> {foo: int, bar: string} :: return value; end\n",
+            "fnc l() -> struct {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
         }
