@@ -481,6 +481,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
+    // Legacy/hand-formatted explicit callable headers may already split their
+    // parameter list across physical lines. Reassemble only that narrow header
+    // shape first so the canonical wrapping rule sees the entire parameter set.
+    let normalized = collapse_multiline_explicit_callable_headers(&normalized);
     // Expand a compact end-delimited callable before nested dispatch
     // normalizers insert line breaks. Otherwise a body beginning with
     // `do select` / match / switch can be split before the outer callable
@@ -505,9 +509,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     // changing the structural brace/keyword nesting used by the language.
     let mut lambda_expr_continuation: Option<usize> = None;
     let mut pending_assignment_continuation = false;
-    // Parenthesized instance-method parameters can span lines. Preserve one
+    // Parenthesized callable parameters can span lines. Preserve one
     // continuation indent without treating their declarations as statements.
-    let mut pending_method_parameter_depth = 0usize;
+    // Explicit fnc/routine headers also carry enough state to recognize
+    // end-delimited callables when the return/body suffix is on the closing line.
+    let mut pending_callable_parameter_depth = 0usize;
+    let mut pending_explicit_callable_parameters = false;
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
@@ -570,7 +577,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         // Field syntax is contextual: do not rewrite local const/let/val,
         // actor state, method bodies, or trait signatures.
         if keyword_stack.is_empty()
-            && pending_method_parameter_depth == 0
+            && pending_callable_parameter_depth == 0
             && in_direct_storage_container(&define_stack, &brace_stack)
         {
             content = canonicalize_storage_field_line(&content, lex).unwrap_or(content);
@@ -669,14 +676,20 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
-        let closes_multiline_method =
-            pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        let closes_multiline_callable =
+            pending_callable_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        let multiline_end_delimited_callable = closes_multiline_callable
+            && pending_explicit_callable_parameters
+            && is_multiline_end_delimited_callable_close(structural);
         let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
-            && is_end_delimited_callable_header(structural);
+            && (is_end_delimited_callable_header(structural) || multiline_end_delimited_callable);
         let callable_body = is_callable_body_header(structural, signature_context)
             || end_delimited_callable
-            || (closes_multiline_method && structural.contains('{'));
-        let callable_signature = is_callable_signature(structural, signature_context);
+            || (closes_multiline_callable && structural.contains('{'));
+        let callable_signature = is_callable_signature(structural, signature_context)
+            || (closes_multiline_callable
+                && signature_context
+                && structural.trim_end().ends_with(';'));
         if callable_body || callable_signature {
             content = canonicalize_callable_parameter_order(&content, lex);
         }
@@ -690,6 +703,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             };
             content = canonicalize_callable_arrow(&content, desired, lex);
         }
+        let callable_parameter_layout = if callable_body || callable_signature {
+            wrap_callable_parameter_list(&content, lex)
+        } else {
+            None
+        };
 
         let brace_depth_before_line = brace_stack.len();
         let assignment_lambda_continuation =
@@ -697,7 +715,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let current_indent = indent
             + usize::from(lambda_expr_continuation.is_some())
             + usize::from(assignment_lambda_continuation)
-            + usize::from(pending_method_parameter_depth > 0 && !closes_multiline_method);
+            + usize::from(pending_callable_parameter_depth > 0 && !closes_multiline_callable);
         let annotation_line = structural.starts_with('@');
         let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
@@ -748,7 +766,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             block_comment_indent_shift =
                 (current_indent * INDENT.len()) as isize - leading as isize;
         }
-        out.push(format!("{}{}", INDENT.repeat(current_indent), content));
+        if let Some(layout) = callable_parameter_layout {
+            for (indent_offset, line) in layout {
+                out.push(format!(
+                    "{}{}",
+                    INDENT.repeat(current_indent + indent_offset),
+                    line
+                ));
+            }
+        } else {
+            out.push(format!("{}{}", INDENT.repeat(current_indent), content));
+        }
 
         let brace_events: Vec<char> = structural
             .chars()
@@ -880,30 +908,39 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
         let parens_open = structural.chars().filter(|&ch| ch == '(').count();
         let parens_close = structural.chars().filter(|&ch| ch == ')').count();
-        if pending_method_parameter_depth > 0 {
-            let depth = pending_method_parameter_depth + parens_open;
+        if pending_callable_parameter_depth > 0 {
+            let depth = pending_callable_parameter_depth + parens_open;
             if parens_close > depth {
                 return Err(FormatError::new(
                     line_no,
-                    "unbalanced multiline method parameters",
+                    "unbalanced multiline callable parameters",
                 ));
             }
-            pending_method_parameter_depth = depth - parens_close;
-        } else if keyword_stack.is_empty()
-            && in_direct_instance_container(&define_stack, &brace_stack)
-            && structural.trim_end().ends_with('(')
-            && !structural.contains('=')
-            && !structural.contains('.')
-            && parens_open > parens_close
-        {
-            pending_method_parameter_depth = parens_open - parens_close;
+            pending_callable_parameter_depth = depth - parens_close;
+            if pending_callable_parameter_depth == 0 {
+                pending_explicit_callable_parameters = false;
+            }
+        } else {
+            let explicit_callable =
+                contains_word(structural, "fnc") || contains_word(structural, "routine");
+            let instance_method = keyword_stack.is_empty()
+                && in_direct_instance_container(&define_stack, &brace_stack)
+                && !structural.contains('=')
+                && !structural.contains('.');
+            if structural.trim_end().ends_with('(')
+                && (explicit_callable || instance_method)
+                && parens_open > parens_close
+            {
+                pending_callable_parameter_depth = parens_open - parens_close;
+                pending_explicit_callable_parameters = explicit_callable;
+            }
         }
     }
 
-    if pending_method_parameter_depth != 0 {
+    if pending_callable_parameter_depth != 0 {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
-            "unterminated multiline method parameters",
+            "unterminated multiline callable parameters",
         ));
     }
 
@@ -2114,6 +2151,15 @@ fn is_end_delimited_callable_header(structural: &str) -> bool {
     line[close + 1..].trim_start().starts_with("->")
 }
 
+fn is_multiline_end_delimited_callable_close(structural: &str) -> bool {
+    let trimmed = structural.trim_start();
+    let Some(after_close) = trimmed.strip_prefix(')') else {
+        return false;
+    };
+    let tail = after_close.trim_start();
+    !tail.contains('{') && !tail.ends_with(';') && tail.starts_with("->")
+}
+
 fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
     if !structural.contains('{') || !structural.contains('(') {
         return false;
@@ -2193,7 +2239,7 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     };
 
     let parameters = &line[open + 1..close];
-    if parameters.trim().is_empty() || parameters.contains("//") || parameters.contains("/*") {
+    if parameters.trim().is_empty() || contains_visible_comment(parameters, LexState::default()) {
         return line.to_string();
     }
 
@@ -2222,6 +2268,275 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     result.push_str(&canonical.join(", "));
     result.push_str(&line[close..]);
     result
+}
+
+fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut index = 0usize;
+    let mut lex = LexState::default();
+
+    while index < lines.len() {
+        let first = lines[index];
+        let initial = lex;
+        let mut first_lex = initial;
+        let first_structural: String = scan_visible(first, &mut first_lex).into_iter().collect();
+        let explicit_callable =
+            contains_word(&first_structural, "fnc") || contains_word(&first_structural, "routine");
+        let method_candidate = looks_like_multiline_method_header_start(&first_structural);
+        let has_unclosed_parameters = (explicit_callable || method_candidate)
+            && first_structural.contains('(')
+            && !first_structural.trim_end().ends_with('(')
+            && callable_parameter_bounds(first, first.len(), initial).is_none()
+            && first_structural.chars().filter(|&ch| ch == '(').count()
+                > first_structural.chars().filter(|&ch| ch == ')').count();
+        let comment_sensitive = contains_visible_comment(first, initial);
+
+        if !has_unclosed_parameters || comment_sensitive {
+            output.push(first.to_string());
+            lex = first_lex;
+            index += 1;
+            continue;
+        }
+
+        let mut joined = first.trim_end().to_string();
+        let mut joined_lex = first_lex;
+        let mut cursor = index + 1;
+        let mut complete = None;
+        let mut unsafe_to_join = false;
+        while cursor < lines.len() {
+            let next = lines[cursor];
+            let next_initial = joined_lex;
+            let mut next_lex = next_initial;
+            let _ = scan_visible(next, &mut next_lex);
+            if contains_visible_comment(next, next_initial) || next.trim().is_empty() {
+                unsafe_to_join = true;
+                break;
+            }
+
+            joined.push(' ');
+            joined.push_str(next.trim());
+            joined_lex = next_lex;
+            if callable_parameter_bounds(&joined, joined.len(), initial).is_some() {
+                complete = Some(cursor);
+                break;
+            }
+            cursor += 1;
+        }
+
+        let declaration_complete = explicit_callable || has_callable_declaration_suffix(&joined);
+        if let Some(last) = complete.filter(|_| !unsafe_to_join && declaration_complete) {
+            output.push(joined);
+            lex = joined_lex;
+            index = last + 1;
+        } else {
+            output.push(first.to_string());
+            lex = first_lex;
+            index += 1;
+        }
+    }
+
+    output.join("\n")
+}
+
+fn looks_like_multiline_method_header_start(structural: &str) -> bool {
+    let trimmed = structural.trim_start();
+    for keyword in [
+        "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
+        "default", "return", "let", "const", "val", "await", "spawn",
+    ] {
+        if starts_word(trimmed, keyword) {
+            return false;
+        }
+    }
+
+    let prefix = trimmed.split('(').next().unwrap_or("").trim();
+    !prefix.is_empty() && !prefix.contains('=') && !prefix.contains('.') && !prefix.ends_with("new")
+}
+
+fn has_callable_declaration_suffix(line: &str) -> bool {
+    let Some((_, close)) = callable_parameter_bounds(line, line.len(), LexState::default()) else {
+        return false;
+    };
+    let tail = line[close + 1..].trim_start();
+    tail.starts_with(':')
+        || tail.starts_with("->")
+        || tail.starts_with("=>")
+        || tail.starts_with('{')
+}
+
+fn wrap_callable_parameter_list(line: &str, initial: LexState) -> Option<Vec<(usize, String)>> {
+    let (open, close) = callable_parameter_bounds(line, line.len(), initial)?;
+    let parameters = &line[open + 1..close];
+    if parameters.trim().is_empty() || contains_visible_comment(parameters, LexState::default()) {
+        return None;
+    }
+
+    let parts = split_top_level_parameters(parameters)?;
+    if parts.iter().any(|part| part.trim().is_empty()) {
+        return None;
+    }
+
+    let should_wrap = if parts.len() >= 4 {
+        true
+    } else if parts.len() >= 3 {
+        let names: Vec<Option<&str>> = parts
+            .iter()
+            .map(|part| callable_parameter_name(part.trim()))
+            .collect();
+        let has_underscore_heavy_name = names
+            .iter()
+            .flatten()
+            .any(|name| name.chars().filter(|&ch| ch == '_').count() >= 2);
+        let total_name_columns = names
+            .iter()
+            .flatten()
+            .map(|name| name.chars().count())
+            .sum::<usize>();
+        has_underscore_heavy_name || (names.iter().all(Option::is_some) && total_name_columns > 60)
+    } else {
+        false
+    };
+
+    if !should_wrap {
+        return None;
+    }
+
+    let mut lines = Vec::with_capacity(parts.len() + 2);
+    lines.push((0, line[..open + 1].trim_end().to_string()));
+    for (index, part) in parts.iter().enumerate() {
+        let comma = if index + 1 == parts.len() { "" } else { "," };
+        lines.push((1, format!("{}{}", part.trim(), comma)));
+    }
+    lines.push((0, line[close..].trim_start().to_string()));
+    Some(lines)
+}
+
+fn callable_parameter_name(parameter: &str) -> Option<&str> {
+    let binding = parameter_binding_prefix(parameter)?;
+    let trimmed = binding.trim_end();
+
+    if let Some(colon) = top_level_parameter_colon(trimmed) {
+        let legacy_name = trimmed[..colon].trim();
+        let mut chars = legacy_name.chars();
+        if chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && chars.all(is_ident_char)
+        {
+            return Some(legacy_name);
+        }
+    }
+
+    let end = trimmed.len();
+    let start = trimmed
+        .char_indices()
+        .rev()
+        .take_while(|(_, ch)| is_ident_char(*ch))
+        .map(|(index, _)| index)
+        .last()
+        .unwrap_or(end);
+    if start == end {
+        return None;
+    }
+
+    let name = &trimmed[start..end];
+    let first = name.chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+
+    let prefix = trimmed[..start].trim_end();
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(name)
+}
+
+fn top_level_parameter_colon(parameter: &str) -> Option<usize> {
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+
+    for (index, ch) in parameter.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren += 1,
+            ')' => paren = paren.checked_sub(1)?,
+            '[' => bracket += 1,
+            ']' => bracket = bracket.checked_sub(1)?,
+            '{' => brace += 1,
+            '}' => brace = brace.checked_sub(1)?,
+            '<' => angle += 1,
+            '>' => angle = angle.checked_sub(1)?,
+            ':' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => return Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parameter_binding_prefix(parameter: &str) -> Option<&str> {
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+
+    for (index, ch) in parameter.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren += 1,
+            ')' => paren = paren.checked_sub(1)?,
+            '[' => bracket += 1,
+            ']' => bracket = bracket.checked_sub(1)?,
+            '{' => brace += 1,
+            '}' => brace = brace.checked_sub(1)?,
+            '<' => angle += 1,
+            '>' => angle = angle.checked_sub(1)?,
+            '=' if paren == 0 && bracket == 0 && brace == 0 && angle == 0 => {
+                return Some(&parameter[..index]);
+            }
+            _ => {}
+        }
+    }
+
+    if quote.is_some() || paren != 0 || bracket != 0 || brace != 0 || angle != 0 {
+        return None;
+    }
+    Some(parameter)
 }
 
 fn split_top_level_parameters(parameters: &str) -> Option<Vec<&str>> {
@@ -2912,6 +3227,42 @@ fn first_visible_char_index(line: &str, needle: char, initial: LexState) -> Opti
 }
 
 // Detect genuine line comments without matching text in strings or blocks.
+fn contains_visible_comment(line: &str, initial: LexState) -> bool {
+    if initial.block_comment {
+        return true;
+    }
+
+    let mut state = initial;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                state.block_comment = false;
+                chars.next();
+            }
+            continue;
+        }
+        if let Some(quote) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if ch == '\\' {
+                state.escape = true;
+            } else if ch == quote {
+                state.quote = None;
+            }
+            continue;
+        }
+        if ch == '/' && matches!(next, Some('/' | '*')) {
+            return true;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            state.quote = Some(ch);
+        }
+    }
+    false
+}
+
 fn has_line_comment(line: &str, initial: LexState) -> bool {
     let mut state = initial;
     let mut chars = line.chars().peekable();
