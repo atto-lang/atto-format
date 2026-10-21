@@ -9,6 +9,7 @@ mod inline_blocks;
 mod keyword_blocks;
 mod match_switch;
 mod select;
+mod unused_imports;
 
 const INDENT: &str = "  ";
 
@@ -47,6 +48,7 @@ impl std::error::Error for FormatError {}
 enum DefineKind {
     Switch,
     Match,
+    Select,
     Module,
     Class,
     Actor,
@@ -54,6 +56,7 @@ enum DefineKind {
     Contract,
     Trait,
     Struct,
+    Callable,
     Other,
 }
 
@@ -105,6 +108,137 @@ struct LexState {
     escape: bool,
 }
 
+/// Split the compiler's compact optional-`as` end-delimited callable form
+/// before the ordinary line-oriented indentation pass. This is deliberately
+/// narrow: only free/module-style `fnc`/`routine` headers with an explicit
+/// slim arrow and a final visible `end` are expanded. Unsupported actor,
+/// static, or abstract callable forms remain untouched so the main formatter
+/// can fail closed on them.
+fn expand_compact_end_delimited_callables(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+
+    for (line_index, line) in source.split('\n').enumerate() {
+        if line_index != 0 {
+            output.push('\n');
+        }
+
+        let initial = lex;
+        let words = visible_word_spans(line, initial);
+        let mut next_lex = lex;
+        let _ = scan_visible(line, &mut next_lex);
+        lex = next_lex;
+
+        let word = |span: WordSpan| &line[span.start..span.end];
+        let forbidden = words.iter().any(|span| {
+            matches!(word(*span), "actor" | "isoactor" | "static" | "abstract")
+        });
+        if forbidden
+            || !words
+                .iter()
+                .any(|span| matches!(word(*span), "fnc" | "routine"))
+        {
+            output.push_str(line);
+            continue;
+        }
+
+        let Some(close) = callable_parameter_close(line, line.len(), initial) else {
+            output.push_str(line);
+            continue;
+        };
+        let Some(as_span) = words
+            .iter()
+            .copied()
+            .find(|span| span.start > close && word(*span) == "as")
+        else {
+            output.push_str(line);
+            continue;
+        };
+        let Some(end_span) = words.last().copied().filter(|span| word(*span) == "end") else {
+            output.push_str(line);
+            continue;
+        };
+        if as_span.end > end_span.start {
+            output.push_str(line);
+            continue;
+        }
+
+        let header_tail = &line[close + 1..as_span.start];
+        let mut header_lex = LexState::default();
+        let visible_header: String = scan_visible(header_tail, &mut header_lex)
+            .into_iter()
+            .collect();
+        let visible_header_words = visible_word_spans(&visible_header, LexState::default());
+        let contains_body_word = visible_header_words.iter().any(|span| {
+            matches!(
+                &visible_header[span.start..span.end],
+                "return"
+                    | "if"
+                    | "elif"
+                    | "else"
+                    | "fi"
+                    | "do"
+                    | "done"
+                    | "select"
+                    | "match"
+                    | "switch"
+                    | "const"
+                    | "let"
+                    | "val"
+                    | "for"
+                    | "while"
+                    | "loop"
+                    | "try"
+                    | "catch"
+                    | "finally"
+                    | "throw"
+                    | "raise"
+                    | "panic"
+                    | "await"
+                    | "spawn"
+                    | "break"
+                    | "continue"
+                    | "yield"
+                    | "defer"
+            )
+        });
+        if !visible_header.contains("->")
+            || visible_header.contains(';')
+            || visible_header.contains('{')
+            || visible_header.contains('}')
+            || contains_body_word
+        {
+            output.push_str(line);
+            continue;
+        }
+
+        // A trailing comment after the callable closer remains attached to
+        // the `end` line. Validate the whole suffix lexically rather than
+        // trusting its prefix: `end /* comment */ stray` must stay on the
+        // fail-closed path instead of being partially normalized.
+        let suffix = &line[end_span.end..];
+        let mut suffix_lex = LexState::default();
+        let visible_suffix: String = scan_visible(suffix, &mut suffix_lex)
+            .into_iter()
+            .collect();
+        if !visible_suffix.trim().is_empty() {
+            output.push_str(line);
+            continue;
+        }
+
+        let body = line[as_span.end..end_span.start].trim();
+        output.push_str(line[..as_span.end].trim_end());
+        output.push('\n');
+        if !body.is_empty() {
+            output.push_str(body);
+            output.push('\n');
+        }
+        output.push_str(&line[end_span.start..]);
+    }
+
+    output
+}
+
 /// Format Oreslang source using the one canonical style.
 ///
 /// The current formatter is intentionally configuration-free:
@@ -115,7 +249,7 @@ struct LexState {
 /// - inline keyword conditionals expanded into indented then/else/fi lines;
 /// - safe single-line return expressions receive explicit semicolon terminators;
 /// - LF line endings and exactly one final newline;
-/// - trailing whitespace removed;
+/// - trailing whitespace removed outside comment payloads;
 /// - at most one ordinary blank line;
 /// - exactly two blank lines between sibling executable callable bodies;
 /// - executable callable return separators are canonicalized to `->`;
@@ -131,12 +265,19 @@ struct LexState {
 pub fn format_source(source: &str) -> Result<String, FormatError> {
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = canonicalize_hash_symbol_quotes(&normalized);
+    // Expand a compact end-delimited callable before nested dispatch
+    // normalizers insert line breaks. Otherwise a body beginning with
+    // `do select` / match / switch can be split before the outer callable
+    // frame is recognized, causing an inner brace/end to steal ownership.
+    let normalized = expand_compact_end_delimited_callables(&normalized);
     let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
+    let mut block_comment_indent_shift = 0isize;
     let mut pending_blank = false;
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
@@ -155,7 +296,46 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
-        let trimmed_end = raw_line.trim_end();
+
+        // Interior lines of a block comment are opaque source text. Their
+        // leading whitespace belongs to the comment, not Oreslang indentation.
+        // Keep the bytes intact while still advancing the lexical state.
+        if lex.block_comment {
+            let mut comment_lex = lex;
+            let visible = scan_visible(raw_line, &mut comment_lex);
+            if visible.iter().all(|ch| ch.is_whitespace()) {
+                // Reindent the whole comment uniformly relative to its opener,
+                // preserving indentation *within* the comment and all text.
+                let content = if raw_line.is_empty() {
+                    String::new()
+                } else if block_comment_indent_shift >= 0 {
+                    format!(
+                        "{}{}",
+                        " ".repeat(block_comment_indent_shift as usize),
+                        raw_line
+                    )
+                } else {
+                    let leading = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
+                    let removed = leading.min((-block_comment_indent_shift) as usize);
+                    raw_line[removed..].to_owned()
+                };
+                out.push(content);
+                lex = comment_lex;
+                pending_blank = false;
+                continue;
+            }
+        }
+
+        // Ordinary trailing whitespace is canonicalized, but whitespace
+        // *inside* a line comment or a continuing block comment is payload.
+        let mut trailing_lex = lex;
+        scan_visible(raw_line, &mut trailing_lex);
+        let preserve_comment_tail = trailing_lex.block_comment || has_line_comment(raw_line, lex);
+        let trimmed_end = if preserve_comment_tail {
+            raw_line
+        } else {
+            raw_line.trim_end()
+        };
         if trimmed_end.trim().is_empty() {
             pending_blank = true;
             continue;
@@ -171,6 +351,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             lex,
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
         );
+        // Field syntax is contextual: do not rewrite local const/let/val,
+        // actor state, method bodies, or trait signatures.
+        if keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack) {
+            content = canonicalize_storage_field_line(&content, lex).unwrap_or(content);
+        }
         content =
             canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
         let mut structural_lex = lex;
@@ -179,10 +364,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             .collect();
         let structural = structural_content.trim_start();
 
-        let starts_end = starts_word(structural, "end");
-        let starts_fi = starts_word(structural, "fi");
-        let starts_done = starts_word(structural, "done");
-        let branch_line = starts_word(structural, "else") || starts_word(structural, "elif");
+        let starts_end = starts_block_keyword(structural, "end");
+        let starts_fi = starts_block_keyword(structural, "fi");
+        let starts_done = starts_block_keyword(structural, "done");
+        let branch_line =
+            starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
@@ -242,11 +428,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
 
+        let mut ended_end_callable = None;
         if starts_end {
             let frame = define_stack.last().ok_or_else(|| {
                 FormatError::new(
                     line_no,
-                    "encountered `end` without a matching define or switch block",
+                    "encountered `end` without a matching define, callable, or dispatch block",
                 )
             })?;
             if brace_stack.len() != frame.brace_depth || keyword_stack.len() != frame.keyword_depth
@@ -256,13 +443,19 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                     "encountered `end` before closing a nested block",
                 ));
             }
+            if frame.kind == DefineKind::Callable {
+                ended_end_callable = Some(indent);
+            }
             define_stack.pop();
         }
 
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
         let closes_multiline_method =
             pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
+            && is_end_delimited_callable_header(structural);
         let callable_body = is_callable_body_header(structural, signature_context)
+            || end_delimited_callable
             || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body || callable_signature {
@@ -271,7 +464,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         if callable_body {
             content = canonicalize_callable_arrow(&content, "->", lex);
         } else if callable_signature {
-            content = canonicalize_callable_arrow(&content, "=>", lex);
+            let desired = if nearest_contract_context(&define_stack, &brace_stack) {
+                "->"
+            } else {
+                "=>"
+            };
+            content = canonicalize_callable_arrow(&content, desired, lex);
         }
 
         let brace_depth_before_line = brace_stack.len();
@@ -326,6 +524,11 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         push_blank_lines(&mut out, desired_blanks);
         pending_blank = false;
 
+        if !lex.block_comment && structural_lex.block_comment {
+            let leading = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
+            block_comment_indent_shift =
+                (current_indent * INDENT.len()) as isize - leading as isize;
+        }
         out.push(format!("{}{}", INDENT.repeat(current_indent), content));
 
         let brace_events: Vec<char> = structural
@@ -338,7 +541,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         let closes = brace_events.iter().filter(|&&c| c == '}').count();
         let mut callable_open_available = callable_body;
         let mut container_open_available = brace_container_kind(structural);
-        let mut ended_callable = None;
+        let mut ended_callable = ended_end_callable;
         for event in brace_events {
             match event {
                 '{' => {
@@ -404,19 +607,25 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             }
         }
 
+        if end_delimited_callable {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Callable,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
         // Switch subjects may end with an optional semicolon, but the block
         // itself always closes with end, independently of its braced arms.
-        if (starts_word(structural, "switch")
-            || (starts_word(structural, "match") && contains_word(structural, "over")))
-            && !structural.contains('{')
+        if let Some(kind) =
+            end_delimited_dispatch_kind(structural).filter(|_| !structural.contains('{'))
         {
             next_order += 1;
             define_stack.push(DefineFrame {
-                kind: if starts_word(structural, "switch") {
-                    DefineKind::Switch
-                } else {
-                    DefineKind::Match
-                },
+                kind,
                 order: next_order,
                 brace_depth: brace_stack.len(),
                 keyword_depth: keyword_stack.len(),
@@ -501,7 +710,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     if !define_stack.is_empty() {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
-            "unterminated define or switch block (expected `end`)",
+            "unterminated define, callable, or dispatch block (expected `end`)",
         ));
     }
     if let Some(terminator) = keyword_stack.last() {
@@ -520,7 +729,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 
     let mut result = out.join("\n");
     result.push('\n');
-    Ok(result)
+    Ok(unused_imports::comment_unused(&result))
 }
 
 /// Returns `true` when `source` is already in canonical form.
@@ -559,15 +768,51 @@ fn canonicalize_legacy_catchall(
         }
         DefineKind::Match if starts_word(line, "on") => {
             let rest = line[2..].trim_start();
-            if starts_word(rest, "_") {
-                format!("default{}", &rest[1..])
-            } else if starts_word(rest, "default") {
-                rest.to_owned()
+            // 'on _' is the only canonical catch-all spelling for match.
+            // Do not turn it into the switch-only 'default' keyword.
+            if starts_word(rest, "default") {
+                format!("on _{}", &rest["default".len()..])
             } else {
                 line.to_owned()
             }
         }
         _ => line.to_owned(),
+    }
+}
+
+/// Recognize dispatch headers in expression position as well as statement
+/// position. In particular, `return match<T> ... over` and a declaration
+/// initializer `const T x = match<T> ... over` both own the following `end`.
+/// Tokenization prevents literals/comments or `foo.match(...)` from opening a
+/// fictitious block.
+fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
+    let lexed = select::tokens(line);
+    let mut index = 0usize;
+    match lexed.first()?.text {
+        "return" | "do" => index = 1,
+        "match" | "switch" | "select" => {}
+        _ => {
+            // Source declaration or assignment: only a direct RHS dispatch
+            // expression may own the next end. Do not mistake '==' for '='.
+            let eq = lexed.iter().position(|token| token.text == "=")?;
+            if lexed.get(eq + 1).is_some_and(|token| token.text == "=")
+                || eq > 0 && lexed[eq - 1].text == "="
+            {
+                return None;
+            }
+            index = eq + 1;
+        }
+    }
+
+    match lexed.get(index)?.text {
+        "match" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => {
+            Some(DefineKind::Match)
+        }
+        "switch" => Some(DefineKind::Switch),
+        "select" if lexed.iter().skip(index + 1).any(|t| t.text == "over") => {
+            Some(DefineKind::Select)
+        }
+        _ => None,
     }
 }
 
@@ -579,6 +824,16 @@ fn starts_word(line: &str, word: &str) -> bool {
         .chars()
         .next()
         .is_none_or(|c| !is_ident_char(c))
+}
+
+// Contextual names such as fi(), else(), and done() are ordinary calls,
+// not structural keyword lines. Preserve them even after inline expansion.
+fn starts_block_keyword(line: &str, word: &str) -> bool {
+    starts_word(line, word)
+        && !matches!(
+            line[word.len()..].trim_start().chars().next(),
+            Some('(' | '[' | '.')
+        )
 }
 
 fn is_ident_char(c: char) -> bool {
@@ -594,13 +849,32 @@ fn leading_closing_braces(line: &str) -> usize {
 
 fn is_closer_line(line: &str) -> bool {
     line.starts_with('}')
-        || starts_word(line, "end")
-        || starts_word(line, "fi")
-        || starts_word(line, "done")
+        || starts_block_keyword(line, "end")
+        || starts_block_keyword(line, "fi")
+        || starts_block_keyword(line, "done")
 }
 
 fn ends_statement(line: &str) -> bool {
     line.trim_end().ends_with(';')
+}
+
+fn nearest_contract_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let mut newest: Option<(usize, bool)> = None;
+
+    for frame in defines {
+        let is_contract = frame.kind == DefineKind::Contract;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, is_contract));
+        }
+    }
+    for frame in braces {
+        let is_contract = frame.kind == BraceKind::Contract;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, is_contract));
+        }
+    }
+
+    newest.map(|(_, is_contract)| is_contract).unwrap_or(false)
 }
 
 fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
@@ -664,6 +938,170 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
         (Some((_, value)), None) | (None, Some((_, value))) => value,
         (None, None) => false,
     }
+}
+
+// Concrete class member slots use final (fixed binding) and mut (mutable
+// referent), while lexical bindings retain const/val/let. Do not rewrite
+// unimplemented named-struct storage, actor state, trait contracts, or
+// code nested within a callable.
+fn in_direct_storage_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, DefineKind::Class)));
+    let latest_brace = brace_stack
+        .last()
+        .map(|frame| (frame.order, matches!(frame.kind, BraceKind::Class)));
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => {
+            if a > b {
+                value
+            } else {
+                other
+            }
+        }
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+// This is deliberately conservative until the formatter has a full parser:
+// only single-line, typed member declarations with recognizable prefixes and
+// an unambiguous initializer separator are normalized. Suspicious syntax,
+// nested expression prefixes, comments, and multiline signatures are left
+// unchanged for compiler diagnostics rather than rewritten by guesswork.
+// Only a top-level declaration separator may become a field initializer.
+// Named generic arguments use '=' (e.g. Box<messages=Message>) and must never
+// be mistaken for the member initializer; nested type contracts may use ':'.
+// Leave malformed, commented or callable prefixes untouched.
+fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<usize> {
+    if initial.block_comment || initial.quote.is_some() {
+        return None;
+    }
+    let mut chars = line.char_indices().peekable();
+    let mut generic_depth = 0usize;
+    while let Some((at, ch)) = chars.next() {
+        let next = chars.peek().map(|(_, c)| *c);
+        if ch == '/' && matches!(next, Some('/' | '*')) {
+            return None;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            return None; // literals never start a field declaration
+        }
+        if ch == '<' {
+            generic_depth += 1;
+            continue;
+        }
+        if ch == '>' {
+            generic_depth = generic_depth.checked_sub(1)?;
+            continue;
+        }
+        if generic_depth == 0 {
+            if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
+                return None; // callable or compound non-field prefix
+            }
+            if matches!(ch, '=' | ':' | ';') {
+                return Some(at);
+            }
+        }
+    }
+    None
+}
+
+fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
+    let separator = canonical_storage_field_separator(line, initial)?;
+    // A legacy uninitialized val field may still be filled in its class
+    // constructor. Rewriting it to final mut would manufacture an invalid
+    // declaration before the coordinated breaking constructor migration.
+    // Preserve ALL uninitialized member spellings until both compilers
+    // enforce declaration-site initialization consistently.
+    if line.as_bytes().get(separator) == Some(&b';') {
+        return None;
+    }
+    let lhs = &line[..separator];
+    if lhs
+        .chars()
+        .any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
+        || lhs.contains("//")
+        || lhs.contains("/*")
+        || lhs.contains("->")
+        || lhs.contains("=>")
+    {
+        return None;
+    }
+    let words = visible_word_spans(lhs, initial);
+    if words.len() < 2 {
+        return None;
+    }
+    let mut cursor = 0usize;
+    let visibility = match &lhs[words[cursor].start..words[cursor].end] {
+        "pub" | "private" => {
+            cursor += 1;
+            Some(&lhs[words[0].start..words[0].end])
+        }
+        _ => None,
+    };
+    if cursor >= words.len() {
+        return None;
+    }
+    let binding = match &lhs[words[cursor].start..words[cursor].end] {
+        "const" | "final" => {
+            cursor += 1;
+            Some("final")
+        }
+        "val" => {
+            cursor += 1;
+            Some("final mut")
+        }
+        "let" => {
+            cursor += 1;
+            None
+        }
+        _ => None,
+    };
+    let mut mutable = false;
+    if cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut" {
+        if binding == Some("final mut") {
+            return None; // duplicate val mut remains a compiler error
+        }
+        mutable = true;
+        cursor += 1;
+    }
+    if words.len() < cursor + 2 {
+        return None; // not a typed field (e.g. legacy name: Type)
+    }
+    let field = words.last()?;
+    if !lhs[field.end..].trim().is_empty() {
+        return None;
+    }
+    let type_and_name = lhs[words[cursor].start..field.end].trim();
+    if type_and_name.is_empty() || type_and_name.contains("::") {
+        return None;
+    }
+    // The declaration type may contain generic args, but the text before
+    // the name must not itself contain an initializer or a callable.
+    let mut prefix = String::new();
+    if let Some(vis) = visibility {
+        prefix.push_str(vis);
+        prefix.push(' ');
+    }
+    if let Some(binding) = binding {
+        prefix.push_str(binding);
+        prefix.push(' ');
+    } else if mutable {
+        prefix.push_str("mut ");
+    }
+    if mutable && binding == Some("final") {
+        prefix.push_str("mut ");
+    }
+    prefix.push_str(type_and_name);
+    if line.as_bytes().get(separator) == Some(&b';') {
+        prefix.push_str(&line[separator..]);
+    } else {
+        prefix.push(':');
+        prefix.push(' ');
+        prefix.push_str(line[separator + 1..].trim_start());
+    }
+    Some(prefix)
 }
 
 fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member: bool) -> String {
@@ -892,7 +1330,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
     let is_prefix_word = |word: &str| {
         matches!(
             word,
-            "define" | "interface" | "contract" | "pub" | "private"
+            "define" | "interface" | "contract" | "pub" | "private" | "static"
         )
     };
     let prefix_len = words
@@ -910,6 +1348,7 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
 
     let mut saw_define = false;
     let mut visibility: Option<&str> = None;
+    let mut is_static = false;
     let mut kind: Option<&str> = None;
 
     for span in prefix {
@@ -918,19 +1357,23 @@ fn canonicalize_defined_interface_or_contract(line: &str, words: &[WordSpan]) ->
             "pub" | "private" if visibility.is_none() => {
                 visibility = Some(&line[span.start..span.end])
             }
+            "static" if !is_static => is_static = true,
             "interface" | "contract" if kind.is_none() => kind = Some(&line[span.start..span.end]),
             _ => return None,
         }
     }
 
     let kind = kind?;
-    if !saw_define {
+    if !saw_define || (is_static && kind != "contract") {
         return None;
     }
 
     let mut canonical = vec!["define"];
     if let Some(visibility) = visibility {
         canonical.push(visibility);
+    }
+    if is_static {
+        canonical.push("static");
     }
     canonical.push(kind);
 
@@ -1084,6 +1527,8 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
                 | "private"
                 | "static"
                 | "async"
+                | "suspend"
+                | "suspends"
                 | "generator"
                 | "nlex"
                 | "pure"
@@ -1112,6 +1557,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
+    let mut is_suspends = false;
     let mut is_generator = false;
     let mut is_nlex = false;
     let mut is_pure = false;
@@ -1134,6 +1580,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
             }
             "static" => set_once(&mut is_static),
             "async" => set_once(&mut is_async),
+            "suspend" | "suspends" => set_once(&mut is_suspends),
             "generator" => set_once(&mut is_generator),
             "nlex" => set_once(&mut is_nlex),
             "pure" => set_once(&mut is_pure),
@@ -1157,6 +1604,10 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
 
     let kind = kind?;
+    // Preserve invalid effect combinations for compiler diagnostics.
+    if is_async && is_suspends {
+        return None;
+    }
 
     // The compiler currently admits quantum only on fnc/static fnc. Keep
     // unsupported combinations untouched so semantic diagnostics remain the
@@ -1177,6 +1628,9 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
     if is_async {
         canonical.push("async");
+    }
+    if is_suspends {
+        canonical.push("suspends");
     }
     if is_generator {
         canonical.push("generator");
@@ -1257,7 +1711,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
 
     for word in words {
         match word {
-            "pub" | "private" | "abstract" | "shared" | "untrusted" => continue,
+            "pub" | "private" | "abstract" | "shared" | "untrusted" | "static" => continue,
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
             "actor" | "isoactor" => return Some(DefineKind::Actor),
@@ -1294,6 +1748,45 @@ fn brace_container_kind(line: &str) -> Option<BraceKind> {
     } else {
         None
     }
+}
+
+fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let mut newest: Option<(usize, bool)> = None;
+
+    for frame in defines {
+        let allowed = frame.kind == DefineKind::Module;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, allowed));
+        }
+    }
+    for frame in braces {
+        let allowed = frame.kind == BraceKind::Module;
+        if newest.is_none_or(|(order, _)| frame.order > order) {
+            newest = Some((frame.order, allowed));
+        }
+    }
+
+    newest.map(|(_, allowed)| allowed).unwrap_or(true)
+}
+
+fn is_end_delimited_callable_header(structural: &str) -> bool {
+    let line = structural.trim();
+    if line.contains('{')
+        || line.ends_with(';')
+        || contains_word(line, "actor")
+        || contains_word(line, "isoactor")
+        || contains_word(line, "static")
+        || contains_word(line, "abstract")
+    {
+        return false;
+    }
+    if !(contains_word(line, "fnc") || contains_word(line, "routine")) || !line.contains('(') {
+        return false;
+    }
+    let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+        return false;
+    };
+    line[close + 1..].trim_start().starts_with("->")
 }
 
 fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
@@ -1638,11 +2131,15 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 let before = prefix.trim_end();
                 // The branch introducer is syntactic. A semicolon immediately
                 // before then/do is legacy punctuation, not a statement end.
-                // The canonical spelling is "if condition then" on one line.
-                // Replace the optional semicolon and all whitespace between
-                // the condition and branch marker in one lexical rewrite.
-                let replacement_start = before.trim_end_matches(';').trim_end().len();
-                let replacement = " then".to_string();
+                // Preserve an explicit conditional separator while
+                // normalizing all surrounding whitespace and the then marker.
+                let has_separator = before.ends_with(';');
+                let replacement_start = if has_separator {
+                    before.trim_end_matches(';').trim_end().len()
+                } else {
+                    before.len()
+                };
+                let replacement = if has_separator { "; then" } else { " then" }.to_string();
                 replacements.push((replacement_start, last.end, replacement));
             }
         }
@@ -1894,6 +2391,125 @@ fn opens_do_block(line: &str) -> bool {
     (t.ends_with(" do") || t.ends_with("; do")) && !starts_word(t.trim_start(), "done")
 }
 
+/// Canonicalize only single-quoted # Symbols; normal strings/comments remain
+/// byte-for-byte unchanged. The Oreslang lexer accepts both quote styles,
+/// but the formatter renders the Symbol's decoded name with double quotes.
+///
+/// This is deliberately a source-aware pass, not a global quote replacement:
+/// it tracks nested block comments, line comments, strings and backtick literals.
+fn canonicalize_hash_symbol_quotes(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut result = String::with_capacity(source.len());
+    let mut index = 0usize;
+    let mut block_depth = 0usize;
+    let mut quote: Option<u8> = None;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let next = bytes.get(index + 1).copied();
+        if block_depth > 0 {
+            if byte == b'/' && next == Some(b'*') {
+                block_depth += 1;
+                result.push_str("/*");
+                index += 2;
+                continue;
+            }
+            if byte == b'*' && next == Some(b'/') {
+                block_depth -= 1;
+                result.push_str("*/");
+                index += 2;
+                continue;
+            }
+        } else if let Some(delimiter) = quote {
+            if byte == b'\\' && next.is_some() {
+                // A quoted escape may be followed by a multibyte Unicode
+                // scalar. Never slice UTF-8 at an arbitrary byte index.
+                let escaped = source[index + 1..].chars().next().expect("valid UTF-8");
+                result.push('\\');
+                result.push(escaped);
+                index += 1 + escaped.len_utf8();
+                continue;
+            }
+            if byte == delimiter {
+                quote = None;
+            }
+        } else {
+            if byte == b'/' && next == Some(b'/') {
+                if let Some(end) = source[index..].find('\n') {
+                    result.push_str(&source[index..index + end + 1]);
+                    index += end + 1;
+                } else {
+                    result.push_str(&source[index..]);
+                    break;
+                }
+                continue;
+            }
+            if byte == b'/' && next == Some(b'*') {
+                block_depth = 1;
+                result.push_str("/*");
+                index += 2;
+                continue;
+            }
+            if byte == b'#' && next == Some(b'\'') {
+                if let Some((end, canonical)) = canonicalize_single_quoted_symbol(source, index) {
+                    result.push_str(&canonical);
+                    index = end;
+                    continue;
+                }
+            }
+            if matches!(byte, b'\'' | b'"' | b'`') {
+                quote = Some(byte);
+            }
+        }
+        let ch = source[index..].chars().next().expect("valid UTF-8");
+        result.push(ch);
+        index += ch.len_utf8();
+    }
+    result
+}
+
+/// Return the byte index after the closing quote and its equivalent
+/// double-quoted hash Symbol. Malformed escapes stay unchanged for the
+/// compiler's normal diagnostics, rather than being silently repaired.
+fn canonicalize_single_quoted_symbol(source: &str, start: usize) -> Option<(usize, String)> {
+    let mut result = String::from("#\"");
+    let mut chars = source[start + 2..].char_indices();
+    while let Some((offset, ch)) = chars.next() {
+        match ch {
+            '\'' => {
+                result.push('"');
+                return Some((start + 2 + offset + 1, result));
+            }
+            '\n' | '\r' => return None,
+            '"' => result.push_str("\\\""),
+            '\\' => {
+                let (_, escaped) = chars.next()?;
+                match escaped {
+                    '\'' => result.push('\''),
+                    '"' => result.push_str("\\\""),
+                    '\\' => result.push_str("\\\\"),
+                    'n' | 'r' | 't' => {
+                        result.push('\\');
+                        result.push(escaped);
+                    }
+                    'u' => {
+                        result.push_str("\\u");
+                        for _ in 0..4 {
+                            let (_, hex) = chars.next()?;
+                            if !hex.is_ascii_hexdigit() {
+                                return None;
+                            }
+                            result.push(hex);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => result.push(ch),
+        }
+    }
+    None
+}
+
 fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
     let lines: Vec<&str> = source.split('\n').collect();
     let mut state = LexState::default();
@@ -1968,6 +2584,44 @@ fn first_visible_char_index(line: &str, needle: char, initial: LexState) -> Opti
     }
 
     None
+}
+
+// Detect genuine line comments without matching text in strings or blocks.
+fn has_line_comment(line: &str, initial: LexState) -> bool {
+    let mut state = initial;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                state.block_comment = false;
+                chars.next();
+            }
+            continue;
+        }
+        if let Some(quote) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if ch == '\\' {
+                state.escape = true;
+            } else if ch == quote {
+                state.quote = None;
+            }
+            continue;
+        }
+        if ch == '/' && next == Some('/') {
+            return true;
+        }
+        if ch == '/' && next == Some('*') {
+            state.block_comment = true;
+            chars.next();
+            continue;
+        }
+        if ch == '"' || ch == '\'' || ch == '\u{60}' {
+            state.quote = Some(ch);
+        }
+    }
+    false
 }
 
 fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
@@ -2161,8 +2815,8 @@ define contract BraceContract {
 "#;
 
         let got = format_source(src).unwrap();
-        assert!(got.contains("fnc end_sig() => String;"));
-        assert!(got.contains("fnc brace_sig() => String;"));
+        assert!(got.contains("fnc end_sig() -> String;"));
+        assert!(got.contains("fnc brace_sig() -> String;"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
@@ -2252,6 +2906,324 @@ define contract BraceContract {
             assert_eq!(got, "pub async isoactor fnc private_worker() {\n}\n");
         }
         assert_eq!(isoactor_cases, 24);
+    }
+
+    #[test]
+    fn canonicalizes_static_contract_declaration_order_without_normalizing_static_interface() {
+        let src = r#"static contract define pub Factory as
+  fnc build(int id): int;
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("define pub static contract Factory as\n"));
+        assert!(got.contains("fnc build(int id) -> int;"));
+        assert_eq!(format_source(&got).unwrap(), got);
+
+        // The formatter must fail closed on a nonsensical static
+        // instance-interface declaration rather than preserving a malformed
+        // end-delimited frame or rewriting it into canonical-looking source.
+        let invalid = "static interface define Bad as\nend\n";
+        assert!(format_source(invalid).is_err());
+    }
+
+    #[test]
+    fn formats_end_delimited_free_and_module_callables() {
+        let src = r#"fnc classify(int x) -> int
+if x > 0 then
+return 1
+else
+return 0
+fi
+end
+
+define module math as
+fnc identity(int x) -> int
+return x
+end
+end
+"#;
+
+        let got = format_source(src).unwrap();
+        let expected = r#"fnc classify(int x) -> int
+  if x > 0 then
+    return 1;
+  else
+    return 0;
+  fi
+end
+
+define module math as
+  fnc identity(int x) -> int
+    return x;
+  end
+end
+"#;
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn retired_callable_do_separator_fails_closed() {
+        assert!(format_source("fnc identity(int x) -> int do return x; end\n").is_err());
+        assert!(format_source("routine identity(int x) -> int do return x; end\n").is_err());
+    }
+
+    #[test]
+    fn expands_optional_as_compact_end_delimited_callables() {
+        let compact = "fnc identity(int x) -> int as return x; end\n";
+        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn expands_optional_as_compact_keyword_control_flow() {
+        let compact =
+            "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
+        let expected = r#"fnc classify(int x) -> int as
+  if x > 0 then
+    return 1;
+  else
+    return 0;
+  fi
+end
+"#;
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn optional_as_after_higher_order_return_type_is_preserved() {
+        let compact = "fnc callback() -> () => void as return factory(); end\n";
+        let got = format_source(compact).unwrap();
+        assert!(got.starts_with("fnc callback() -> () => void as\n"));
+        assert!(got.contains("  return factory();\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_expands_before_nested_match_end_ownership() {
+        let src = "fnc classify(int x) -> int as match x 1 -> { return 1; } else -> { return 0; } end end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc classify(int x) -> int as\n"));
+        assert!(got.contains("  match x"));
+        assert!(got.contains("return 1;"));
+        assert!(got.contains("return 0;"));
+        assert!(got.ends_with("end\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_separator_can_precede_real_do_select_body() {
+        let src = r#"fnc consume(Channel<int> incoming) -> void as do select { case readch incoming: val number { return; } } end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void as\n"));
+        assert!(got.contains("  do select {\n"));
+        assert!(got.contains("    when readch incoming: val number {\n"));
+        assert!(got.ends_with("end\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn next_line_do_select_remains_a_body_statement() {
+        let src = r#"fnc consume(Channel<int> incoming) -> void
+do select {
+case readch incoming: val number {
+return;
+}
+}
+end
+"#;
+        let expected = r#"fnc consume(Channel<int> incoming) -> void
+  do select {
+    when readch incoming: val number {
+      return;
+    }
+  }
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn multiline_callable_as_never_opens_a_done_frame() {
+        let src = "fnc identity(int x) -> int as\nreturn x\nend\n";
+        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
+        let got = format_source(src).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_as_preserves_trailing_end_comment() {
+        let src = "fnc identity(int x) -> int as return x; end // callable\n";
+        let got = format_source(src).unwrap();
+        assert!(got.contains("end // callable\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn compact_callable_rejects_visible_syntax_after_block_comment_suffix() {
+        let src = "fnc identity(int x) -> int as return x; end /* comment */ stray\n";
+        assert!(format_source(src).is_err());
+    }
+
+    #[test]
+    fn compact_callable_as_ignores_delimiters_hidden_in_comments_and_literals() {
+        let src =
+            "fnc value() -> int /* ; as do end */ as /* ; end */ return 7; end // as do end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc value() -> int /* ; as do end */ as\n"));
+        assert!(got.contains("  /* ; end */ return 7;\n"));
+        assert!(got.ends_with("end // as do end\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+
+        let string_body = "fnc text() -> string as return \"do end fi;\"; end\n";
+        let string_got = format_source(string_body).unwrap();
+        assert!(string_got.contains("  return \"do end fi;\";\n"));
+        assert_eq!(format_source(&string_got).unwrap(), string_got);
+    }
+
+    #[test]
+    fn compact_callable_as_preserves_nested_lambda_boundaries() {
+        let src =
+            "fnc make() -> () => string as return || -> { return \"do end\"; }; end\n";
+        let got = format_source(src).unwrap();
+        assert!(got.starts_with("fnc make() -> () => string as\n"));
+        assert!(got.contains("return || -> {"));
+        assert!(got.contains("\"do end\""));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn body_level_cast_as_cannot_impersonate_callable_separator() {
+        let src = "fnc casty() -> int return value as int; end\n";
+        assert!(format_source(src).is_err());
+    }
+
+    #[test]
+    fn visible_semicolon_before_callable_as_is_not_reinterpreted_as_a_body() {
+        let src = "fnc bad() -> int; as return 1; end\n";
+        assert!(format_source(src).is_err());
+    }
+
+    #[test]
+    fn shared_java_round_trip_corpus_formats_idempotently() {
+        let source = include_str!("../tests/fixtures/end-delimited-roundtrip.ores");
+        let once = format_source(source).unwrap();
+        let twice = format_source(&once).unwrap();
+        assert_eq!(twice, once);
+        assert!(once.contains("fnc identity(int x) -> int as\n"));
+        assert!(once.contains("fnc callback() -> () => void as\n"));
+        assert!(once.contains("fnc text() -> string /* ; as do end */ as\n"));
+        assert!(once.contains("fnc double(int x) -> int as\n"));
+    }
+
+    #[test]
+    fn routine_uses_the_same_end_delimited_as_formatting() {
+        let compact = "routine identity(int x) -> int as return x; end\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, "routine identity(int x) -> int as\n  return x;\nend\n");
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn contract_arrows_are_executable_style_but_interfaces_stay_type_level() {
+        let src = r#"define contract ModuleApi as
+  fnc load(int id) => tuple (int, string);
+end
+
+define static contract StaticApi as
+  fnc build(int id): Result<Option<tuple (int, string)>, string>;
+end
+
+define interface InstanceApi as
+  fnc run(int id) -> int;
+end
+
+define trait Retryable as
+  fnc retry(): bool;
+end
+"#;
+
+        let got = format_source(src).unwrap();
+        assert!(got.contains("fnc load(int id) -> tuple (int, string);"));
+        assert!(got.contains(
+            "fnc build(int id) -> Result<Option<tuple (int, string)>, string>;"
+        ));
+        assert!(got.contains("fnc run(int id) => int;"));
+        assert!(got.contains("fnc retry() => bool;"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn end_delimited_actor_or_class_methods_are_not_accepted_as_free_callable_frames() {
+        let class_method = r#"define class C as
+  run(int x) -> int
+    return x
+  end
+end
+"#;
+        assert!(format_source(class_method).is_err());
+
+        let actor_callable = r#"actor fnc run(int x) -> int
+  return x
+end
+"#;
+        assert!(format_source(actor_callable).is_err());
+    }
+
+    #[test]
+    fn large_tuple_return_spelling_is_preserved_and_idempotent() {
+        let slots = (0..65).map(|_| "int").collect::<Vec<_>>().join(", ");
+        let src = format!(
+            "fnc identity(tuple ({slots}) value) -> tuple ({slots})\nreturn value\nend\n"
+        );
+        let got = format_source(&src).unwrap();
+        assert!(got.contains(&format!("tuple ({slots}) value")));
+        assert!(got.contains(&format!("-> tuple ({slots})")));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn delimiter_words_inside_literals_and_comments_do_not_close_callable() {
+        let src = r#"fnc words() -> string
+const string value = "end fi"
+return value // end fi
+end
+"#;
+        let got = format_source(src).unwrap();
+        assert!(got.contains("\"end fi\""));
+        assert!(got.contains("// end fi"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn static_or_abstract_end_delimited_free_callable_fails_closed() {
+        let top_static = r#"static fnc run() -> int
+return 1
+end
+"#;
+        assert!(format_source(top_static).is_err());
+
+        let module_static = r#"define module M as
+static fnc run() -> int
+return 1
+end
+end
+"#;
+        assert!(format_source(module_static).is_err());
+
+        let top_abstract = r#"abstract fnc run() -> int
+return 1
+end
+"#;
+        assert!(format_source(top_abstract).is_err());
     }
 
     #[test]

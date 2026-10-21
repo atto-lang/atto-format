@@ -1,4 +1,4 @@
-use oreslang_format::{format_source, is_formatted};
+use oreslang_format::{FormatError, format_source, is_formatted};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -67,7 +67,9 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("oresfmt: {err}");
-            ExitCode::from(2)
+            // Syntax/formatting rejection is an ordinary input failure.
+            // Keep usage, Git-policy, filesystem and process failures distinct.
+            ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
         }
     }
 }
@@ -521,7 +523,9 @@ mod write_safety_tests {
             std::process::id()
         ));
         fs::create_dir_all(&root).unwrap();
-        root
+        // macOS temp_dir traverses /var -> /private/var. Resolve only our
+        // fixture root so the write guard reaches the mutation under test.
+        fs::canonicalize(root).unwrap()
     }
 
     #[test]
