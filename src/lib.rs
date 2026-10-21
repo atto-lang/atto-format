@@ -354,7 +354,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         );
         // Field syntax is contextual: do not rewrite local const/let/val,
         // actor state, method bodies, or trait signatures.
-        if keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack) {
+        if keyword_stack.is_empty()
+            && pending_method_parameter_depth == 0
+            && in_direct_storage_container(&define_stack, &brace_stack)
+        {
             content = canonicalize_storage_field_line(&content, lex).unwrap_or(content);
         }
         content =

@@ -46,6 +46,10 @@ the full field contract.
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
 - braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
+- direct type-first class field initializers canonically use `:`: `final int foo = 5`
+  becomes `final int foo: 5`, and `string bar = "100"` becomes
+  `string bar: "100"`; ordinary assignments, name-first declarations,
+  comments, string literals, and nested method bodies are never rewritten;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
 - in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;

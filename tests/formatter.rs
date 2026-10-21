@@ -1637,3 +1637,110 @@ fn module_header_comments_and_nonheaders_are_not_rewritten() {
     let quote = "const string example = \"define module core\";\n";
     assert_eq!(format_source(quote).unwrap(), quote);
 }
+
+#[test]
+fn colon_initializers_are_canonical_only_for_direct_type_first_class_fields() {
+    let src = r#"define class Foo as
+final int foo = 5
+string bar = "100"
+Map<string, Array<int>> cache = factory()
+bar: string = "typed"
+fnc update(): void {
+  foo = 6;
+  const value = struct{bar: "literal = stays"};
+  return;
+}
+end
+"#;
+    let expected = r#"define class Foo as
+  final int foo: 5
+  string bar: "100"
+  Map<string, Array<int>> cache: factory()
+  bar: string = "typed"
+  update() -> void {
+    foo = 6;
+    const value = struct{bar: "literal = stays"};
+    return;
+  }
+end
+"#;
+    let actual = format_source(src).unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(format_source(&actual).unwrap(), actual);
+}
+
+#[test]
+fn colon_initializer_keeps_comments_strings_and_function_assignments_untouched() {
+    let src = r#"define class C as
+  int one = 3 // = inside a comment
+  string label = "a=b:c"
+  int two: 4
+  change(): void {
+    one = 9;
+    const v = {"key": "="};
+  }
+end
+"#;
+    let actual = format_source(src).unwrap();
+    assert!(actual.contains("int one: 3 // = inside a comment"));
+    assert!(actual.contains("string label: \"a=b:c\""));
+    assert!(actual.contains("int two: 4"));
+    assert!(actual.contains("one = 9;"));
+    assert!(actual.contains("\"key\": \"=\""));
+    assert_eq!(format_source(&actual).unwrap(), actual);
+}
+
+#[test]
+fn colon_normalization_preserves_legacy_binding_kind_fields_and_nested_code() {
+    let src = r#"define class Box as
+  pub let int balance = 100;
+  val string label = "fixed";
+  const int limit = 9;
+  let mut Array<int> items = new Array<int>();
+  final int identifier = 42
+  string name = "box"
+  change(): void {
+    let int n = 2;
+    balance = 3;
+  }
+end
+"#;
+    let got = format_source(src).unwrap();
+    for unchanged in [
+        "pub int balance: 100;",
+        "final mut string label: \"fixed\";",
+        "final int limit: 9;",
+        "mut Array<int> items: new Array<int>();",
+        "let int n = 2;",
+        "balance = 3;",
+    ] {
+        assert!(
+            got.contains(unchanged),
+            "rewrote an unrelated construct: {unchanged} in {got}"
+        );
+    }
+    assert!(got.contains("final int identifier: 42"));
+    assert!(got.contains("string name: \"box\""));
+    assert_eq!(got, format_source(&got).unwrap());
+}
+
+#[test]
+fn multiline_method_parameter_defaults_are_not_field_initializers() {
+    let src = r#"define class Foo as
+  int field = 42
+  compute(
+    int x = 5,
+    string label = "ok"
+  ): int {
+    return x;
+  }
+end
+"#;
+    let got = format_source(src).unwrap();
+    assert!(got.contains("int field: 42"), "{got}");
+    assert!(got.contains("int x = 5"), "{got}");
+    assert!(got.contains("string label = \"ok\""), "{got}");
+    assert!(!got.contains("int x: 5"), "{got}");
+    assert!(!got.contains("string label: \"ok\""), "{got}");
+    assert_eq!(got, format_source(&got).unwrap());
+}
