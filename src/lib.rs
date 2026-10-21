@@ -2287,7 +2287,8 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
             && callable_parameter_bounds(first, first.len(), LexState::default()).is_none()
             && first_structural.chars().filter(|&ch| ch == '(').count()
                 > first_structural.chars().filter(|&ch| ch == ')').count();
-        let comment_sensitive = first.contains("//") || first.contains("/*") || first.contains("*/");
+        let comment_sensitive =
+            first.contains("//") || first.contains("/*") || first.contains("*/");
 
         if !has_unclosed_parameters || comment_sensitive {
             output.push(first.to_string());
@@ -2344,10 +2345,7 @@ fn looks_like_multiline_method_header_start(structural: &str) -> bool {
     }
 
     let prefix = trimmed.split('(').next().unwrap_or("").trim();
-    !prefix.is_empty()
-        && !prefix.contains('=')
-        && !prefix.contains('.')
-        && !prefix.ends_with("new")
+    !prefix.is_empty() && !prefix.contains('=') && !prefix.contains('.') && !prefix.ends_with("new")
 }
 
 fn has_callable_declaration_suffix(line: &str) -> bool {
