@@ -1450,6 +1450,8 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
                 | "private"
                 | "static"
                 | "async"
+                | "suspend"
+                | "suspends"
                 | "generator"
                 | "nlex"
                 | "pure"
@@ -1478,6 +1480,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
+    let mut is_suspends = false;
     let mut is_generator = false;
     let mut is_nlex = false;
     let mut is_pure = false;
@@ -1500,6 +1503,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
             }
             "static" => set_once(&mut is_static),
             "async" => set_once(&mut is_async),
+            "suspend" | "suspends" => set_once(&mut is_suspends),
             "generator" => set_once(&mut is_generator),
             "nlex" => set_once(&mut is_nlex),
             "pure" => set_once(&mut is_pure),
@@ -1523,6 +1527,10 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
 
     let kind = kind?;
+    // Preserve invalid effect combinations for compiler diagnostics.
+    if is_async && is_suspends {
+        return None;
+    }
 
     // The compiler currently admits quantum only on fnc/static fnc. Keep
     // unsupported combinations untouched so semantic diagnostics remain the
@@ -1543,6 +1551,9 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
     if is_async {
         canonical.push("async");
+    }
+    if is_suspends {
+        canonical.push("suspends");
     }
     if is_generator {
         canonical.push("generator");
