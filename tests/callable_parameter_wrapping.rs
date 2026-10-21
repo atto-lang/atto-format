@@ -150,3 +150,113 @@ end
     assert_eq!(got, expected);
     assert_eq!(format_source(&got).unwrap(), got);
 }
+
+#[test]
+fn name_first_parameters_trigger_the_same_wrapping_rule() {
+    let input = r#"fnc attach(authorized_namespace: bool, policy_accepted: bool, sandbox_identity_valid: bool): bool {
+return true;
+}
+"#;
+    let expected = r#"fnc attach(
+  bool authorized_namespace,
+  bool policy_accepted,
+  bool sandbox_identity_valid
+) -> bool {
+  return true;
+}
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn string_defaults_that_look_like_comments_do_not_disable_wrapping() {
+    let input = r#"fnc route(string endpoint = "https://example.invalid/a,b", string marker = "/*not a comment*/", int retries = 1, bool enabled = true): void {
+return;
+}
+"#;
+    let expected = r#"fnc route(
+  string endpoint = "https://example.invalid/a,b",
+  string marker = "/*not a comment*/",
+  int retries = 1,
+  bool enabled = true
+) -> void {
+  return;
+}
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn nested_parameter_commas_do_not_change_the_top_level_count() {
+    let input = r#"fnc build(Map<string, int> values, tuple (int, string) pair, string label, int limit = clamp(1, 2)): void {
+return;
+}
+"#;
+    let expected = r#"fnc build(
+  Map<string, int> values,
+  tuple (int, string) pair,
+  string label,
+  int limit = clamp(1, 2)
+) -> void {
+  return;
+}
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn real_parameter_comments_are_preserved_fail_closed() {
+    let input = r#"fnc commented(int a, int b, /* keep this payload */ int c, int d): void {
+return;
+}
+"#;
+    let expected = r#"fnc commented(int a, int b, /* keep this payload */ int c, int d) -> void {
+  return;
+}
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert!(got.contains("/* keep this payload */"));
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn multiline_block_comment_payload_cannot_be_collapsed_as_a_callable() {
+    let input = r#"/*
+fnc fake(int alpha, int beta,
+         int gamma, int delta): void {
+*/
+fnc real(int a, int b, int c, int d): void {
+return;
+}
+"#;
+    let expected = r#"/*
+fnc fake(int alpha, int beta,
+         int gamma, int delta): void {
+*/
+fnc real(
+  int a,
+  int b,
+  int c,
+  int d
+) -> void {
+  return;
+}
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert!(got.contains("fnc fake(int alpha, int beta,\n         int gamma, int delta): void {"));
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
