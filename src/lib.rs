@@ -108,76 +108,144 @@ struct LexState {
     escape: bool,
 }
 
-fn top_level_visible_type_words(text: &str) -> Vec<WordSpan> {
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut words = Vec::new();
+fn top_level_type_chunks(text: &str) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let mut start: Option<usize> = None;
     let mut paren = 0usize;
     let mut bracket = 0usize;
     let mut brace = 0usize;
     let mut angle = 0usize;
-    let mut i = 0usize;
 
-    while i < chars.len() {
-        let (start, c) = chars[i];
-        match c {
-            '(' => { paren += 1; i += 1; continue; }
-            ')' => { paren = paren.saturating_sub(1); i += 1; continue; }
-            '[' => { bracket += 1; i += 1; continue; }
-            ']' => { bracket = bracket.saturating_sub(1); i += 1; continue; }
-            '{' => { brace += 1; i += 1; continue; }
-            '}' => { brace = brace.saturating_sub(1); i += 1; continue; }
-            '<' => { angle += 1; i += 1; continue; }
-            '>' if angle > 0 => { angle -= 1; i += 1; continue; }
-            _ => {}
-        }
-
-        if paren == 0 && bracket == 0 && brace == 0 && angle == 0 && is_ident_char(c) {
-            let mut end = start + c.len_utf8();
-            i += 1;
-            while i < chars.len() && is_ident_char(chars[i].1) {
-                end = chars[i].0 + chars[i].1.len_utf8();
-                i += 1;
+    for (index, c) in text.char_indices() {
+        let top_level = paren == 0 && bracket == 0 && brace == 0 && angle == 0;
+        if c.is_whitespace() && top_level {
+            if let Some(chunk_start) = start.take() {
+                chunks.push(&text[chunk_start..index]);
             }
-            words.push(WordSpan { start, end });
             continue;
         }
-        i += 1;
+        if start.is_none() {
+            start = Some(index);
+        }
+        match c {
+            '(' => paren += 1,
+            ')' => paren = paren.saturating_sub(1),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            '{' => brace += 1,
+            '}' => brace = brace.saturating_sub(1),
+            '<' => angle += 1,
+            '>' if angle > 0 => angle -= 1,
+            _ => {}
+        }
     }
-
-    words
+    if let Some(chunk_start) = start {
+        chunks.push(&text[chunk_start..]);
+    }
+    chunks
 }
 
-fn header_tail_has_ambiguous_bare_words(visible_header: &str) -> bool {
+fn parse_type_chunks(chunks: &[&str], index: &mut usize) -> bool {
+    if !parse_type_atom_chunks(chunks, index) {
+        return false;
+    }
+    while *index < chunks.len() && chunks[*index] == "|" {
+        *index += 1;
+        if !parse_type_atom_chunks(chunks, index) {
+            return false;
+        }
+    }
+    true
+}
+
+fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
+    if *index >= chunks.len() {
+        return false;
+    }
+
+    match chunks[*index] {
+        "!" | "type" => {
+            *index += 1;
+            return parse_type_atom_chunks(chunks, index);
+        }
+        "borrow" | "&" => {
+            *index += 1;
+            if *index < chunks.len() && chunks[*index] == "mut" {
+                *index += 1;
+            }
+            return parse_type_atom_chunks(chunks, index);
+        }
+        "tuple" => {
+            *index += 1;
+            if *index >= chunks.len() || !chunks[*index].starts_with('(') {
+                return false;
+            }
+            *index += 1;
+            return true;
+        }
+        "struct" | "record" => {
+            *index += 1;
+            if *index >= chunks.len() || !chunks[*index].starts_with('{') {
+                return false;
+            }
+            *index += 1;
+            return true;
+        }
+        "typeof" => {
+            *index += 1;
+            if *index >= chunks.len() {
+                return false;
+            }
+            if chunks[*index] == "fnc" {
+                *index += 1;
+                if *index >= chunks.len() || !chunks[*index].starts_with('(') {
+                    return false;
+                }
+                *index += 1;
+            } else if chunks[*index].starts_with("fnc(") {
+                *index += 1;
+            } else {
+                return false;
+            }
+            if *index >= chunks.len() || chunks[*index] != "=>" {
+                return false;
+            }
+            *index += 1;
+            return parse_type_chunks(chunks, index);
+        }
+        "|" | "=>" | "." | "mut" => return false,
+        _ => {}
+    }
+
+    let first = chunks[*index];
+    *index += 1;
+
+    if first.starts_with('(') && *index < chunks.len() && chunks[*index] == "=>" {
+        *index += 1;
+        return parse_type_chunks(chunks, index);
+    }
+
+    while *index + 1 < chunks.len() && chunks[*index] == "." {
+        *index += 2;
+    }
+    while *index < chunks.len()
+        && (chunks[*index].starts_with('<') || chunks[*index].starts_with('['))
+    {
+        *index += 1;
+    }
+    true
+}
+
+fn header_tail_is_complete_type(visible_header: &str) -> bool {
     let Some(arrow) = visible_header.find("->") else {
         return false;
     };
-    let tail = &visible_header[arrow + 2..];
-    let words = top_level_visible_type_words(tail);
-
-    for index in 1..words.len() {
-        let previous = words[index - 1];
-        let current = words[index];
-        if !tail[previous.end..current.start].chars().all(char::is_whitespace) {
-            continue;
-        }
-
-        let previous_word = &tail[previous.start..previous.end];
-        let current_word = &tail[current.start..current.end];
-        let amp_mut = previous_word == "mut"
-            && (index >= 2
-                && &tail[words[index - 2].start..words[index - 2].end] == "borrow"
-                || tail[..previous.start].trim_end().ends_with('&'));
-        let legal_type_pair = previous_word == "type"
-            || previous_word == "borrow"
-            || amp_mut
-            || (previous_word == "typeof" && current_word == "fnc");
-
-        if !legal_type_pair {
-            return true;
-        }
+    let chunks = top_level_type_chunks(visible_header[arrow + 2..].trim());
+    if chunks.is_empty() {
+        return false;
     }
-
-    false
+    let mut index = 0usize;
+    parse_type_chunks(&chunks, &mut index) && index == chunks.len()
 }
 
 fn visible_double_colon_span(line: &str, after: usize, initial: LexState) -> Option<WordSpan> {
@@ -342,7 +410,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             || visible_header.contains('{')
             || visible_header.contains('}')
             || contains_body_word
-            || header_tail_has_ambiguous_bare_words(&visible_header)
+            || !header_tail_is_complete_type(&visible_header)
         {
             output.push_str(line);
             continue;
