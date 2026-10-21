@@ -2239,9 +2239,7 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     };
 
     let parameters = &line[open + 1..close];
-    if parameters.trim().is_empty()
-        || contains_visible_comment(parameters, LexState::default())
-    {
+    if parameters.trim().is_empty() || contains_visible_comment(parameters, LexState::default()) {
         return line.to_string();
     }
 
@@ -2370,9 +2368,7 @@ fn has_callable_declaration_suffix(line: &str) -> bool {
 fn wrap_callable_parameter_list(line: &str, initial: LexState) -> Option<Vec<(usize, String)>> {
     let (open, close) = callable_parameter_bounds(line, line.len(), initial)?;
     let parameters = &line[open + 1..close];
-    if parameters.trim().is_empty()
-        || contains_visible_comment(parameters, LexState::default())
-    {
+    if parameters.trim().is_empty() || contains_visible_comment(parameters, LexState::default()) {
         return None;
     }
 
