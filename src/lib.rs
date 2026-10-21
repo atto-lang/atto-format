@@ -2239,7 +2239,9 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     };
 
     let parameters = &line[open + 1..close];
-    if parameters.trim().is_empty() || parameters.contains("//") || parameters.contains("/*") {
+    if parameters.trim().is_empty()
+        || contains_visible_comment(parameters, LexState::default())
+    {
         return line.to_string();
     }
 
@@ -2274,10 +2276,12 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
     let lines: Vec<&str> = source.split('\n').collect();
     let mut output = Vec::with_capacity(lines.len());
     let mut index = 0usize;
+    let mut lex = LexState::default();
 
     while index < lines.len() {
         let first = lines[index];
-        let mut first_lex = LexState::default();
+        let initial = lex;
+        let mut first_lex = initial;
         let first_structural: String = scan_visible(first, &mut first_lex).into_iter().collect();
         let explicit_callable =
             contains_word(&first_structural, "fnc") || contains_word(&first_structural, "routine");
@@ -2285,36 +2289,37 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
         let has_unclosed_parameters = (explicit_callable || method_candidate)
             && first_structural.contains('(')
             && !first_structural.trim_end().ends_with('(')
-            && callable_parameter_bounds(first, first.len(), LexState::default()).is_none()
+            && callable_parameter_bounds(first, first.len(), initial).is_none()
             && first_structural.chars().filter(|&ch| ch == '(').count()
                 > first_structural.chars().filter(|&ch| ch == ')').count();
-        let comment_sensitive =
-            first.contains("//") || first.contains("/*") || first.contains("*/");
+        let comment_sensitive = contains_visible_comment(first, initial);
 
         if !has_unclosed_parameters || comment_sensitive {
             output.push(first.to_string());
+            lex = first_lex;
             index += 1;
             continue;
         }
 
         let mut joined = first.trim_end().to_string();
+        let mut joined_lex = first_lex;
         let mut cursor = index + 1;
         let mut complete = None;
         let mut unsafe_to_join = false;
         while cursor < lines.len() {
             let next = lines[cursor];
-            if next.contains("//") || next.contains("/*") || next.contains("*/") {
-                unsafe_to_join = true;
-                break;
-            }
-            if next.trim().is_empty() {
+            let next_initial = joined_lex;
+            let mut next_lex = next_initial;
+            let _ = scan_visible(next, &mut next_lex);
+            if contains_visible_comment(next, next_initial) || next.trim().is_empty() {
                 unsafe_to_join = true;
                 break;
             }
 
             joined.push(' ');
             joined.push_str(next.trim());
-            if callable_parameter_bounds(&joined, joined.len(), LexState::default()).is_some() {
+            joined_lex = next_lex;
+            if callable_parameter_bounds(&joined, joined.len(), initial).is_some() {
                 complete = Some(cursor);
                 break;
             }
@@ -2324,9 +2329,11 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
         let declaration_complete = explicit_callable || has_callable_declaration_suffix(&joined);
         if let Some(last) = complete.filter(|_| !unsafe_to_join && declaration_complete) {
             output.push(joined);
+            lex = joined_lex;
             index = last + 1;
         } else {
             output.push(first.to_string());
+            lex = first_lex;
             index += 1;
         }
     }
@@ -2364,9 +2371,7 @@ fn wrap_callable_parameter_list(line: &str, initial: LexState) -> Option<Vec<(us
     let (open, close) = callable_parameter_bounds(line, line.len(), initial)?;
     let parameters = &line[open + 1..close];
     if parameters.trim().is_empty()
-        || parameters.contains("//")
-        || parameters.contains("/*")
-        || parameters.contains("*/")
+        || contains_visible_comment(parameters, LexState::default())
     {
         return None;
     }
@@ -3226,6 +3231,42 @@ fn first_visible_char_index(line: &str, needle: char, initial: LexState) -> Opti
 }
 
 // Detect genuine line comments without matching text in strings or blocks.
+fn contains_visible_comment(line: &str, initial: LexState) -> bool {
+    if initial.block_comment {
+        return true;
+    }
+
+    let mut state = initial;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        if state.block_comment {
+            if ch == '*' && next == Some('/') {
+                state.block_comment = false;
+                chars.next();
+            }
+            continue;
+        }
+        if let Some(quote) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if ch == '\\' {
+                state.escape = true;
+            } else if ch == quote {
+                state.quote = None;
+            }
+            continue;
+        }
+        if ch == '/' && matches!(next, Some('/' | '*')) {
+            return true;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            state.quote = Some(ch);
+        }
+    }
+    false
+}
+
 fn has_line_comment(line: &str, initial: LexState) -> bool {
     let mut state = initial;
     let mut chars = line.chars().peekable();
