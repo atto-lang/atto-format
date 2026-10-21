@@ -2284,6 +2284,7 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
         let method_candidate = looks_like_multiline_method_header_start(&first_structural);
         let has_unclosed_parameters = (explicit_callable || method_candidate)
             && first_structural.contains('(')
+            && !first_structural.trim_end().ends_with('(')
             && callable_parameter_bounds(first, first.len(), LexState::default()).is_none()
             && first_structural.chars().filter(|&ch| ch == '(').count()
                 > first_structural.chars().filter(|&ch| ch == ')').count();
