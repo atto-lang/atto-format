@@ -3169,6 +3169,20 @@ end
     }
 
     #[test]
+    fn double_colon_separator_is_lexical_and_rejects_mixed_separators() {
+        assert!(format_source("fnc bad() -> int as :: return 1; end\n").is_err());
+        assert!(format_source("fnc bad() -> int :: as return 1; end\n").is_err());
+        assert!(format_source("fnc bad() -> int /* :: */ return 1; end\n").is_err());
+
+        let text = format_source("fnc text() -> string :: return \"::\"; end\n").unwrap();
+        assert!(text.starts_with("fnc text() -> string ::\n"));
+        assert!(text.contains("  return \"::\";\n"));
+
+        let comment = format_source("fnc value() -> int /* :: */ as return 1; end\n").unwrap();
+        assert!(comment.starts_with("fnc value() -> int /* :: */ as\n"));
+    }
+
+    #[test]
     fn expands_optional_as_compact_keyword_control_flow() {
         let compact =
             "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
