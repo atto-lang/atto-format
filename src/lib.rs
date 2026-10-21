@@ -2242,14 +2242,21 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
     {
         return line.to_string();
     }
-    let rest = &line[open + 1..];
-    let Some(relative_close) = first_visible_char_index(rest, '|', LexState::default()) else {
-        return line.to_string();
+    // The first pipe inside a typed parameter may be a union separator.
+    // Only a visible pipe followed by the executable arrow closes the lambda.
+    let mut search = open + 1;
+    let close = loop {
+        let Some(relative) =
+            first_visible_char_index(&line[search..], '|', LexState::default())
+        else {
+            return line.to_string();
+        };
+        let candidate = search + relative;
+        if line[candidate + 1..].trim_start().starts_with("->") {
+            break candidate;
+        }
+        search = candidate + 1;
     };
-    let close = open + 1 + relative_close;
-    if !line[close + 1..].trim_start().starts_with("->") {
-        return line.to_string();
-    }
     let parameters = &line[open + 1..close];
     if parameters.contains("//") || parameters.contains("/*") {
         return line.to_string();
