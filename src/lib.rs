@@ -2841,34 +2841,89 @@ fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError
     for (index, line) in source.lines().enumerate() {
         let visible: String = scan_visible(line, &mut lex).into_iter().collect();
         let compact: String = visible.chars().filter(|c| !c.is_whitespace()).collect();
+        let words = visible_word_spans(&visible, LexState::default());
+        let word = |span: WordSpan| &visible[span.start..span.end];
 
-        let forbidden = [
-            ("rtborrowmut", "legacy rt borrow mut; use rt mut borrow"),
-            ("rtref", "rt ref is not Oreslang source syntax"),
-            ("rtderef", "rt deref is not Oreslang source syntax"),
-            ("rtunref", "rt unref is not Oreslang source syntax"),
-            ("rtraw", "rt raw is not Oreslang source syntax"),
-            ("Pointer<", "Pointer<T> is not Oreslang source syntax"),
-            ("RawPointer<", "RawPointer<T> is not Oreslang source syntax"),
-            ("&mut", "&mut is not Oreslang borrow syntax"),
-        ];
-        for (needle, message) in forbidden {
-            if compact.contains(needle) {
+        for triple in words.windows(3) {
+            if word(triple[0]) == "rt"
+                && word(triple[1]) == "borrow"
+                && word(triple[2]) == "mut"
+            {
+                return Err(FormatError::new(
+                    index + 1,
+                    "legacy rt borrow mut; use rt mut borrow",
+                ));
+            }
+        }
+
+        for pair in words.windows(2) {
+            if word(pair[0]) != "rt" {
+                continue;
+            }
+            let message = match word(pair[1]) {
+                "ref" => Some("rt ref is not Oreslang source syntax"),
+                "deref" => Some("rt deref is not Oreslang source syntax"),
+                "unref" => Some("rt unref is not Oreslang source syntax"),
+                "raw" => Some("rt raw is not Oreslang source syntax"),
+                _ => None,
+            };
+            if let Some(message) = message {
                 return Err(FormatError::new(index + 1, message));
             }
         }
 
-        // Reject common unary address/dereference spellings without confusing
-        // ordinary binary bitwise '&' or multiplication '*'.
+        for span in &words {
+            let name = word(*span);
+            if matches!(name, "Pointer" | "RawPointer")
+                && visible[span.end..].trim_start().starts_with('<')
+            {
+                return Err(FormatError::new(
+                    index + 1,
+                    if name == "Pointer" {
+                        "Pointer<T> is not Oreslang source syntax"
+                    } else {
+                        "RawPointer<T> is not Oreslang source syntax"
+                    },
+                ));
+            }
+        }
+
+        // '& mut' is always a legacy pointer/borrow spelling, but an identifier
+        // such as 'mutator' after binary '&' must remain legal.
+        for (byte, _) in visible.match_indices('&') {
+            let tail = visible[byte + 1..].trim_start();
+            if let Some(rest) = tail.strip_prefix("mut") {
+                let boundary = rest
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_');
+                if boundary {
+                    return Err(FormatError::new(index + 1, "&mut is not Oreslang borrow syntax"));
+                }
+            }
+        }
+
+        // Reject unary address/dereference spellings at common expression and
+        // type starts without confusing ordinary binary '&' or '*'.
         for (needle, message) in [
             ("=&", "unary & address/borrow syntax is not valid Oreslang"),
             ("return&", "unary & address/borrow syntax is not valid Oreslang"),
             ("(&", "unary & address/borrow syntax is not valid Oreslang"),
             (",&", "unary & address/borrow syntax is not valid Oreslang"),
+            (":&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("->&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("[&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("{&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("=>&", "unary & address/borrow syntax is not valid Oreslang"),
             ("=*", "unary * dereference syntax is not valid Oreslang"),
             ("return*", "unary * dereference syntax is not valid Oreslang"),
             ("(*", "unary * dereference syntax is not valid Oreslang"),
             (",*", "unary * dereference syntax is not valid Oreslang"),
+            (":*", "unary * dereference syntax is not valid Oreslang"),
+            ("->*", "unary * dereference syntax is not valid Oreslang"),
+            ("[*", "unary * dereference syntax is not valid Oreslang"),
+            ("{*", "unary * dereference syntax is not valid Oreslang"),
+            ("=>*", "unary * dereference syntax is not valid Oreslang"),
         ] {
             if compact.contains(needle) {
                 return Err(FormatError::new(index + 1, message));
