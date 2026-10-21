@@ -69,9 +69,9 @@ end
   pub fnc abi_compatible(int minimum_supported, int maximum_supported,
                          int requested_abi): bool {
     return minimum_supported > 0 &
-           maximum_supported >= minimum_supported &
-           requested_abi >= minimum_supported &
-           requested_abi <= maximum_supported;
+         maximum_supported >= minimum_supported &
+         requested_abi >= minimum_supported &
+         requested_abi <= maximum_supported;
   }
   pub fnc allow_plugin(bool signature_verified, bool tenant_allowed,
                        bool sandboxed, bool abi_compatible): bool {
@@ -83,9 +83,9 @@ end
   // Numeric ABI versions are negotiated independently of plugin versions.
   pub fnc abi_compatible(int minimum_supported, int maximum_supported, int requested_abi) -> bool {
     return minimum_supported > 0 &
-      maximum_supported >= minimum_supported &
-      requested_abi >= minimum_supported &
-      requested_abi <= maximum_supported;
+    maximum_supported >= minimum_supported &
+    requested_abi >= minimum_supported &
+    requested_abi <= maximum_supported;
   }
   pub fnc allow_plugin(
     bool signature_verified,
@@ -107,7 +107,7 @@ define module oci_lifecycle as
                            int requested_generation, int observed_generation,
                            bool same_workload_uid, bool deleting): bool {
     if current_agent_epoch <= 0 ||
-       claimed_agent_epoch != current_agent_epoch; do return false; fi
+     claimed_agent_epoch != current_agent_epoch; do return false; fi
     if requested_generation <= 0 || observed_generation < 0; do return false; fi
     if requested_generation < observed_generation; do return false; fi
     return same_workload_uid && !deleting;
@@ -116,8 +116,8 @@ define module oci_lifecycle as
   pub fnc stop_authorized(int current_agent_epoch, int claimed_agent_epoch,
                           bool sandbox_identity_valid): bool {
     return current_agent_epoch > 0 &&
-           claimed_agent_epoch == current_agent_epoch &&
-           sandbox_identity_valid;
+         claimed_agent_epoch == current_agent_epoch &&
+         sandbox_identity_valid;
   }
 
   pub fnc release_resources(bool stop_requested,
@@ -138,7 +138,7 @@ define module oci_lifecycle as
     bool deleting
   ) -> bool {
     if current_agent_epoch <= 0 ||
-      claimed_agent_epoch != current_agent_epoch; then
+    claimed_agent_epoch != current_agent_epoch; then
       return false;
     fi
     if requested_generation <= 0 || observed_generation < 0; then
@@ -156,8 +156,8 @@ define module oci_lifecycle as
     bool sandbox_identity_valid
   ) -> bool {
     return current_agent_epoch > 0 &&
-      claimed_agent_epoch == current_agent_epoch &&
-      sandbox_identity_valid;
+    claimed_agent_epoch == current_agent_epoch &&
+    sandbox_identity_valid;
   }
 
   pub fnc release_resources(bool stop_requested, bool process_absent_confirmed) -> bool {
@@ -176,7 +176,7 @@ define module oci_validation as
   pub fnc may_reuse_container(int requested_generation, int observed_generation,
                               bool same_workload_uid, bool runtime_alive): bool {
     return requested_generation == observed_generation &
-           requested_generation > 0 & same_workload_uid & runtime_alive;
+         requested_generation > 0 & same_workload_uid & runtime_alive;
   }
 end
 "#,
@@ -192,7 +192,7 @@ define module oci_validation as
     bool runtime_alive
   ) -> bool {
     return requested_generation == observed_generation &
-      requested_generation > 0 & same_workload_uid & runtime_alive;
+    requested_generation > 0 & same_workload_uid & runtime_alive;
   }
 end
 "#,
