@@ -1115,9 +1115,86 @@ fn canonicalize_declaration_line(line: &str, initial: LexState, instance_member:
         .flatten())
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
+    .or_else(|| canonicalize_defined_type_alias(line, &words))
+    .or_else(|| canonicalize_simple_module_header(line, &words))
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .unwrap_or_else(|| line.to_string())
+}
+
+/// Canonical simple, end-delimited module header: `define module M as`.
+/// Do not touch qualified/contract headers, brace bodies, comments or strings.
+fn canonicalize_simple_module_header(line: &str, words: &[WordSpan]) -> Option<String> {
+    if words.len() != 3 || !plain_word_prefix(line, words) {
+        return None;
+    }
+    if &line[words[0].start..words[0].end] != "define"
+        || &line[words[1].start..words[1].end] != "module"
+    {
+        return None;
+    }
+    let name = &line[words[2].start..words[2].end];
+    if name.is_empty() || matches!(name, "as" | "conforms") {
+        return None;
+    }
+    let suffix = &line[words[2].end..];
+    if !suffix.trim().is_empty() && !suffix.trim_start().starts_with("//") {
+        return None;
+    }
+    let mut output = String::with_capacity(line.len() + 3);
+    output.push_str(&line[..words[2].end]);
+    output.push_str(" as");
+    output.push_str(suffix);
+    Some(output)
+}
+
+/// Order only the declaration prefix; never rewrite an alias's target,
+/// generic parameters or a legacy type whose identifier is literally `alias`.
+fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_prefix = |word: &str| {
+        matches!(word, "define" | "pub" | "private" | "type" | "alias")
+    };
+    let prefix_len = words
+        .iter()
+        .take_while(|span| is_prefix(&line[span.start..span.end]))
+        .count();
+    if prefix_len < 3 || prefix_len >= words.len() {
+        return None;
+    }
+    let prefix = &words[..prefix_len];
+    // The very next word must be the actual alias name, with no intervening
+    // '=' or punctuation. This protects `define type alias = int;`.
+    if !plain_word_prefix(line, &words[..=prefix_len]) {
+        return None;
+    }
+
+    let mut define_seen = false;
+    let mut type_seen = false;
+    let mut alias_seen = false;
+    let mut visibility: Option<&str> = None;
+    for span in prefix {
+        match &line[span.start..span.end] {
+            "define" if !define_seen => define_seen = true,
+            "type" if !type_seen => type_seen = true,
+            "alias" if type_seen && !alias_seen => alias_seen = true,
+            "pub" | "private" if visibility.is_none() => {
+                visibility = Some(&line[span.start..span.end])
+            }
+            _ => return None,
+        }
+    }
+    if !define_seen || !type_seen || !alias_seen
+        || &line[prefix.last()?.start..prefix.last()?.end] != "alias"
+    {
+        return None;
+    }
+
+    let mut canonical = vec!["define"];
+    if let Some(visibility) = visibility {
+        canonical.push(visibility);
+    }
+    canonical.extend(["type", "alias"]);
+    Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
 // Legacy "fnc name(...)" inside a class or actor is an instance method,

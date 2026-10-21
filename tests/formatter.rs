@@ -1584,3 +1584,56 @@ return;
     }
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn transparent_type_aliases_preserve_generic_targets_and_canonicalize_visibility() {
+    let source = r#"pub define type alias Pair<K, V> as Entry<K, V>;
+define type alias Two<A, B> as Tuple[A, B];
+type Old = Entry<int, string>;
+type alias = int;
+define type alias = string;
+"#;
+    let formatted = format_source(source).expect("format aliases");
+    assert!(formatted.contains("define pub type alias Pair<K, V> as Entry<K, V>;"), "{formatted}");
+    assert!(formatted.contains("define type alias Two<A, B> as Tuple[A, B];"), "{formatted}");
+    assert!(formatted.contains("type Old = Entry<int, string>;"), "{formatted}");
+    assert!(formatted.contains("type alias = int;"), "{formatted}");
+    assert!(formatted.contains("define type alias = string;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn comments_and_literals_cannot_reorder_type_alias_words() {
+    let source = r#"// pub define type alias Fake as Entry;
+const string example = "pub define type alias Fake as Entry";
+pub define /* comment */ type alias Real as Entry;
+"#;
+    let formatted = format_source(source).expect("format alias comments");
+    assert!(formatted.contains("// pub define type alias Fake as Entry;"));
+    assert!(formatted.contains("\"pub define type alias Fake as Entry\""));
+    assert!(formatted.contains("pub define /* comment */ type alias Real as Entry;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn canonical_simple_module_headers_use_as() {
+    let legacy = "define module products\n  define pub type alias Pair<K,V> as Tuple[K,V];\nend\n";
+    let expected = "define module products as\n  define pub type alias Pair<K,V> as Tuple[K,V];\nend\n";
+    assert_eq!(format_source(legacy).unwrap(), expected);
+    assert_eq!(format_source(expected).unwrap(), expected);
+}
+
+#[test]
+fn module_header_comments_and_nonheaders_are_not_rewritten() {
+    let source = "define module core // comment\nend\n";
+    let result = format_source(source).unwrap();
+    assert!(result.starts_with("define module core as // comment\n"), "{result}");
+    assert_eq!(format_source(&result).unwrap(), result);
+
+    let already = "define module core as\nend\n";
+    assert_eq!(format_source(already).unwrap(), already);
+
+    // Never manufacture an `as` in strings or unrelated expressions.
+    let quote = "const string example = \"define module core\";\n";
+    assert_eq!(format_source(quote).unwrap(), quote);
+}
