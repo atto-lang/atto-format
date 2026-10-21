@@ -108,7 +108,62 @@ struct LexState {
     escape: bool,
 }
 
-/// Split the compiler's compact optional-`as` end-delimited callable form
+fn first_visible_double_colon_index(line: &str, initial: LexState) -> Option<usize> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let mut state = initial;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let (byte_index, c) = chars[i];
+        let next = chars.get(i + 1).map(|(_, c)| *c);
+
+        if state.block_comment {
+            if c == '*' && next == Some('/') {
+                state.block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(q) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if c == '\\' {
+                state.escape = true;
+            } else if c == q {
+                state.quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            return None;
+        }
+        if c == '/' && next == Some('*') {
+            state.block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(c, '"' | '\'' | '`') {
+            state.quote = Some(c);
+            i += 1;
+            continue;
+        }
+
+        if c == ':' && next == Some(':') {
+            return Some(byte_index);
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+/// Split the compiler's compact optional-`as`/`::` end-delimited callable form
 /// before the ordinary line-oriented indentation pass. This is deliberately
 /// narrow: only free/module-style `fnc`/`routine` headers with an explicit
 /// slim arrow and a final visible `end` are expanded. Unsupported actor,
@@ -146,24 +201,38 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(line);
             continue;
         };
-        let Some(as_span) = words
+        let as_separator = words
             .iter()
             .copied()
             .find(|span| span.start > close && word(*span) == "as")
-        else {
+            .map(|span| (span.start, span.end));
+
+        let mut separator_lex = initial;
+        let _ = scan_visible(&line[..close + 1], &mut separator_lex);
+        let double_colon_separator =
+            first_visible_double_colon_index(&line[close + 1..], separator_lex)
+                .map(|offset| (close + 1 + offset, close + 1 + offset + 2));
+
+        let separator = match (as_separator, double_colon_separator) {
+            (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
+            (Some(separator), None) | (None, Some(separator)) => Some(separator),
+            (None, None) => None,
+        };
+        let Some((separator_start, separator_end)) = separator else {
             output.push_str(line);
             continue;
         };
+
         let Some(end_span) = words.last().copied().filter(|span| word(*span) == "end") else {
             output.push_str(line);
             continue;
         };
-        if as_span.end > end_span.start {
+        if separator_end > end_span.start {
             output.push_str(line);
             continue;
         }
 
-        let header_tail = &line[close + 1..as_span.start];
+        let header_tail = &line[close + 1..separator_start];
         let mut header_lex = LexState::default();
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
@@ -226,8 +295,8 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             continue;
         }
 
-        let body = line[as_span.end..end_span.start].trim();
-        output.push_str(line[..as_span.end].trim_end());
+        let body = line[separator_end..end_span.start].trim();
+        output.push_str(line[..separator_end].trim_end());
         output.push('\n');
         if !body.is_empty() {
             output.push_str(body);
@@ -3357,4 +3426,40 @@ end
         assert!(got.contains("fnc retry() => bool;"));
         assert!(got.contains("pub name() -> String {"));
     }
+    #[test]
+    fn expands_optional_double_colon_compact_end_delimited_callables() {
+        let compact = "fnc identity(int x) -> int :: return x; end\n";
+        let expected = "fnc identity(int x) -> int ::\n  return x;\nend\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn double_colon_separator_preserves_body_casts_and_qualified_members() {
+        let compact =
+            "fnc lookup(int value) -> int :: return namespace::convert(value as int); end\n";
+        let got = format_source(compact).unwrap();
+        assert!(got.starts_with("fnc lookup(int value) -> int ::\n"));
+        assert!(got.contains("  return namespace::convert(value as int);\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn double_colon_separator_follows_complete_higher_order_return_type() {
+        let compact = "fnc callback() -> () => void :: return factory(); end\n";
+        let got = format_source(compact).unwrap();
+        assert!(got.starts_with("fnc callback() -> () => void ::\n"));
+        assert!(got.contains("  return factory();\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn hidden_double_colon_cannot_impersonate_callable_separator() {
+        assert!(format_source(
+            "fnc malformed() -> int /* :: */ return 1; end\n"
+        )
+        .is_err());
+    }
+
 }
