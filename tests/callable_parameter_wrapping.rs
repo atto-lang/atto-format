@@ -259,4 +259,3 @@ fnc real(
     assert!(got.contains("fnc fake(int alpha, int beta,\n         int gamma, int delta): void {"));
     assert_eq!(format_source(&got).unwrap(), got);
 }
-
