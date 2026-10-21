@@ -749,8 +749,8 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             pending_method_parameter_depth > 0 && structural.trim_start().starts_with(')');
         let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
             && is_end_delimited_callable_header(structural);
-        let callable_body = is_callable_body_header(structural, signature_context)
-            || end_delimited_callable
+        let callable_body = end_delimited_callable
+            || is_callable_body_header(structural, signature_context)
             || (closes_multiline_method && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context);
         if callable_body || callable_signature {
@@ -2172,8 +2172,7 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
 
 fn is_end_delimited_callable_header(structural: &str) -> bool {
     let line = structural.trim();
-    if line.contains('{')
-        || line.ends_with(';')
+    if line.ends_with(';')
         || contains_word(line, "actor")
         || contains_word(line, "isoactor")
         || contains_word(line, "static")
@@ -2187,7 +2186,24 @@ fn is_end_delimited_callable_header(structural: &str) -> bool {
     let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
         return false;
     };
-    line[close + 1..].trim_start().starts_with("->")
+    let header_tail = line[close + 1..].trim();
+    if !header_tail.starts_with("->") {
+        return false;
+    }
+    // A record/struct return type may itself contain balanced braces. Such
+    // braces are part of the type, not the beginning of an executable body.
+    // Strip only an optional final body separator before checking the type.
+    // Actual braced bodies leave extra tokens and must not be classified as
+    // end-delimited callable headers.
+    if line.contains('{') {
+        let type_tail = header_tail
+            .strip_suffix("::")
+            .or_else(|| header_tail.strip_suffix(" as"))
+            .unwrap_or(header_tail)
+            .trim_end();
+        return header_tail_is_complete_type(type_tail);
+    }
+    true
 }
 
 fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
@@ -3568,9 +3584,20 @@ end
             "fnc j() -> \"ok value\" :: return \"ok value\"; end\n",
             "fnc k() -> {foo: int, bar: string} :: return value; end\n",
             "fnc l() -> struct {foo: int} :: return value; end\n",
+            "fnc m() -> {foo: int} as return value; end\n",
+            "fnc n() -> record {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
         }
+    }
+
+    #[test]
+    fn record_shaped_return_type_does_not_open_a_braced_callable_body() {
+        let source = "fnc shape() -> {foo: int, bar: string}\nreturn value;\nend\n";
+        let rendered = format_source(source).unwrap();
+        assert!(rendered.contains("fnc shape() -> {foo: int, bar: string}\n"));
+        assert!(rendered.contains("  return value;\n"));
+        assert_eq!(format_source(&rendered).unwrap(), rendered);
     }
 
     #[test]
