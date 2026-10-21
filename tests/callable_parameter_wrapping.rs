@@ -74,10 +74,8 @@ fn three_parameters_wrap_only_above_sixty_total_name_columns() {
 
 #[test]
 fn fewer_than_three_parameters_do_not_wrap_from_underscore_names() {
-    let input =
-        "fnc pair(bool namespace_policy_accepted, bool sandbox_identity_valid): bool {\nreturn true;\n}\n";
-    let expected =
-        "fnc pair(bool namespace_policy_accepted, bool sandbox_identity_valid) -> bool {\n  return true;\n}\n";
+    let input = "fnc pair(bool namespace_policy_accepted, bool sandbox_identity_valid): bool {\nreturn true;\n}\n";
+    let expected = "fnc pair(bool namespace_policy_accepted, bool sandbox_identity_valid) -> bool {\n  return true;\n}\n";
     assert_eq!(format_source(input).unwrap(), expected);
 }
 
@@ -85,6 +83,32 @@ fn fewer_than_three_parameters_do_not_wrap_from_underscore_names() {
 fn instance_methods_use_the_same_two_space_continuation_rule() {
     let input = r#"define class Driver as
   attach(bool a, bool b, bool c, bool d): void {
+    return;
+  }
+end
+"#;
+    let expected = r#"define class Driver as
+  attach(
+    bool a,
+    bool b,
+    bool c,
+    bool d
+  ) -> void {
+    return;
+  }
+end
+"#;
+
+    let got = format_source(input).unwrap();
+    assert_eq!(got, expected);
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn partially_multiline_instance_methods_are_reflowed_canonically() {
+    let input = r#"define class Driver as
+  attach(bool a, bool b,
+         bool c, bool d): void {
     return;
   }
 end
