@@ -2281,7 +2281,8 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
         let first_structural: String = scan_visible(first, &mut first_lex).into_iter().collect();
         let explicit_callable =
             contains_word(&first_structural, "fnc") || contains_word(&first_structural, "routine");
-        let has_unclosed_parameters = explicit_callable
+        let method_candidate = looks_like_multiline_method_header_start(&first_structural);
+        let has_unclosed_parameters = (explicit_callable || method_candidate)
             && first_structural.contains('(')
             && callable_parameter_bounds(first, first.len(), LexState::default()).is_none()
             && first_structural.chars().filter(|&ch| ch == '(').count()
@@ -2318,7 +2319,8 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
             cursor += 1;
         }
 
-        if let Some(last) = complete.filter(|_| !unsafe_to_join) {
+        let declaration_complete = explicit_callable || has_callable_declaration_suffix(&joined);
+        if let Some(last) = complete.filter(|_| !unsafe_to_join && declaration_complete) {
             output.push(joined);
             index = last + 1;
         } else {
@@ -2328,6 +2330,35 @@ fn collapse_multiline_explicit_callable_headers(source: &str) -> String {
     }
 
     output.join("\n")
+}
+
+fn looks_like_multiline_method_header_start(structural: &str) -> bool {
+    let trimmed = structural.trim_start();
+    for keyword in [
+        "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
+        "default", "return", "let", "const", "val", "await", "spawn",
+    ] {
+        if starts_word(trimmed, keyword) {
+            return false;
+        }
+    }
+
+    let prefix = trimmed.split('(').next().unwrap_or("").trim();
+    !prefix.is_empty()
+        && !prefix.contains('=')
+        && !prefix.contains('.')
+        && !prefix.ends_with("new")
+}
+
+fn has_callable_declaration_suffix(line: &str) -> bool {
+    let Some((_, close)) = callable_parameter_bounds(line, line.len(), LexState::default()) else {
+        return false;
+    };
+    let tail = line[close + 1..].trim_start();
+    tail.starts_with(':')
+        || tail.starts_with("->")
+        || tail.starts_with("=>")
+        || tail.starts_with('{')
 }
 
 fn wrap_callable_parameter_list(line: &str, initial: LexState) -> Option<Vec<(usize, String)>> {
