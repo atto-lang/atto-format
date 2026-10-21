@@ -108,7 +108,65 @@ struct LexState {
     escape: bool,
 }
 
-/// Split the compiler's compact optional-`as` end-delimited callable form
+fn visible_double_colon_span(line: &str, after: usize, initial: LexState) -> Option<WordSpan> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let mut state = initial;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let (byte_index, c) = chars[i];
+        let next = chars.get(i + 1).map(|(_, ch)| *ch);
+
+        if state.block_comment {
+            if c == '*' && next == Some('/') {
+                state.block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(q) = state.quote {
+            if state.escape {
+                state.escape = false;
+            } else if c == '\\' {
+                state.escape = true;
+            } else if c == q {
+                state.quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            return None;
+        }
+        if c == '/' && next == Some('*') {
+            state.block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(c, '"' | '\'' | '`') {
+            state.quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if byte_index > after && c == ':' && next == Some(':') {
+            let (next_index, next_char) = chars[i + 1];
+            return Some(WordSpan {
+                start: byte_index,
+                end: next_index + next_char.len_utf8(),
+            });
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+/// Split the compiler's compact optional-`as` / `::` end-delimited callable form
 /// before the ordinary line-oriented indentation pass. This is deliberately
 /// narrow: only free/module-style `fnc`/`routine` headers with an explicit
 /// slim arrow and a final visible `end` are expanded. Unsupported actor,
@@ -146,10 +204,15 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(line);
             continue;
         };
-        let Some(as_span) = words
+        let as_span = words
             .iter()
             .copied()
-            .find(|span| span.start > close && word(*span) == "as")
+            .find(|span| span.start > close && word(*span) == "as");
+        let double_colon_span = visible_double_colon_span(line, close, initial);
+        let Some(separator_span) = [as_span, double_colon_span]
+            .into_iter()
+            .flatten()
+            .min_by_key(|span| span.start)
         else {
             output.push_str(line);
             continue;
@@ -158,12 +221,12 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             output.push_str(line);
             continue;
         };
-        if as_span.end > end_span.start {
+        if separator_span.end > end_span.start {
             output.push_str(line);
             continue;
         }
 
-        let header_tail = &line[close + 1..as_span.start];
+        let header_tail = &line[close + 1..separator_span.start];
         let mut header_lex = LexState::default();
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
@@ -226,8 +289,8 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
             continue;
         }
 
-        let body = line[as_span.end..end_span.start].trim();
-        output.push_str(line[..as_span.end].trim_end());
+        let body = line[separator_span.end..end_span.start].trim();
+        output.push_str(line[..separator_span.end].trim_end());
         output.push('\n');
         if !body.is_empty() {
             output.push_str(body);
@@ -3088,6 +3151,24 @@ end
     }
 
     #[test]
+    fn expands_optional_double_colon_compact_end_delimited_callables() {
+        let compact = "fnc identity(int x) -> int :: return x; end\n";
+        let expected = "fnc identity(int x) -> int ::\n  return x;\nend\n";
+        let got = format_source(compact).unwrap();
+        assert_eq!(got, expected);
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
+    fn double_colon_separator_preserves_static_access_in_body() {
+        let compact = "fnc lookup() -> int :: return Math::answer(); end\n";
+        let got = format_source(compact).unwrap();
+        assert!(got.starts_with("fnc lookup() -> int ::\n"));
+        assert!(got.contains("  return Math::answer();\n"));
+        assert_eq!(format_source(&got).unwrap(), got);
+    }
+
+    #[test]
     fn expands_optional_as_compact_keyword_control_flow() {
         let compact =
             "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
@@ -3105,12 +3186,18 @@ end
     }
 
     #[test]
-    fn optional_as_after_higher_order_return_type_is_preserved() {
-        let compact = "fnc callback() -> () => void as return factory(); end\n";
-        let got = format_source(compact).unwrap();
-        assert!(got.starts_with("fnc callback() -> () => void as\n"));
-        assert!(got.contains("  return factory();\n"));
-        assert_eq!(format_source(&got).unwrap(), got);
+    fn optional_body_separator_after_higher_order_return_type_is_preserved() {
+        let compact_as = "fnc callback() -> () => void as return factory(); end\n";
+        let got_as = format_source(compact_as).unwrap();
+        assert!(got_as.starts_with("fnc callback() -> () => void as\n"));
+        assert!(got_as.contains("  return factory();\n"));
+        assert_eq!(format_source(&got_as).unwrap(), got_as);
+
+        let compact_colon = "fnc callback() -> () => void :: return factory(); end\n";
+        let got_colon = format_source(compact_colon).unwrap();
+        assert!(got_colon.starts_with("fnc callback() -> () => void ::\n"));
+        assert!(got_colon.contains("  return factory();\n"));
+        assert_eq!(format_source(&got_colon).unwrap(), got_colon);
     }
 
     #[test]
@@ -3229,17 +3316,23 @@ end
         let twice = format_source(&once).unwrap();
         assert_eq!(twice, once);
         assert!(once.contains("fnc identity(int x) -> int as\n"));
+        assert!(once.contains("fnc identity_colon(int x) -> int ::\n"));
         assert!(once.contains("fnc callback() -> () => void as\n"));
         assert!(once.contains("fnc text() -> string /* ; as do end */ as\n"));
         assert!(once.contains("fnc double(int x) -> int as\n"));
     }
 
     #[test]
-    fn routine_uses_the_same_end_delimited_as_formatting() {
-        let compact = "routine identity(int x) -> int as return x; end\n";
-        let got = format_source(compact).unwrap();
-        assert_eq!(got, "routine identity(int x) -> int as\n  return x;\nend\n");
-        assert_eq!(format_source(&got).unwrap(), got);
+    fn routine_uses_the_same_end_delimited_separator_formatting() {
+        let compact_as = "routine identity(int x) -> int as return x; end\n";
+        let got_as = format_source(compact_as).unwrap();
+        assert_eq!(got_as, "routine identity(int x) -> int as\n  return x;\nend\n");
+        assert_eq!(format_source(&got_as).unwrap(), got_as);
+
+        let compact_colon = "routine identity(int x) -> int :: return x; end\n";
+        let got_colon = format_source(compact_colon).unwrap();
+        assert_eq!(got_colon, "routine identity(int x) -> int ::\n  return x;\nend\n");
+        assert_eq!(format_source(&got_colon).unwrap(), got_colon);
     }
 
     #[test]
