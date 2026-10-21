@@ -152,7 +152,16 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     false
 }
 
-fn first_top_level_header_terminator(tokens: &[Token<'_>], start: usize) -> Option<&str> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderTerminator {
+    Keyword,
+    Brace,
+}
+
+fn first_top_level_header_terminator(
+    tokens: &[Token<'_>],
+    start: usize,
+) -> Option<HeaderTerminator> {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
     for token in &tokens[start..] {
@@ -161,8 +170,8 @@ fn first_top_level_header_terminator(tokens: &[Token<'_>], start: usize) -> Opti
             ")" => parens = parens.saturating_sub(1),
             "[" => brackets += 1,
             "]" => brackets = brackets.saturating_sub(1),
-            "{" if parens == 0 && brackets == 0 => return Some("{"),
-            "then" | "do" if parens == 0 && brackets == 0 => return Some(token.text),
+            "{" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Brace),
+            "then" | "do" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Keyword),
             _ => {}
         }
     }
@@ -220,11 +229,11 @@ fn collapse_multiline_keyword_headers(source: &str) -> String {
             let mut joined_state = LexState::default();
             let joined_lexed = lex_line(&joined, &mut joined_state);
             match first_top_level_header_terminator(&joined_lexed.tokens, 1) {
-                Some("then" | "do") => {
+                Some(HeaderTerminator::Keyword) => {
                     complete = Some(cursor);
                     break;
                 }
-                Some("{") => {
+                Some(HeaderTerminator::Brace) => {
                     unsafe_to_join = true;
                     break;
                 }
