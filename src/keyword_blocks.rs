@@ -164,14 +164,16 @@ fn first_top_level_header_terminator(
 ) -> Option<HeaderTerminator> {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
-    for token in &tokens[start..] {
+    for token in tokens.iter().skip(start) {
         match token.text {
             "(" => parens += 1,
             ")" => parens = parens.saturating_sub(1),
             "[" => brackets += 1,
             "]" => brackets = brackets.saturating_sub(1),
             "{" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Brace),
-            "then" | "do" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Keyword),
+            "then" | "do" if parens == 0 && brackets == 0 => {
+                return Some(HeaderTerminator::Keyword);
+            }
             _ => {}
         }
     }
