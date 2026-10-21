@@ -108,6 +108,72 @@ struct LexState {
     escape: bool,
 }
 
+fn normalize_header_type_source(text: &str) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut block_depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+
+        if block_depth > 0 {
+            if c == '/' && next == Some('*') {
+                block_depth += 1;
+                i += 2;
+                continue;
+            }
+            if c == '*' && next == Some('/') {
+                block_depth -= 1;
+                out.push(' ');
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            break;
+        }
+        if c == '/' && next == Some('*') {
+            block_depth = 1;
+            out.push(' ');
+            i += 2;
+            continue;
+        }
+        if c == '"' || c == '\'' || c == '\u{60}' {
+            out.push_str("__ores_literal_type__");
+            quote = Some(c);
+            i += 1;
+            continue;
+        }
+
+        out.push(c);
+        i += 1;
+    }
+
+    if block_depth != 0 || quote.is_some() {
+        return None;
+    }
+    Some(out)
+}
+
 fn top_level_type_chunks(text: &str) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start: Option<usize> = None;
@@ -168,9 +234,10 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             *index += 1;
             return parse_type_atom_chunks(chunks, index);
         }
-        "borrow" | "&" => {
+        "borrow" | "&" | "&mut" => {
+            let prefix = chunks[*index];
             *index += 1;
-            if *index < chunks.len() && chunks[*index] == "mut" {
+            if prefix != "&mut" && *index < chunks.len() && chunks[*index] == "mut" {
                 *index += 1;
             }
             return parse_type_atom_chunks(chunks, index);
@@ -236,11 +303,14 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
     true
 }
 
-fn header_tail_is_complete_type(visible_header: &str) -> bool {
-    let Some(arrow) = visible_header.find("->") else {
+fn header_tail_is_complete_type(header_source: &str) -> bool {
+    let Some(normalized) = normalize_header_type_source(header_source) else {
         return false;
     };
-    let chunks = top_level_type_chunks(visible_header[arrow + 2..].trim());
+    let Some(arrow) = normalized.find("->") else {
+        return false;
+    };
+    let chunks = top_level_type_chunks(normalized[arrow + 2..].trim());
     if chunks.is_empty() {
         return false;
     }
@@ -371,46 +441,9 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
             .collect();
-        let visible_header_words = visible_word_spans(&visible_header, LexState::default());
-        let contains_body_word = visible_header_words.iter().any(|span| {
-            matches!(
-                &visible_header[span.start..span.end],
-                "return"
-                    | "if"
-                    | "elif"
-                    | "else"
-                    | "fi"
-                    | "do"
-                    | "done"
-                    | "select"
-                    | "match"
-                    | "switch"
-                    | "const"
-                    | "let"
-                    | "val"
-                    | "for"
-                    | "while"
-                    | "loop"
-                    | "try"
-                    | "catch"
-                    | "finally"
-                    | "throw"
-                    | "raise"
-                    | "panic"
-                    | "await"
-                    | "spawn"
-                    | "break"
-                    | "continue"
-                    | "yield"
-                    | "defer"
-            )
-        });
         if !visible_header.contains("->")
             || visible_header.contains(';')
-            || visible_header.contains('{')
-            || visible_header.contains('}')
-            || contains_body_word
-            || !header_tail_is_complete_type(&visible_header)
+            || !header_tail_is_complete_type(header_tail)
         {
             output.push_str(line);
             continue;
@@ -3488,6 +3521,10 @@ end
             "fnc f() -> & mut Thing :: return value; end\n",
             "fnc g() -> type Thing :: return value; end\n",
             "fnc h() -> typeof fnc(int x) => string :: return callback; end\n",
+            "fnc i() -> &mut Thing :: return value; end\n",
+            "fnc j() -> \"ok value\" :: return \"ok value\"; end\n",
+            "fnc k() -> {foo: int, bar: string} :: return value; end\n",
+            "fnc l() -> struct {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
         }
