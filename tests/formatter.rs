@@ -270,6 +270,32 @@ fn binary_ampersand_and_multiplication_remain_formatable() {
 }
 
 #[test]
+fn pointer_guard_uses_token_boundaries() {
+    for source in [
+        "fnc rtrefactor(int value): int { return value; }\n",
+        "define class SomePointer as end\n",
+        "define class RawPointerAlias as end\n",
+        "fnc calc(int mutator, int x): int { return x & mutator; }\n",
+    ] {
+        assert!(format_source(source).is_ok(), "{source}");
+    }
+}
+
+#[test]
+fn pointer_guard_rejects_more_expression_and_type_starts() {
+    for source in [
+        "fnc bad(): &Thing { return value; }\n",
+        "fnc bad(): int { return [&value][0]; }\n",
+        "fnc bad(): int { return [*value][0]; }\n",
+        "fnc bad(): int { return condition ? 1 : &value; }\n",
+        "fnc bad(): int { return condition ? 1 : *value; }\n",
+        "define class Cursor as pub next(self & mut Cursor)() -> int { return 1; } end\n",
+    ] {
+        assert!(format_source(source).is_err(), "{source}");
+    }
+}
+
+#[test]
 fn module_owned_class_is_indented_as_a_module_member() {
     let src = r#"define module Accounts as
 define class Account as
