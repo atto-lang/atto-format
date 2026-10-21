@@ -691,6 +691,9 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             content = canonicalize_callable_arrow(&content, desired, lex);
         }
 
+        // Both |Type name| and |name: Type| are accepted; emit type-first.
+        content = canonicalize_pipe_lambda_parameter_order(&content, lex);
+
         let brace_depth_before_line = brace_stack.len();
         let assignment_lambda_continuation =
             pending_assignment_continuation && starts_pipe_lambda_expression(structural);
@@ -2222,6 +2225,53 @@ fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> Strin
     result.push_str(&canonical.join(", "));
     result.push_str(&line[close..]);
     result
+}
+
+/// Normalize explicit name-first pipe parameters without rewriting unrelated
+/// bitwise/boolean pipes, comments, strings, or the lambda's expression body.
+fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> String {
+    let Some(open) = first_visible_char_index(line, '|', initial) else {
+        return line.to_string();
+    };
+    let prefix = line[..open].trim_end();
+    if !(prefix.is_empty()
+        || prefix.ends_with('=')
+        || prefix.ends_with('(')
+        || prefix.ends_with("nlex")
+        || prefix.ends_with("return"))
+    {
+        return line.to_string();
+    }
+    let rest = &line[open + 1..];
+    let Some(relative_close) = first_visible_char_index(rest, '|', LexState::default()) else {
+        return line.to_string();
+    };
+    let close = open + 1 + relative_close;
+    if !line[close + 1..].trim_start().starts_with("->") {
+        return line.to_string();
+    }
+    let parameters = &line[open + 1..close];
+    if parameters.contains("//") || parameters.contains("/*") {
+        return line.to_string();
+    }
+    let Some(parts) = split_top_level_parameters(parameters) else {
+        return line.to_string();
+    };
+    let mut changed = false;
+    let mut canonical = Vec::with_capacity(parts.len());
+    for part in parts {
+        let part = part.trim();
+        if let Some(typed) = canonicalize_name_first_parameter(part) {
+            changed = true;
+            canonical.push(typed);
+        } else {
+            canonical.push(part.to_string());
+        }
+    }
+    if !changed {
+        return line.to_string();
+    }
+    format!("{}{}{}", &line[..open + 1], canonical.join(", "), &line[close..])
 }
 
 fn split_top_level_parameters(parameters: &str) -> Option<Vec<&str>> {
