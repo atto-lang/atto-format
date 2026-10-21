@@ -1792,3 +1792,30 @@ const fnc second = |bar: string| -> {
     assert!(formatted.contains("const fnc second = |string bar| -> {"), "{formatted}");
     assert!(is_formatted(&formatted).unwrap());
 }
+
+#[test]
+fn pipe_lambda_parameter_union_must_not_be_mistaken_for_closing_delimiter() {
+    let source = r#"const fnc union = |candidate: string | int| -> {
+  return candidate;
+};
+const fnc ordinary = |string left, right: string| -> {
+  return left + right;
+};
+"#;
+    let formatted = format_source(source).expect("format typed union lambdas");
+    assert!(formatted.contains("const fnc union = |string | int candidate| -> {"), "{formatted}");
+    assert!(formatted.contains("const fnc ordinary = |string left, string right| -> {"), "{formatted}");
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
+fn pipe_lambda_no_rewrite_of_arrow_in_strings_or_unrelated_pipes() {
+    let src = r#"const text = "|hello: string| -> fake";
+const outcome = good | bad;
+const fnc actual = |name: string| -> name;
+"#;
+    let result = format_source(src).expect("format");
+    assert!(result.contains(r#"const text = "|hello: string| -> fake";"#), "{result}");
+    assert!(result.contains("const outcome = good | bad;"), "{result}");
+    assert!(result.contains("const fnc actual = |string name| -> name;"), "{result}");
+}
