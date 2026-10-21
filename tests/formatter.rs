@@ -1789,3 +1789,29 @@ return;
     }
     assert_eq!(format_source(&once).unwrap(), once);
 }
+
+
+#[test]
+fn typed_const_fnc_template_body_keeps_lambda_and_interpolation_bytes() {
+    let source = r#"const fnc foo = |string bar, string star| -> {
+return `${bar} is ${star}`;
+};
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("const fnc foo = |string bar, string star| -> {"), "{once}");
+    assert!(once.contains("return `${bar} is ${star}`;"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn template_expression_tokens_are_opaque_to_conditional_and_lambda_rewrites() {
+    let source = r#"pub fnc main(): void {
+const word = "hi";
+const complex = `start:${word} - ${"{" + "}"} ? -> : done`;
+return;
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains(r#"`start:${word} - ${"{" + "}"} ? -> : done`"#), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
