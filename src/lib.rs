@@ -328,9 +328,9 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         lex = next_lex;
 
         let word = |span: WordSpan| &line[span.start..span.end];
-        let forbidden = words.iter().any(|span| {
-            matches!(word(*span), "actor" | "isoactor" | "static" | "abstract")
-        });
+        let forbidden = words
+            .iter()
+            .any(|span| matches!(word(*span), "actor" | "isoactor" | "static" | "abstract"));
         if forbidden
             || !words
                 .iter()
@@ -422,9 +422,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         // fail-closed path instead of being partially normalized.
         let suffix = &line[end_span.end..];
         let mut suffix_lex = LexState::default();
-        let visible_suffix: String = scan_visible(suffix, &mut suffix_lex)
-            .into_iter()
-            .collect();
+        let visible_suffix: String = scan_visible(suffix, &mut suffix_lex).into_iter().collect();
         if !visible_suffix.trim().is_empty() {
             output.push_str(line);
             continue;
@@ -1465,9 +1463,7 @@ fn canonicalize_simple_module_header(line: &str, words: &[WordSpan]) -> Option<S
 /// Order only the declaration prefix; never rewrite an alias's target,
 /// generic parameters or a legacy type whose identifier is literally `alias`.
 fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<String> {
-    let is_prefix = |word: &str| {
-        matches!(word, "define" | "pub" | "private" | "type" | "alias")
-    };
+    let is_prefix = |word: &str| matches!(word, "define" | "pub" | "private" | "type" | "alias");
     let prefix_len = words
         .iter()
         .take_while(|span| is_prefix(&line[span.start..span.end]))
@@ -1497,7 +1493,9 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
             _ => return None,
         }
     }
-    if !define_seen || !type_seen || !alias_seen
+    if !define_seen
+        || !type_seen
+        || !alias_seen
         || &line[prefix.last()?.start..prefix.last()?.end] != "alias"
     {
         return None;
@@ -3443,8 +3441,7 @@ end
 
     #[test]
     fn compact_callable_as_preserves_nested_lambda_boundaries() {
-        let src =
-            "fnc make() -> () => string as return || -> { return \"do end\"; }; end\n";
+        let src = "fnc make() -> () => string as return || -> { return \"do end\"; }; end\n";
         let got = format_source(src).unwrap();
         assert!(got.starts_with("fnc make() -> () => string as\n"));
         assert!(got.contains("return || -> {"));
@@ -3462,9 +3459,9 @@ end
     #[test]
     fn body_level_static_access_cannot_impersonate_double_colon_separator() {
         assert!(format_source("fnc bad() -> int Math::answer(); end\n").is_err());
-        assert!(format_source(
-            "routine bad() -> Result<int, string> Math::answer(); end\n"
-        ).is_err());
+        assert!(
+            format_source("routine bad() -> Result<int, string> Math::answer(); end\n").is_err()
+        );
     }
 
     #[test]
@@ -3506,12 +3503,18 @@ end
     fn routine_uses_the_same_end_delimited_separator_formatting() {
         let compact_as = "routine identity(int x) -> int as return x; end\n";
         let got_as = format_source(compact_as).unwrap();
-        assert_eq!(got_as, "routine identity(int x) -> int as\n  return x;\nend\n");
+        assert_eq!(
+            got_as,
+            "routine identity(int x) -> int as\n  return x;\nend\n"
+        );
         assert_eq!(format_source(&got_as).unwrap(), got_as);
 
         let compact_colon = "routine identity(int x) -> int :: return x; end\n";
         let got_colon = format_source(compact_colon).unwrap();
-        assert_eq!(got_colon, "routine identity(int x) -> int ::\n  return x;\nend\n");
+        assert_eq!(
+            got_colon,
+            "routine identity(int x) -> int ::\n  return x;\nend\n"
+        );
         assert_eq!(format_source(&got_colon).unwrap(), got_colon);
     }
 
@@ -3536,9 +3539,7 @@ end
 
         let got = format_source(src).unwrap();
         assert!(got.contains("fnc load(int id) -> tuple (int, string);"));
-        assert!(got.contains(
-            "fnc build(int id) -> Result<Option<tuple (int, string)>, string>;"
-        ));
+        assert!(got.contains("fnc build(int id) -> Result<Option<tuple (int, string)>, string>;"));
         assert!(got.contains("fnc run(int id) => int;"));
         assert!(got.contains("fnc retry() => bool;"));
         assert_eq!(format_source(&got).unwrap(), got);
@@ -3564,9 +3565,8 @@ end
     #[test]
     fn large_tuple_return_spelling_is_preserved_and_idempotent() {
         let slots = (0..65).map(|_| "int").collect::<Vec<_>>().join(", ");
-        let src = format!(
-            "fnc identity(tuple ({slots}) value) -> tuple ({slots})\nreturn value\nend\n"
-        );
+        let src =
+            format!("fnc identity(tuple ({slots}) value) -> tuple ({slots})\nreturn value\nend\n");
         let got = format_source(&src).unwrap();
         assert!(got.contains(&format!("tuple ({slots}) value")));
         assert!(got.contains(&format!("-> tuple ({slots})")));
