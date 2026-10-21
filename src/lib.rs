@@ -312,7 +312,7 @@ fn visible_double_colon_span(line: &str, after: usize, initial: LexState) -> Opt
 /// slim arrow and a final visible `end` are expanded. Unsupported actor,
 /// static, or abstract callable forms remain untouched so the main formatter
 /// can fail closed on them.
-fn expand_compact_end_delimited_callables(source: &str) -> String {
+fn expand_compact_end_delimited_callables(source: &str) -> Result<String, FormatError> {
     let mut output = String::with_capacity(source.len());
     let mut lex = LexState::default();
 
@@ -429,6 +429,19 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         }
 
         let body = line[separator_span.end..end_span.start].trim();
+        let mut body_lex = LexState::default();
+        let visible_body: String = scan_visible(body, &mut body_lex).into_iter().collect();
+        let body_words = visible_word_spans(&visible_body, LexState::default());
+        if visible_body.trim_start().starts_with("::")
+            || body_words
+                .first()
+                .is_some_and(|span| &visible_body[span.start..span.end] == "as")
+        {
+            return Err(FormatError::new(
+                line_index + 1,
+                "callable body must not repeat or mix as and :: separators",
+            ));
+        }
         output.push_str(line[..separator_span.end].trim_end());
         output.push('\n');
         if !body.is_empty() {
@@ -438,7 +451,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> String {
         output.push_str(&line[end_span.start..]);
     }
 
-    output
+    Ok(output)
 }
 
 /// Format Oreslang source using the one canonical style.
@@ -472,7 +485,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     // normalizers insert line breaks. Otherwise a body beginning with
     // `do select` / match / switch can be split before the outer callable
     // frame is recognized, causing an inner brace/end to steal ownership.
-    let normalized = expand_compact_end_delimited_callables(&normalized);
+    let normalized = expand_compact_end_delimited_callables(&normalized)?;
     let normalized = match_switch::normalize(&normalized);
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
