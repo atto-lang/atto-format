@@ -168,7 +168,7 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             *index += 1;
             return parse_type_atom_chunks(chunks, index);
         }
-        "borrow" | "&" => {
+        "borrow" => {
             *index += 1;
             if *index < chunks.len() && chunks[*index] == "mut" {
                 *index += 1;
@@ -478,6 +478,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
 /// reorder unrelated declarations or unknown grammar whose meaning depends on
 /// the compiler's evolving syntax.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
+    reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
@@ -2833,6 +2834,48 @@ fn canonicalize_single_quoted_symbol(source: &str, start: usize) -> Option<(usiz
         }
     }
     None
+}
+
+fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError> {
+    let mut lex = LexState::default();
+    for (index, line) in source.lines().enumerate() {
+        let visible: String = scan_visible(line, &mut lex).into_iter().collect();
+        let compact: String = visible.chars().filter(|c| !c.is_whitespace()).collect();
+
+        let forbidden = [
+            ("rtborrowmut", "legacy rt borrow mut; use rt mut borrow"),
+            ("rtref", "rt ref is not Oreslang source syntax"),
+            ("rtderef", "rt deref is not Oreslang source syntax"),
+            ("rtunref", "rt unref is not Oreslang source syntax"),
+            ("rtraw", "rt raw is not Oreslang source syntax"),
+            ("Pointer<", "Pointer<T> is not Oreslang source syntax"),
+            ("RawPointer<", "RawPointer<T> is not Oreslang source syntax"),
+            ("&mut", "&mut is not Oreslang borrow syntax"),
+        ];
+        for (needle, message) in forbidden {
+            if compact.contains(needle) {
+                return Err(FormatError::new(index + 1, message));
+            }
+        }
+
+        // Reject common unary address/dereference spellings without confusing
+        // ordinary binary bitwise '&' or multiplication '*'.
+        for (needle, message) in [
+            ("=&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("return&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("(&", "unary & address/borrow syntax is not valid Oreslang"),
+            (",&", "unary & address/borrow syntax is not valid Oreslang"),
+            ("=*", "unary * dereference syntax is not valid Oreslang"),
+            ("return*", "unary * dereference syntax is not valid Oreslang"),
+            ("(*", "unary * dereference syntax is not valid Oreslang"),
+            (",*", "unary * dereference syntax is not valid Oreslang"),
+        ] {
+            if compact.contains(needle) {
+                return Err(FormatError::new(index + 1, message));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn reject_multiline_literals(source: &str) -> Result<(), FormatError> {
