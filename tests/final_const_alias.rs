@@ -20,7 +20,7 @@ end
         "{formatted}"
     );
     assert!(
-        formatted.contains("final int compatible = 7;"),
+        formatted.contains("final int compatible: 7;"),
         "{formatted}"
     );
     assert!(!formatted.contains("final const"), "{formatted}");
@@ -73,7 +73,7 @@ end
         "{formatted}"
     );
     assert!(
-        formatted.contains("const int explicit_constant = 7;"),
+        formatted.contains("final int explicit_constant: 7;"),
         "{formatted}"
     );
     assert!(

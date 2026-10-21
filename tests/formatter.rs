@@ -251,7 +251,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub let int balance = 100;
+    pub int balance: 100;
 
     pub read() -> int {
       return self.balance;
@@ -270,14 +270,14 @@ end
 #[test]
 fn tuple_and_fixed_sequence_metadata_remain_stable() {
     let src = r#"fnc build() => void {
-val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
 val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
 return;
 }
 "#;
 
     let expected = r#"fnc build() -> void {
-  val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+  val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
   val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
   return;
 }
@@ -314,12 +314,18 @@ return;
 }
 
 #[test]
-fn import_selector_spellings_remain_stable() {
-    let src = r#"import * as util from "../util";
+fn unused_import_selector_spellings_are_commented_not_deleted() {
+    let src = r#"// oresfmt: pure-import
+import * as util from "../util";
+// oresfmt: pure-import
 import module Math from "../math";
+// oresfmt: pure-import
 import actor Worker from "../worker";
+// oresfmt: pure-import
 import class Box from "../box";
+// oresfmt: pure-import
 import types X, Y, Z from "../types";
+// oresfmt: pure-import
 import types (A, B, C) from "../more-types";
 
 define module App as
@@ -329,12 +335,18 @@ return;
 end
 "#;
 
-    let expected = r#"import * as util from "../util";
-import module Math from "../math";
-import actor Worker from "../worker";
-import class Box from "../box";
-import types X, Y, Z from "../types";
-import types (A, B, C) from "../more-types";
+    let expected = r#"// oresfmt: pure-import
+// import * as util from "../util";
+// oresfmt: pure-import
+// import module Math from "../math";
+// oresfmt: pure-import
+// import actor Worker from "../worker";
+// oresfmt: pure-import
+// import class Box from "../box";
+// oresfmt: pure-import
+// import types X, Y, Z from "../types";
+// oresfmt: pure-import
+// import types (A, B, C) from "../more-types";
 
 define module App as
   pub fnc main() -> void {
@@ -422,7 +434,7 @@ fi
 "#;
     let expected = r#"shared actor Cleaner {
   pub compact() -> void {
-    if ready then
+    if ready; then
       actor.gc();
     else
       return;
@@ -575,7 +587,7 @@ fi
 }
 "#;
     let formatted = format_source(valid).unwrap();
-    assert!(formatted.contains("  if ready then"));
+    assert!(formatted.contains("  if ready; then"));
     assert!(formatted.contains("    while busy; do"));
     assert!(formatted.contains("  fi"));
 
@@ -616,13 +628,13 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0 then
+  if handler_id < 0; then
     return Err("handler_id must be non-negative");
   fi
-  if !pattern.is_valid() then
+  if !pattern.is_valid(); then
     return Err("invalid route pattern");
   fi
-  if pattern.size() > self.max_segments_value then
+  if pattern.size() > self.max_segments_value; then
     return Err("route pattern exceeds max_segments");
   fi
 }
@@ -705,7 +717,7 @@ fi
     let expected = r#"fnc choose(int value) -> int {
   if value < 0 then
     return -1;
-  elif value == 0 then
+  elif value == 0; then
     return 0;
   elif value == 1 then
     return 1;
@@ -730,7 +742,7 @@ fi
 "#;
     let expected = r#"fnc text() -> String {
   // elseif fake; do
-  if ready then
+  if ready; then
     return "else if nope do";
   else
     return "then";
@@ -938,9 +950,9 @@ fi
 "#;
 
     let expected = r#"fnc validate(int handler_id, Pattern pattern) -> Result {
-  if handler_id < 0 then
+  if handler_id < 0; then
     return Err("handler_id must be non-negative");
-  elif !pattern.is_valid() then
+  elif !pattern.is_valid(); then
     return Err("invalid route pattern");
   elif pattern.size() > self.max_segments_value then
     return Err("route pattern exceeds max_segments");
@@ -1390,7 +1402,7 @@ end
 }
 
 #[test]
-fn switch_and_match_underscore_aliases_format_as_default() {
+fn switch_default_and_match_wildcard_remain_distinct() {
     let source = r#"fnc choose(string v): string {
   switch v {
     _ { return "star"; }
@@ -1411,8 +1423,7 @@ fnc other(int n): int {
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("default {\n"), "{formatted}");
-    assert!(formatted.contains("default as m {\n"), "{formatted}");
-    assert!(!formatted.contains("on _ as m"), "{formatted}");
+    assert!(formatted.contains("on _ as m {\n"), "{formatted}");
     assert!(!formatted.contains("on default"), "{formatted}");
     assert!(
         formatted.contains("case \"foo\", \"car\", \"mar\" {"),
@@ -1448,8 +1459,7 @@ end
 "#;
     let once = format_source(source).unwrap();
     assert!(once.contains("default -> {"), "{once}");
-    assert!(once.contains("default as other -> {"), "{once}");
-    assert!(!once.contains("on _ as other"), "{once}");
+    assert!(once.contains("on _ as other -> {"), "{once}");
     assert!(!once.contains("\n  _ ->"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
 }
@@ -1472,7 +1482,7 @@ end
 "#;
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("on _ -> { phantom(); }"), "{formatted}");
-    assert!(formatted.contains("default -> {"), "{formatted}");
+    assert!(formatted.contains("on _ -> {"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
@@ -1486,7 +1496,7 @@ on _ as remaining { return false; }
 }
 fnc procedural(int n): bool {
 do match<ret=bool> n over {
-default as remaining { return false; }
+on _ as remaining { return false; }
 on 7 { return true; }
 }
 }
@@ -1494,7 +1504,136 @@ on 7 { return true; }
     let once = format_source(source).unwrap();
     assert!(once.contains("match<ret=bool> n over {"), "{once}");
     assert!(once.contains("do match<ret=bool> n over {"), "{once}");
-    assert!(once.contains("default as remaining {"), "{once}");
-    assert!(!once.contains("on _ as remaining"), "{once}");
+    assert!(once.contains("on _ as remaining {"), "{once}");
     assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn generic_defaults_and_named_type_arguments_are_semantically_preserved() {
+    let source = r#"fnc choose<A, B=int, C=B, D=Array<C>, E=string>(A input): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<A=int, D=Array<string>>(7);
+  val int second = choose<E=bool, A=int>(7);
+  val int third = choose<int, _>(7);
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(
+        once.contains("choose<A, B=int, C=B, D=Array<C>, E=string>"),
+        "{once}"
+    );
+    assert!(once.contains("choose<A=int, D=Array<string>>(7)"), "{once}");
+    assert!(once.contains("choose<E=bool, A=int>(7)"), "{once}");
+    assert!(once.contains("choose<int, _>(7)"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+    assert!(is_formatted(&once).unwrap());
+}
+
+#[test]
+fn generic_inference_hole_and_comparison_like_tokens_do_not_mutate() {
+    let source = r#"fnc choose<T=int>(): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<T=_>();
+  val int second = choose<Array<_>>();
+  val int third = choose<Option<Array<_>>>();
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    for preserved in [
+        "choose<T=_>()",
+        "choose<Array<_>>()",
+        "choose<Option<Array<_>>>()",
+    ] {
+        assert!(once.contains(preserved), "{preserved}: {once}");
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn typed_lambda_and_explicit_tuple_record_forms_are_stable() {
+    let source = r#"type Mapper = (int) => int;
+fnc demo(): void {
+const mapper: Mapper = |int n| -> (n * 3) as int;
+const declared = |int n|: int -> n * 3;
+const pair = tuple(4, "four");
+const singleton = tuple(7) as tuple[int];
+const point = struct{x: int, y: int}{x: 3, y: 5};
+const just_x = point as {x: int};
+return;
+}
+"#;
+    let formatted = format_source(source).expect("valid typed lambda and aggregate syntax");
+    for fragment in [
+        "|int n| -> (n * 3) as int",
+        "|int n|: int -> n * 3",
+        "tuple(4, \"four\")",
+        "tuple(7) as tuple[int]",
+        "struct{x: int, y: int}{x: 3, y: 5}",
+        "point as {x: int}",
+    ] {
+        assert!(
+            formatted.contains(fragment),
+            "formatter lost the required syntax {fragment:?}: {formatted}"
+        );
+    }
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn transparent_type_aliases_preserve_generic_targets_and_canonicalize_visibility() {
+    let source = r#"pub define type alias Pair<K, V> as Entry<K, V>;
+define type alias Two<A, B> as Tuple[A, B];
+type Old = Entry<int, string>;
+type alias = int;
+define type alias = string;
+"#;
+    let formatted = format_source(source).expect("format aliases");
+    assert!(formatted.contains("define pub type alias Pair<K, V> as Entry<K, V>;"), "{formatted}");
+    assert!(formatted.contains("define type alias Two<A, B> as Tuple[A, B];"), "{formatted}");
+    assert!(formatted.contains("type Old = Entry<int, string>;"), "{formatted}");
+    assert!(formatted.contains("type alias = int;"), "{formatted}");
+    assert!(formatted.contains("define type alias = string;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn comments_and_literals_cannot_reorder_type_alias_words() {
+    let source = r#"// pub define type alias Fake as Entry;
+const string example = "pub define type alias Fake as Entry";
+pub define /* comment */ type alias Real as Entry;
+"#;
+    let formatted = format_source(source).expect("format alias comments");
+    assert!(formatted.contains("// pub define type alias Fake as Entry;"));
+    assert!(formatted.contains("\"pub define type alias Fake as Entry\""));
+    assert!(formatted.contains("pub define /* comment */ type alias Real as Entry;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn canonical_simple_module_headers_use_as() {
+    let legacy = "define module products\n  define pub type alias Pair<K,V> as Tuple[K,V];\nend\n";
+    let expected = "define module products as\n  define pub type alias Pair<K,V> as Tuple[K,V];\nend\n";
+    assert_eq!(format_source(legacy).unwrap(), expected);
+    assert_eq!(format_source(expected).unwrap(), expected);
+}
+
+#[test]
+fn module_header_comments_and_nonheaders_are_not_rewritten() {
+    let source = "define module core // comment\nend\n";
+    let result = format_source(source).unwrap();
+    assert!(result.starts_with("define module core as // comment\n"), "{result}");
+    assert_eq!(format_source(&result).unwrap(), result);
+
+    let already = "define module core as\nend\n";
+    assert_eq!(format_source(already).unwrap(), already);
+
+    // Never manufacture an `as` in strings or unrelated expressions.
+    let quote = "const string example = \"define module core\";\n";
+    assert_eq!(format_source(quote).unwrap(), quote);
 }
