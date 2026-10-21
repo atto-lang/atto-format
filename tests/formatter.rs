@@ -1707,10 +1707,10 @@ end
 "#;
     let got = format_source(src).unwrap();
     for unchanged in [
-        "pub let int balance = 100;",
-        "val string label = \"fixed\";",
-        "const int limit = 9;",
-        "let mut Array<int> items = new Array<int>();",
+        "pub int balance: 100;",
+        "final mut string label: \"fixed\";",
+        "final int limit: 9;",
+        "mut Array<int> items: new Array<int>();",
         "let int n = 2;",
         "balance = 3;",
     ] {
