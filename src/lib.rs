@@ -108,6 +108,111 @@ struct LexState {
     escape: bool,
 }
 
+fn normalize_header_type_source(text: &str) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut block_depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+
+        if block_depth > 0 {
+            if c == '/' && next == Some('*') {
+                block_depth += 1;
+                i += 2;
+                continue;
+            }
+            if c == '*' && next == Some('/') {
+                block_depth -= 1;
+                out.push(' ');
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && next == Some('/') {
+            break;
+        }
+        if c == '/' && next == Some('*') {
+            block_depth = 1;
+            out.push(' ');
+            i += 2;
+            continue;
+        }
+        if c == '"' || c == '\'' || c == '\u{60}' {
+            out.push_str("__ores_literal_type__");
+            quote = Some(c);
+            i += 1;
+            continue;
+        }
+
+        out.push(c);
+        i += 1;
+    }
+
+    if block_depth != 0 || quote.is_some() {
+        return None;
+    }
+    Some(out)
+}
+
+fn type_delimiters_balanced(text: &str) -> bool {
+    let mut stack: Vec<char> = Vec::new();
+    let mut previous: Option<char> = None;
+
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' | '<' => stack.push(c),
+            ')' => {
+                if stack.pop() != Some('(') {
+                    return false;
+                }
+            }
+            ']' => {
+                if stack.pop() != Some('[') {
+                    return false;
+                }
+            }
+            '}' => {
+                if stack.pop() != Some('{') {
+                    return false;
+                }
+            }
+            '>' => {
+                if stack.last() == Some(&'<') {
+                    stack.pop();
+                } else if previous != Some('=') {
+                    // The only unmatched '>' admitted by the type grammar is
+                    // the second character of the function-type fat arrow.
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        previous = Some(c);
+    }
+
+    stack.is_empty()
+}
+
 fn top_level_type_chunks(text: &str) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start: Option<usize> = None;
@@ -168,9 +273,10 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             *index += 1;
             return parse_type_atom_chunks(chunks, index);
         }
-        "borrow" | "&" => {
+        "borrow" | "&" | "&mut" => {
+            let prefix = chunks[*index];
             *index += 1;
-            if *index < chunks.len() && chunks[*index] == "mut" {
+            if prefix != "&mut" && *index < chunks.len() && chunks[*index] == "mut" {
                 *index += 1;
             }
             return parse_type_atom_chunks(chunks, index);
@@ -236,11 +342,18 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
     true
 }
 
-fn header_tail_is_complete_type(visible_header: &str) -> bool {
-    let Some(arrow) = visible_header.find("->") else {
+fn header_tail_is_complete_type(header_source: &str) -> bool {
+    let Some(normalized) = normalize_header_type_source(header_source) else {
         return false;
     };
-    let chunks = top_level_type_chunks(visible_header[arrow + 2..].trim());
+    let Some(arrow) = normalized.find("->") else {
+        return false;
+    };
+    let type_source = normalized[arrow + 2..].trim();
+    if !type_delimiters_balanced(type_source) {
+        return false;
+    }
+    let chunks = top_level_type_chunks(type_source);
     if chunks.is_empty() {
         return false;
     }
@@ -371,46 +484,9 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let visible_header: String = scan_visible(header_tail, &mut header_lex)
             .into_iter()
             .collect();
-        let visible_header_words = visible_word_spans(&visible_header, LexState::default());
-        let contains_body_word = visible_header_words.iter().any(|span| {
-            matches!(
-                &visible_header[span.start..span.end],
-                "return"
-                    | "if"
-                    | "elif"
-                    | "else"
-                    | "fi"
-                    | "do"
-                    | "done"
-                    | "select"
-                    | "match"
-                    | "switch"
-                    | "const"
-                    | "let"
-                    | "val"
-                    | "for"
-                    | "while"
-                    | "loop"
-                    | "try"
-                    | "catch"
-                    | "finally"
-                    | "throw"
-                    | "raise"
-                    | "panic"
-                    | "await"
-                    | "spawn"
-                    | "break"
-                    | "continue"
-                    | "yield"
-                    | "defer"
-            )
-        });
         if !visible_header.contains("->")
             || visible_header.contains(';')
-            || visible_header.contains('{')
-            || visible_header.contains('}')
-            || contains_body_word
-            || !header_tail_is_complete_type(&visible_header)
+            || !header_tail_is_complete_type(header_tail)
         {
             output.push_str(line);
             continue;
@@ -432,14 +508,14 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let mut body_lex = LexState::default();
         let visible_body: String = scan_visible(body, &mut body_lex).into_iter().collect();
         let body_words = visible_word_spans(&visible_body, LexState::default());
-        if visible_body.trim_start().starts_with("::")
+        if visible_body.trim_start().starts_with(':')
             || body_words
                 .first()
                 .is_some_and(|span| &visible_body[span.start..span.end] == "as")
         {
             return Err(FormatError::new(
                 line_index + 1,
-                "callable body must not repeat or mix as and :: separators",
+                "callable body separator must be exactly one 'as' or one contiguous '::'",
             ));
         }
         output.push_str(line[..separator_span.end].trim_end());
@@ -2133,8 +2209,7 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
 
 fn is_end_delimited_callable_header(structural: &str) -> bool {
     let line = structural.trim();
-    if line.contains('{')
-        || line.ends_with(';')
+    if line.ends_with(';')
         || contains_word(line, "actor")
         || contains_word(line, "isoactor")
         || contains_word(line, "static")
@@ -2148,7 +2223,24 @@ fn is_end_delimited_callable_header(structural: &str) -> bool {
     let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
         return false;
     };
-    line[close + 1..].trim_start().starts_with("->")
+    let header_tail = line[close + 1..].trim();
+    if !header_tail.starts_with("->") {
+        return false;
+    }
+    // A record/struct return type may itself contain balanced braces. Such
+    // braces are part of the type, not the beginning of an executable body.
+    // Strip only an optional final body separator before checking the type.
+    // Actual braced bodies leave extra tokens and must not be classified as
+    // end-delimited callable headers.
+    if line.contains('{') {
+        let type_tail = header_tail
+            .strip_suffix("::")
+            .or_else(|| header_tail.strip_suffix(" as"))
+            .unwrap_or(header_tail)
+            .trim_end();
+        return header_tail_is_complete_type(type_tail);
+    }
+    true
 }
 
 fn is_multiline_end_delimited_callable_close(structural: &str) -> bool {
@@ -3839,8 +3931,47 @@ end
             "fnc f() -> & mut Thing :: return value; end\n",
             "fnc g() -> type Thing :: return value; end\n",
             "fnc h() -> typeof fnc(int x) => string :: return callback; end\n",
+            "fnc i() -> &mut Thing :: return value; end\n",
+            "fnc j() -> \"ok value\" :: return \"ok value\"; end\n",
+            "fnc k() -> {foo: int, bar: string} :: return value; end\n",
+            "fnc l() -> struct {foo: int} :: return value; end\n",
+            "fnc m() -> {foo: int} as return value; end\n",
+            "fnc n() -> record {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn record_shaped_return_type_does_not_open_a_braced_callable_body() {
+        let source = "fnc shape() -> {foo: int, bar: string}\nreturn value;\nend\n";
+        let rendered = format_source(source).unwrap();
+        assert!(rendered.contains("fnc shape() -> {foo: int, bar: string}\n"));
+        assert!(rendered.contains("  return value;\n"));
+        assert_eq!(format_source(&rendered).unwrap(), rendered);
+    }
+
+    #[test]
+    fn double_colon_separator_has_exact_lexical_boundaries() {
+        for source in [
+            "fnc a() -> int ::: return 1; end\n",
+            "fnc b() -> int : : return 1; end\n",
+            "fnc c() -> int; :: return 1; end\n",
+        ] {
+            assert!(format_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn separator_guard_rejects_unbalanced_or_stray_type_delimiters() {
+        for source in [
+            "fnc a() -> Result<int :: return value; end\n",
+            "fnc b() -> tuple (int, string :: return value; end\n",
+            "fnc c() -> {foo: int, bar: string :: return value; end\n",
+            "fnc d() -> struct {foo: int :: return value; end\n",
+            "fnc e() -> Thing> :: return value; end\n",
+        ] {
+            assert!(format_source(source).is_err(), "{source}");
         }
     }
 
