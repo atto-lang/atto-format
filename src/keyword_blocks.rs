@@ -152,6 +152,111 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     false
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderTerminator {
+    Keyword,
+    Brace,
+}
+
+fn first_top_level_header_terminator(
+    tokens: &[Token<'_>],
+    start: usize,
+) -> Option<HeaderTerminator> {
+    let (mut parens, mut brackets) = (0usize, 0usize);
+
+    for token in tokens.iter().skip(start) {
+        match token.text {
+            "(" => parens += 1,
+            ")" => parens = parens.saturating_sub(1),
+            "[" => brackets += 1,
+            "]" => brackets = brackets.saturating_sub(1),
+            "{" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Brace),
+            "then" | "do" if parens == 0 && brackets == 0 => {
+                return Some(HeaderTerminator::Keyword);
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn collapse_multiline_keyword_headers(source: &str) -> String {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let first = lines[index];
+        let mut first_state = LexState::default();
+        let first_lexed = lex_line(first, &mut first_state);
+        let first_tokens = &first_lexed.tokens;
+        let header_start = first_tokens
+            .first()
+            .is_some_and(|token| matches!(token.text, "if" | "elif" | "elseif"));
+        let first_terminator = first_top_level_header_terminator(first_tokens, 1);
+
+        if !header_start
+            || first_lexed.line_comment.is_some()
+            || first_lexed.block_comment_seen
+            || first_terminator.is_some()
+        {
+            output.push(first.to_string());
+            index += 1;
+            continue;
+        }
+
+        let mut joined = first.trim_end().to_string();
+        let mut cursor = index + 1;
+        let mut complete = None;
+        let mut unsafe_to_join = false;
+
+        while cursor < lines.len() {
+            let next = lines[cursor];
+            if next.trim().is_empty() {
+                unsafe_to_join = true;
+                break;
+            }
+
+            let mut next_state = LexState::default();
+            let next_lexed = lex_line(next, &mut next_state);
+            if next_lexed.line_comment.is_some() || next_lexed.block_comment_seen {
+                unsafe_to_join = true;
+                break;
+            }
+
+            joined.push(' ');
+            joined.push_str(next.trim());
+
+            let mut joined_state = LexState::default();
+            let joined_lexed = lex_line(&joined, &mut joined_state);
+            match first_top_level_header_terminator(&joined_lexed.tokens, 1) {
+                Some(HeaderTerminator::Keyword) => {
+                    complete = Some(cursor);
+                    break;
+                }
+                Some(HeaderTerminator::Brace) => {
+                    unsafe_to_join = true;
+                    break;
+                }
+                _ => {}
+            }
+
+            cursor += 1;
+        }
+
+        if let Some(last) = complete.filter(|_| !unsafe_to_join) {
+            output.push(joined);
+            index = last + 1;
+        } else {
+            output.push(first.to_string());
+            index += 1;
+        }
+    }
+
+    output.join("\n")
+}
+
 fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
     let mut start = 0usize;
     for previous in (0..index).rev() {
@@ -426,12 +531,27 @@ fn terminate_simple_returns(source: &str) -> String {
 
 /// Break compact conditional arms and safely terminate full-line returns.
 pub(crate) fn normalize(source: &str) -> String {
-    terminate_simple_returns(&split_keyword_blocks(source))
+    let collapsed = collapse_multiline_keyword_headers(source);
+    terminate_simple_returns(&split_keyword_blocks(&collapsed))
 }
 
 #[cfg(test)]
 mod tests {
     use super::normalize;
+
+    #[test]
+    fn expands_multiline_keyword_if_header_before_compact_body() {
+        assert_eq!(
+            normalize("if ready &&\n   permitted; do return false; fi"),
+            "if ready && permitted; do\n return false;\nfi"
+        );
+    }
+
+    #[test]
+    fn multiline_braced_if_is_not_collapsed_into_keyword_form() {
+        let source = "if ready &&\n   permitted\n{\nwork();\n}";
+        assert_eq!(normalize(source), source);
+    }
 
     #[test]
     fn expands_keyword_if_with_terminator() {
