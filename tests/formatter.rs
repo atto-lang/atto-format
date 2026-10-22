@@ -273,8 +273,8 @@ fn binary_ampersand_and_multiplication_remain_formatable() {
 fn pointer_guard_uses_token_boundaries() {
     for source in [
         "fnc rtrefactor(int value): int { return value; }\n",
-        "define class SomePointer as end\n",
-        "define class RawPointerAlias as end\n",
+        "define class SomePointer as\nend\n",
+        "define class RawPointerAlias as\nend\n",
         "fnc calc(int mutator, int x): int { return x & mutator; }\n",
     ] {
         assert!(format_source(source).is_ok(), "{source}");
@@ -285,6 +285,8 @@ fn pointer_guard_uses_token_boundaries() {
 fn pointer_guard_rejects_more_expression_and_type_starts() {
     for source in [
         "fnc bad(): &Thing { return value; }\n",
+        "fnc f() -> & mut Thing :: return value; end\n",
+        "fnc i() -> &mut Thing :: return value; end\n",
         "fnc bad(): int { return [&value][0]; }\n",
         "fnc bad(): int { return [*value][0]; }\n",
         "fnc bad(): int { return condition ? 1 : &value; }\n",
@@ -1822,4 +1824,163 @@ end
     assert!(!got.contains("int x: 5"), "{got}");
     assert!(!got.contains("string label: \"ok\""), "{got}");
     assert_eq!(got, format_source(&got).unwrap());
+}
+
+#[test]
+fn quotes_and_template_interpolations_remain_byte_for_byte_intact() {
+    let src = r#"pub fnc main(): void {
+const foo1 = "abc";
+const foo2 = "'abc'";
+const foo3 = '"abc"';
+const foo4 = `'"abc"'`;
+const bar = "Mars";
+const star = "bright";
+const greeting = `${bar} is ${star}`;
+const escaped = `escaped \${notInterpolated} and \``;
+return;
+}
+"#;
+    let once = format_source(src).unwrap();
+    for fragment in [
+        r#""abc""#,
+        r#""'abc'""#,
+        r#"'"abc"'"#,
+        r#"`'"abc"'`"#,
+        r#"`${bar} is ${star}`"#,
+        r#"`escaped \${notInterpolated} and \``"#,
+    ] {
+        assert!(
+            once.contains(fragment),
+            "changed string literal: {fragment}; got {once}"
+        );
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn typed_const_fnc_template_body_keeps_lambda_and_interpolation_bytes() {
+    let source = r#"const fnc foo = |string bar, string star| -> {
+return `${bar} is ${star}`;
+};
+"#;
+    let once = format_source(source).unwrap();
+    assert!(
+        once.contains("const fnc foo = |string bar, string star| -> {"),
+        "{once}"
+    );
+    assert!(once.contains("return `${bar} is ${star}`;"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn template_expression_tokens_are_opaque_to_conditional_and_lambda_rewrites() {
+    let source = r#"pub fnc main(): void {
+const word = "hi";
+const complex = `start:${word} - ${"{" + "}"} ? -> : done`;
+return;
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(
+        once.contains(r#"`start:${word} - ${"{" + "}"} ? -> : done`"#),
+        "{once}"
+    );
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn both_typed_pipe_lambda_parameter_orders_format_to_one_canonical_spelling() {
+    let source = r#"const fnc first = |string bar, string star| -> {
+  return bar + star;
+};
+const fnc second = |bar: string, star: string| -> {
+  return bar + star;
+};
+const expr = |left: Option<string>, right: string| -> left;
+"#;
+    let formatted = format_source(source).expect("format both typed lambda styles");
+    assert!(
+        formatted.contains("const fnc first = |string bar, string star| -> {"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("const fnc second = |string bar, string star| -> {"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("const expr = |Option<string> left, string right| -> left;"),
+        "{formatted}"
+    );
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn typed_pipe_lambda_formatting_keeps_literals_and_other_pipes_unchanged() {
+    let source = r#"const quote = "|bar: string| -> ignore";
+const flag = a | b;
+const fnc second = |bar: string| -> {
+  return bar;
+};
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains(r#"const quote = "|bar: string| -> ignore";"#),
+        "{formatted}"
+    );
+    assert!(formatted.contains("const flag = a | b;"), "{formatted}");
+    assert!(
+        formatted.contains("const fnc second = |string bar| -> {"),
+        "{formatted}"
+    );
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn pipe_lambda_parameter_union_must_not_be_mistaken_for_closing_delimiter() {
+    let source = r#"const fnc union = |candidate: string | int| -> {
+  return candidate;
+};
+const fnc ordinary = |string left, right: string| -> {
+  return left + right;
+};
+"#;
+    let formatted = format_source(source).expect("format typed union lambdas");
+    assert!(
+        formatted.contains("const fnc union = |string | int candidate| -> {"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("const fnc ordinary = |string left, string right| -> {"),
+        "{formatted}"
+    );
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
+fn pipe_lambda_no_rewrite_of_arrow_in_strings_or_unrelated_pipes() {
+    let src = r#"const text = "|hello: string| -> fake";
+const outcome = good | bad;
+const fnc actual = |name: string| -> name;
+"#;
+    let result = format_source(src).expect("format");
+    assert!(
+        result.contains(r#"const text = "|hello: string| -> fake";"#),
+        "{result}"
+    );
+    assert!(result.contains("const outcome = good | bad;"), "{result}");
+    assert!(
+        result.contains("const fnc actual = |string name| -> name;"),
+        "{result}"
+    );
+}
+
+#[test]
+fn return_suffix_identifiers_keep_binary_operators() {
+    for source in [
+        "fnc calc(int myreturn, int other): int { return myreturn * other; }\n",
+        "fnc calc(int myreturn, int other): int { return myreturn & other; }\n",
+    ] {
+        let formatted = format_source(source).expect("binary operand is an identifier");
+        assert_eq!(formatted, format_source(&formatted).unwrap());
+    }
 }
