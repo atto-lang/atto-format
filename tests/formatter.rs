@@ -216,20 +216,85 @@ fi
 #[test]
 fn preserves_explicit_receivers_and_native_collection_members() {
     let src = r#"define class Cursor as
-pub next(self &mut Cursor)() -> int {
+pub next(mut self)() -> int {
 self.index = self.index + 1;
 return self.items.size;
 }
 end
 "#;
     let expected = r#"define class Cursor as
-  pub next(self &mut Cursor)() -> int {
+  pub next(mut self)() -> int {
     self.index = self.index + 1;
     return self.items.size;
   }
 end
 "#;
     assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn preserves_canonical_pointerless_borrow_syntax() {
+    let src = r#"fnc update(borrow mut Thing thing) -> void {
+val view = rt mut borrow thing;
+return;
+}
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("borrow mut Thing thing"));
+    assert!(formatted.contains("rt mut borrow thing"));
+}
+
+#[test]
+fn rejects_pointer_style_ownership_syntax() {
+    for source in [
+        "fnc read(&Thing thing) -> int { return thing.value; }\n",
+        "fnc read(borrow Thing thing) -> int { return &thing.value; }\n",
+        "fnc read(borrow Thing thing) -> int { return *thing.value; }\n",
+        "fnc read(Pointer<int> thing) -> int { return 1; }\n",
+        "fnc read(RawPointer<int> thing) -> int { return 1; }\n",
+        "fnc read(borrow mut Thing thing) -> int { return rt borrow mut thing.value; }\n",
+        "fnc read(Thing thing) -> int { return rt ref thing; }\n",
+        "fnc read(Thing thing) -> int { return rt deref thing; }\n",
+        "fnc read(Thing thing) -> int { return rt unref thing; }\n",
+        "fnc read(Thing thing) -> int { return rt raw thing; }\n",
+        "define class Cursor as pub next(self &mut Cursor)() -> int { return 1; } end\n",
+    ] {
+        assert!(format_source(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn binary_ampersand_and_multiplication_remain_formatable() {
+    let source = "fnc calc(int a, int b): int { return (a & b) * 2; }\n";
+    assert!(format_source(source).is_ok());
+}
+
+#[test]
+fn pointer_guard_uses_token_boundaries() {
+    for source in [
+        "fnc rtrefactor(int value): int { return value; }\n",
+        "define class SomePointer as\nend\n",
+        "define class RawPointerAlias as\nend\n",
+        "fnc calc(int mutator, int x): int { return x & mutator; }\n",
+    ] {
+        assert!(format_source(source).is_ok(), "{source}");
+    }
+}
+
+#[test]
+fn pointer_guard_rejects_more_expression_and_type_starts() {
+    for source in [
+        "fnc bad(): &Thing { return value; }\n",
+        "fnc f() -> & mut Thing :: return value; end\n",
+        "fnc i() -> &mut Thing :: return value; end\n",
+        "fnc bad(): int { return [&value][0]; }\n",
+        "fnc bad(): int { return [*value][0]; }\n",
+        "fnc bad(): int { return condition ? 1 : &value; }\n",
+        "fnc bad(): int { return condition ? 1 : *value; }\n",
+        "define class Cursor as pub next(self & mut Cursor)() -> int { return 1; } end\n",
+    ] {
+        assert!(format_source(source).is_err(), "{source}");
+    }
 }
 
 #[test]
@@ -1907,4 +1972,15 @@ const fnc actual = |name: string| -> name;
         result.contains("const fnc actual = |string name| -> name;"),
         "{result}"
     );
+}
+
+#[test]
+fn return_suffix_identifiers_keep_binary_operators() {
+    for source in [
+        "fnc calc(int myreturn, int other): int { return myreturn * other; }\n",
+        "fnc calc(int myreturn, int other): int { return myreturn & other; }\n",
+    ] {
+        let formatted = format_source(source).expect("binary operand is an identifier");
+        assert_eq!(formatted, format_source(&formatted).unwrap());
+    }
 }
