@@ -2650,8 +2650,7 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
     // Only a visible pipe followed by the executable arrow closes the lambda.
     let mut search = open + 1;
     let close = loop {
-        let Some(relative) =
-            first_visible_char_index(&line[search..], '|', LexState::default())
+        let Some(relative) = first_visible_char_index(&line[search..], '|', LexState::default())
         else {
             return line.to_string();
         };
@@ -2682,7 +2681,12 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
     if !changed {
         return line.to_string();
     }
-    format!("{}{}{}", &line[..open + 1], canonical.join(", "), &line[close..])
+    format!(
+        "{}{}{}",
+        &line[..open + 1],
+        canonical.join(", "),
+        &line[close..]
+    )
 }
 
 fn split_top_level_parameters(parameters: &str) -> Option<Vec<&str>> {
