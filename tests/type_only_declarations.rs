@@ -55,3 +55,27 @@ fn legacy_define_interface_and_trait_remain_supported() {
     assert!(formatted.contains("define trait Tagged"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn opaque_forward_type_preserves_semicolon_and_visibility() {
+    let source = "pub declare type Code;\n".to_string()
+        + "fnc identity(Code value): Code { return value; }\n"
+        + "define pub type Code = int;\n";
+    let formatted = format_source(&source).expect("opaque type syntax must format");
+    assert!(formatted.contains("declare pub type Code;"), "{formatted}");
+    assert!(formatted.contains("define pub type Code = int;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn forward_type_does_not_open_end_delimited_block() {
+    let source = "define module api as\n".to_string()
+        + "declare type Code;\n"
+        + "fnc identity(Code value): Code { return value; }\n"
+        + "define type Code = int;\n"
+        + "end\n";
+    let formatted = format_source(&source).expect("forward declaration must not consume module end");
+    assert!(formatted.contains("  declare type Code;"), "{formatted}");
+    assert!(formatted.contains("  define type Code = int;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
