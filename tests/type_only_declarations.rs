@@ -82,3 +82,14 @@ fn complete_type_aliases_preserve_module_end_balance() {
     assert!(formatted.contains("  define type OtherCode = int;"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn named_alias_extension_method_preserves_contextual_mtd_and_on() {
+    let source = "declare type Code = int;\n".to_string()
+        + "define mtd double on Code(): int { return self + self; }\n"
+        + "fnc calculate(Code code): int { return code.double(); }\n";
+    let formatted = format_source(&source).expect("extension source must remain valid");
+    assert!(formatted.contains("define mtd double on Code()"), "{formatted}");
+    assert!(formatted.contains("code.double()"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
