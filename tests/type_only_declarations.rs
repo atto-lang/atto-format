@@ -57,25 +57,28 @@ fn legacy_define_interface_and_trait_remain_supported() {
 }
 
 #[test]
-fn opaque_forward_type_preserves_semicolon_and_visibility() {
-    let source = "pub declare type Code;\n".to_string()
-        + "fnc identity(Code value): Code { return value; }\n"
-        + "define pub type Code = int;\n";
-    let formatted = format_source(&source).expect("opaque type syntax must format");
-    assert!(formatted.contains("declare pub type Code;"), "{formatted}");
-    assert!(formatted.contains("define pub type Code = int;"), "{formatted}");
-    assert_eq!(format_source(&formatted).unwrap(), formatted);
+fn declare_and_define_complete_type_aliases_both_format_idempotently() {
+    for source in [
+        "declare type Code = int;\n",
+        "define type Code = int;\n",
+        "declare pub type Code = int;\n",
+        "define pub type Code = int;\n",
+    ] {
+        let formatted = format_source(source).expect("completed type alias must format");
+        assert!(formatted.contains("type Code = int;"), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
 }
 
 #[test]
-fn forward_type_does_not_open_end_delimited_block() {
+fn complete_type_aliases_preserve_module_end_balance() {
     let source = "define module api as\n".to_string()
-        + "declare type Code;\n"
+        + "declare type Code = int;\n"
         + "fnc identity(Code value): Code { return value; }\n"
-        + "define type Code = int;\n"
+        + "define type OtherCode = int;\n"
         + "end\n";
-    let formatted = format_source(&source).expect("forward declaration must not consume module end");
-    assert!(formatted.contains("  declare type Code;"), "{formatted}");
-    assert!(formatted.contains("  define type Code = int;"), "{formatted}");
+    let formatted = format_source(&source).expect("completed aliases cannot open end blocks");
+    assert!(formatted.contains("  declare type Code = int;"), "{formatted}");
+    assert!(formatted.contains("  define type OtherCode = int;"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
