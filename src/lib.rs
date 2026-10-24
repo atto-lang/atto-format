@@ -553,6 +553,16 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
 /// reorder unrelated declarations or unknown grammar whose meaning depends on
 /// the compiler's evolving syntax.
 pub fn format_source(source: &str) -> Result<String, FormatError> {
+    format_source_impl(source, false)
+}
+
+/// Explicit migration output: add the optional contextual `mtd` introducer
+/// to immediate instance methods. Normal formatting remains style-neutral.
+pub fn format_source_with_mtd(source: &str) -> Result<String, FormatError> {
+    format_source_impl(source, true)
+}
+
+fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatError> {
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
@@ -644,12 +654,17 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
+        let instance_member = keyword_stack.is_empty()
+            && in_direct_instance_container(&define_stack, &brace_stack);
         content = canonicalize_declaration_line(
             &content,
             lex,
-            keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack),
+            instance_member,
             keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
+        if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
+            content = insert_contextual_mtd(&content, lex);
+        }
         // Field syntax is contextual: do not rewrite local const/let/val,
         // actor state, method bodies, or trait signatures.
         if keyword_stack.is_empty()
@@ -758,7 +773,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
             && pending_explicit_callable_parameters
             && is_multiline_end_delimited_callable_close(structural);
         let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
-            && (is_end_delimited_callable_header(structural) || multiline_end_delimited_callable);
+            && (is_end_delimited_callable_header(
+                structural,
+                in_direct_instance_container(&define_stack, &brace_stack),
+            ) || (multiline_end_delimited_callable
+                && (!in_direct_instance_container(&define_stack, &brace_stack)
+                    || structural.trim_end().ends_with("::"))));
         let callable_body = is_callable_body_header(structural, signature_context)
             || end_delimited_callable
             || (closes_multiline_callable && structural.contains('{'));
@@ -1534,6 +1554,48 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
     tail.is_empty() || tail.starts_with("//")
 }
 
+// Used only when a caller explicitly requests the source-migration spelling.
+// This is contextual and intentionally does not rewrite functions, statics,
+// constructors, class fields, comments, literals or nested callable bodies.
+fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.is_empty() {
+        return line.to_string();
+    }
+    let word = |index: usize| &line[words[index].start..words[index].end];
+    let mut index = 0;
+    while index < words.len() && matches!(
+        word(index),
+        "pub" | "private" | "async" | "suspend" | "suspends" |
+        "critical" | "structural" | "abstract"
+    ) {
+        index += 1;
+    }
+    if index >= words.len() || matches!(
+        word(index),
+        "fnc" | "fn" | "method" | "static" | "constructor" |
+        "let" | "val" | "const" | "final" | "mtd"
+    ) {
+        // mtd() as a literal method name is still legal without insertion.
+        return line.to_string();
+    }
+    if !plain_word_prefix(line, &words[..=index]) {
+        return line.to_string();
+    }
+    let suffix = line[words[index].end..].trim_start();
+    if !suffix.starts_with('(') && !suffix.starts_with('<') {
+        return line.to_string();
+    }
+    if !line.contains('(') || line.contains('=') {
+        return line.to_string();
+    }
+    let mut out = String::with_capacity(line.len() + 4);
+    out.push_str(&line[..words[index].start]);
+    out.push_str("mtd ");
+    out.push_str(&line[words[index].start..]);
+    out
+}
+
 fn canonicalize_declaration_line(
     line: &str,
     initial: LexState,
@@ -2194,13 +2256,13 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
     let mut newest: Option<(usize, bool)> = None;
 
     for frame in defines {
-        let allowed = frame.kind == DefineKind::Module;
+        let allowed = matches!(frame.kind, DefineKind::Module | DefineKind::Class | DefineKind::Actor);
         if newest.is_none_or(|(order, _)| frame.order > order) {
             newest = Some((frame.order, allowed));
         }
     }
     for frame in braces {
-        let allowed = frame.kind == BraceKind::Module;
+        let allowed = matches!(frame.kind, BraceKind::Module | BraceKind::Class | BraceKind::Actor);
         if newest.is_none_or(|(order, _)| frame.order > order) {
             newest = Some((frame.order, allowed));
         }
@@ -2209,7 +2271,7 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
     newest.map(|(_, allowed)| allowed).unwrap_or(true)
 }
 
-fn is_end_delimited_callable_header(structural: &str) -> bool {
+fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
     if line.ends_with(';')
         || contains_word(line, "actor")
@@ -2219,7 +2281,12 @@ fn is_end_delimited_callable_header(structural: &str) -> bool {
     {
         return false;
     }
-    if !(contains_word(line, "fnc") || contains_word(line, "routine")) || !line.contains('(') {
+    let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
+    // Bare class and actor methods have no 'fnc' introducer. Requiring an
+    // explicit '::' avoids misclassifying a field, call or incomplete header.
+    if !line.contains('(') || (!standalone && !instance_member)
+        || (instance_member && !line.ends_with("::"))
+    {
         return false;
     }
     let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
