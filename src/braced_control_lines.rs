@@ -19,6 +19,16 @@ fn is_control_header(source: &str) -> bool {
         {
             return false;
         }
+        // Fail closed for expressions with top-level inline record/type
+        // introducers: their first brace is data, not a control-body brace.
+        // The compiler and future AST-aware formatter must disambiguate.
+        if text.contains("infer struct")
+            || text.contains("infer record")
+            || text.contains("obj{")
+            || text.contains("new struct")
+        {
+            return false;
+        }
         // Keyword-bodied conditionals are normalized by keyword_blocks,
         // not by an independent brace heuristic.
         if matches!(keyword, "if" | "elif" | "elseif")
@@ -87,9 +97,7 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     }
     expanded.push('}');
     // A line comment belongs to the closing brace and must not move.
-    if trailing.trim_start().starts_with("//")
-        || trailing.trim_start().starts_with("/*")
-    {
+    if trailing.trim_start().starts_with("//") || trailing.trim_start().starts_with("/*") {
         expanded.push_str(trailing);
     } else if !trailing.trim().is_empty() {
         expanded.push('\n');
@@ -157,6 +165,12 @@ mod tests {
             normalize(source).unwrap(),
             "if ready {\n work(\"} ;\");\n} // comment; }"
         );
+    }
+
+    #[test]
+    fn ambiguous_inline_type_brace_in_condition_is_not_treated_as_body() {
+        let source = "if value == infer struct {count: 1} { run(); }";
+        assert_eq!(normalize(source).unwrap(), source);
     }
 
     #[test]
