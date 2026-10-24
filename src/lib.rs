@@ -9,6 +9,7 @@ mod inline_blocks;
 mod keyword_blocks;
 mod match_switch;
 mod select;
+mod statement_lines;
 mod unused_imports;
 
 const INDENT: &str = "  ";
@@ -570,6 +571,7 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
+    let normalized = statement_lines::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut block_comment_indent_shift = 0isize;
