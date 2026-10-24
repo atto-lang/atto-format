@@ -573,6 +573,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
     let normalized = braced_control_lines::normalize(&normalized)?;
+    // A compact keyword conditional may have been hidden inside a one-line
+    // braced control body. After its brace opens are expanded, the keyword
+    // pass can see it at the start of its own physical line.
+    let normalized = keyword_blocks::normalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut block_comment_indent_shift = 0isize;
