@@ -769,16 +769,18 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         let signature_context = nearest_signature_context(&define_stack, &brace_stack);
         let closes_multiline_callable =
             pending_callable_parameter_depth > 0 && structural.trim_start().starts_with(')');
+        // A class/actor instance method may omit 'fnc' even when its
+        // parameter list spans lines. Its close line can still open a
+        // keyword-delimited body, but only with the explicit '::' marker.
+        let direct_instance_member =
+            in_direct_instance_container(&define_stack, &brace_stack);
         let multiline_end_delimited_callable = closes_multiline_callable
-            && pending_explicit_callable_parameters
-            && is_multiline_end_delimited_callable_close(structural);
+            && (pending_explicit_callable_parameters || direct_instance_member)
+            && is_multiline_end_delimited_callable_close(structural)
+            && (!direct_instance_member || structural.trim_end().ends_with("::"));
         let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
-            && (is_end_delimited_callable_header(
-                structural,
-                in_direct_instance_container(&define_stack, &brace_stack),
-            ) || (multiline_end_delimited_callable
-                && (!in_direct_instance_container(&define_stack, &brace_stack)
-                    || structural.trim_end().ends_with("::"))));
+            && (is_end_delimited_callable_header(structural, direct_instance_member)
+                || multiline_end_delimited_callable);
         let callable_body = is_callable_body_header(structural, signature_context)
             || end_delimited_callable
             || (closes_multiline_callable && structural.contains('{'));
