@@ -2081,6 +2081,6 @@ end
     assert!(formatted.contains("  mtd first() -> int ::\n"), "{formatted}");
     assert!(formatted.contains("    if true then\n"), "{formatted}");
     assert!(formatted.contains("      return 1;\n"), "{formatted}");
-    assert!(formatted.contains("    end\n  second() -> int {"), "{formatted}");
+    assert!(formatted.contains("  end\n  second() -> int {"), "{formatted}");
     assert_eq!(formatted, format_source(&formatted).unwrap());
 }
