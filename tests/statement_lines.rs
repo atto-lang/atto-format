@@ -141,3 +141,12 @@ fn record_return_braces_are_not_treated_as_callable_bodies() {
     assert!(formatted.contains("  first();\n  second();\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn multiline_control_preserves_opening_line_comment_and_actions() {
+    let source = "fnc run() -> void {\nif ready { // note: }; else; must remain comment\nfirst(); second();\n}\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  if ready { // note: }; else; must remain comment\n"));
+    assert!(formatted.contains("    first();\n    second();\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
