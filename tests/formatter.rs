@@ -2029,7 +2029,7 @@ fnc standalone(): void {}
     assert!(once.contains("mtd foo() -> void {"), "{once}");
     assert!(once.contains("mtd bar() -> void ::"), "{once}");
     assert!(once.contains("static fnc helper() -> void {"), "{once}");
-    assert!(once.contains("mtd() -> void {"), "{once}");
+    assert!(once.contains("mtd mtd() -> void {"), "{once}");
     assert!(once.contains("suspend mtd work() -> void {"), "{once}");
     assert!(once.contains("fnc standalone() -> void {"), "{once}");
     assert!(!once.contains("mtd mtd bar"), "{once}");
