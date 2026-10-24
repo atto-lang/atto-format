@@ -40,3 +40,23 @@ fn semicolons_in_arguments_are_not_separate_statements() {
     assert!(formatted.contains("  call(\"a;b\", nested(1, 2));\n  next();"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn inline_braced_if_else_has_separate_control_and_action_lines() {
+    let input = "fnc run() -> void {\nif ready { first(); second(); } else { fallback(); } fi\n}\n";
+    let output = format_source(input).unwrap();
+    assert!(output.contains("  if ready {\n"));
+    assert!(output.contains("    first();\n"));
+    assert!(output.contains("    second();\n"));
+    assert!(output.contains("  else {\n"));
+    assert!(output.contains("    fallback();\n"));
+    assert!(!output.contains("first(); second();"));
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn formatter_does_not_invent_an_action_when_expanding_control_flow() {
+    let formatted = format_source("fnc run() -> void {\nif foo then x(); fi\n}\n").unwrap();
+    assert!(formatted.contains("    x();\n"));
+    assert!(!formatted.contains("do();"));
+}
