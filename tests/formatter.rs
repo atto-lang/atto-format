@@ -1984,3 +1984,54 @@ fn return_suffix_identifiers_keep_binary_operators() {
         assert_eq!(formatted, format_source(&formatted).unwrap());
     }
 }
+
+
+#[test]
+fn class_methods_accept_bare_and_mtd_double_colon_terminators() {
+    let source = r#"define class X1 as
+foo(): void {}
+end
+define class X2 as
+foo() -> void ::
+end
+end
+define class X3 as
+mtd foo(): void {}
+end
+define class X4 as
+mtd foo() -> void ::
+end
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("foo() -> void {"), "{once}");
+    assert!(once.contains("foo() -> void ::"), "{once}");
+    assert!(once.contains("mtd foo() -> void {"), "{once}");
+    assert!(once.contains("mtd foo() -> void ::"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn optional_mtd_insertion_is_idempotent_and_scope_aware() {
+    let source = r#"define class C as
+foo(): void {}
+mtd bar() -> void ::
+end
+static fnc helper(): void {}
+mtd(): void {}
+end
+define actor A as
+suspend work(): void {}
+end
+fnc standalone(): void {}
+"#;
+    let once = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(once.contains("mtd foo() -> void {"), "{once}");
+    assert!(once.contains("mtd bar() -> void ::"), "{once}");
+    assert!(once.contains("static fnc helper() -> void {"), "{once}");
+    assert!(once.contains("mtd() -> void {"), "{once}");
+    assert!(once.contains("suspend mtd work() -> void {"), "{once}");
+    assert!(once.contains("fnc standalone() -> void {"), "{once}");
+    assert!(!once.contains("mtd mtd bar"), "{once}");
+    assert_eq!(once, oreslang_format::format_source_with_mtd(&once).unwrap());
+}
