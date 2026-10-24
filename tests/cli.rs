@@ -363,3 +363,25 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
         assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
     }
 }
+
+
+#[test]
+fn insert_mtd_is_an_opt_in_migration_not_a_default() {
+    let repo = TempRepo::new("insert-mtd");
+    let path = repo.write("methods.ores", "define class X as\nfoo(): void {}\nend\n");
+    repo.commit_all("baseline");
+
+    let default = repo.run(&["--stdout", "methods.ores"]);
+    assert!(default.status.success());
+    assert!(!String::from_utf8_lossy(&default.stdout).contains("mtd foo()"));
+
+    let explicit = repo.run(&["--insert-mtd", "--stdout", "methods.ores"]);
+    assert!(explicit.status.success());
+    assert!(String::from_utf8_lossy(&explicit.stdout).contains("mtd foo()"));
+
+    let written = repo.run(&["--write", "--insert-mtd", "methods.ores"]);
+    assert!(written.status.success());
+    assert!(fs::read_to_string(&path).unwrap().contains("mtd foo()"));
+    let checked = repo.run(&["--check", "--insert-mtd", "methods.ores"]);
+    assert!(checked.status.success());
+}
