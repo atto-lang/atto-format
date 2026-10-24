@@ -150,3 +150,12 @@ fn multiline_control_preserves_opening_line_comment_and_actions() {
     assert!(formatted.contains("    first();\n    second();\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn control_header_literals_do_not_trigger_record_brace_guard() {
+    let source = "fnc run() -> void {\nif name == \"infer struct\" { first(); second(); }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  if name == \"infer struct\" {\n"));
+    assert!(formatted.contains("    first();\n    second();\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
