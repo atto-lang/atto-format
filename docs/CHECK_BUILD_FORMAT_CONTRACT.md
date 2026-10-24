@@ -5,10 +5,11 @@ are intentionally different admission steps.
 
 - `oresfmt --check path/to/src` checks canonical layout **read-only**. It does
   not establish grammar, import, type, effect, ownership or backend validity.
-- The Java/GraalVM launcher `oreslang --check file.ores` runs linked compiler
-  validation (including syntax errors), without executing the guest entrypoint.
+- The Java/GraalVM launcher `oreslang check file.ores` is the canonical public
+  spelling for linked compiler validation (including syntax errors), without
+  executing the guest entrypoint. Legacy `--check` remains an alias.
 - The stack CLI's `oreslang-stack check` already performs generated-adapter
-  drift verification and compiler `--check` for every `.ores` source.
+  drift verification and invokes `oreslang check` for every `.ores` source.
   Its companion `--format-check` option (in the separate stack CLI change)
   then runs `oresfmt --check` on the same source tree.
 - `oreslang-stack build --format-check` requires both checks **before**
@@ -42,10 +43,29 @@ normalizes its layout. A missing `fi` or an invalid expression remains a
 compiler diagnostic. Semicolons embedded in strings, comments, argument lists
 and record literals are not statement separators.
 
+## Executable acceptance chain
+
+For every syntax fixture admitted by the compiler, the release gate is:
+
+```text
+original source
+  -> oreslang check
+  -> oresfmt
+  -> oreslang check
+  -> oresfmt again (byte-identical)
+  -> oreslang-stack build --format-check
+```
+
+A compiler rejection stops the chain before formatting. A formatting rejection
+stops the chain before packaging. Neither check nor build may rewrite source.
+Compact-but-valid source is a compiler concern; canonical physical layout is a
+formatter concern.
+
 ## Release gate before enabling formatting by default
 
-Run the real Java `--check` command on **both** source and formatted source,
-plus real LLVM compiler admission for the backend's supported subset. Require:
+Run the real Java `oreslang check` command on **both** source and formatted
+source, plus real LLVM compiler admission for the backend's supported subset.
+Require:
 formatter idempotence, comments/literal byte preservation, equivalent linked
 compiler admission, and semantic/AST checks wherever available. Formatter
 syntax-only tests and mock compiler harnesses cannot substitute for actual
