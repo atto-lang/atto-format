@@ -2135,3 +2135,23 @@ end
     assert!(migrated.contains("mtd nested<T, List<int>>("), "{migrated}");
     assert_eq!(migrated, oreslang_format::format_source_with_mtd(&migrated).unwrap());
 }
+
+
+#[test]
+fn symbol_instance_method_migration_preserves_computed_method_name() {
+    let source = r#"define class Iter as
+[Symbol.iterator](): int { return 1; }
+pub [Symbol.dispose]() -> void ::
+end
+mtd [Symbol.custom](): int { return 2; }
+end
+"#;
+    let normal = format_source(source).unwrap();
+    assert!(!normal.contains("mtd [Symbol.iterator]"), "{normal}");
+    let once = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(once.contains("mtd [Symbol.iterator]() -> int {"), "{once}");
+    assert!(once.contains("pub mtd [Symbol.dispose]() -> void ::"), "{once}");
+    assert!(once.contains("mtd [Symbol.custom]() -> int {"), "{once}");
+    assert!(!once.contains("mtd mtd [Symbol.custom]"), "{once}");
+    assert_eq!(once, oreslang_format::format_source_with_mtd(&once).unwrap());
+}
