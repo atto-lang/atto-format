@@ -2279,6 +2279,7 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
         || contains_word(line, "isoactor")
         || contains_word(line, "static")
         || contains_word(line, "abstract")
+        || starts_word(line, "constructor")
     {
         return false;
     }
