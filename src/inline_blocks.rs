@@ -134,7 +134,7 @@ pub(crate) fn normalize(source: &str) -> String {
 
 /// Return byte offsets of syntax punctuation, excluding strings and comments.
 /// Scan state is carried across lines so multiline block comments are opaque.
-fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
+pub(crate) fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
     let mut result = Vec::new();
     let mut chars = line.char_indices().peekable();
     while let Some((at, ch)) = chars.next() {
