@@ -6,6 +6,25 @@
 
 use crate::LexState;
 
+// Skip only whitespace and leading comments after a statement terminator.
+// Unlike rescanning the entire suffix at every semicolon, this has linear
+// total cost across ordinary and generated long lines. Quoted literals are
+// executable tokens here, never mistaken for comments.
+fn next_code_after_comments(mut remaining: &str) -> Option<&str> {
+    loop {
+        remaining = remaining.trim_start();
+        if remaining.is_empty() || remaining.starts_with("//") {
+            return None;
+        }
+        if let Some(comment) = remaining.strip_prefix("/*") {
+            let end = comment.find("*/")?;
+            remaining = &comment[end + 2..];
+            continue;
+        }
+        return Some(remaining);
+    }
+}
+
 // Track opaque data braces across physical lines. Ordinary executable
 // control/callable braces do not inhibit statement splitting in their bodies;
 // inline data/record braces must, even when their fields span multiple lines.
@@ -91,16 +110,12 @@ pub(crate) fn normalize(source: &str) -> String {
                     // this statement, but a comment followed by executable
                     // source still begins another statement. Inspect the
                     // visible tail instead of suppressing every /* prefix.
-                    let mut tail_lex = LexState::default();
-                    let visible_tail: String = crate::scan_visible(remainder, &mut tail_lex)
-                        .into_iter()
-                        .collect();
-                    let next_code = visible_tail.trim_start();
-                    if !next_code.is_empty()
-                        && !crate::starts_word(next_code, "then")
-                        && !crate::starts_word(next_code, "do")
-                    {
-                        cuts.push(at + 1);
+                    if let Some(next_code) = next_code_after_comments(remainder) {
+                        if !crate::starts_word(next_code, "then")
+                            && !crate::starts_word(next_code, "do")
+                        {
+                            cuts.push(at + 1);
+                        }
                     }
                 }
                 _ => {}
@@ -171,6 +186,34 @@ mod tests {
             normalize("first(); /* start\n continued */ second();"),
             "first(); /* start\n continued */ second();"
         );
+    }
+
+    #[test]
+    fn block_comments_before_header_terminators_stay_on_one_line() {
+        assert_eq!(
+            normalize("if ready; /* header note */ then run();"),
+            "if ready; /* header note */ then run();"
+        );
+        assert_eq!(
+            normalize("first(); /* one */ /* two */ second();"),
+            "first();\n /* one */ /* two */ second();"
+        );
+        assert_eq!(
+            normalize("first(); /* one */ // second();"),
+            "first(); /* one */ // second();"
+        );
+        assert_eq!(
+            normalize("first(); /* unterminated"),
+            "first(); /* unterminated"
+        );
+    }
+
+    #[test]
+    fn many_actions_do_not_require_rescanning_long_suffixes() {
+        let line = "action(); ".repeat(2048);
+        let separated = normalize(&line);
+        assert_eq!(separated.lines().count(), 2048);
+        assert!(separated.lines().all(|line| line.trim() == "action();"));
     }
 
     #[test]
