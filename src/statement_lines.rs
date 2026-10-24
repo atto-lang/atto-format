@@ -87,11 +87,18 @@ pub(crate) fn normalize(source: &str) -> String {
                     // 'if condition; then' is a supported compatibility
                     // spelling. Never terminate its header. Keep comments
                     // attached to the original statement.
-                    if !remainder.is_empty()
-                        && !remainder.starts_with("//")
-                        && !remainder.starts_with("/*")
-                        && !crate::starts_word(remainder, "then")
-                        && !crate::starts_word(remainder, "do")
+                    // A trailing /* block comment */ alone belongs to
+                    // this statement, but a comment followed by executable
+                    // source still begins another statement. Inspect the
+                    // visible tail instead of suppressing every /* prefix.
+                    let mut tail_lex = LexState::default();
+                    let visible_tail: String = crate::scan_visible(remainder, &mut tail_lex)
+                        .into_iter()
+                        .collect();
+                    let next_code = visible_tail.trim_start();
+                    if !next_code.is_empty()
+                        && !crate::starts_word(next_code, "then")
+                        && !crate::starts_word(next_code, "do")
                     {
                         cuts.push(at + 1);
                     }
@@ -143,6 +150,26 @@ mod tests {
         assert_eq!(
             normalize("for (i = 0; i < 3; i++) do work();"),
             "for (i = 0; i < 3; i++) do work();"
+        );
+    }
+
+    #[test]
+    fn block_comment_between_actions_does_not_hide_the_second_action() {
+        assert_eq!(
+            normalize("first(); /* keep note */ second();"),
+            "first();\n /* keep note */ second();"
+        );
+        assert_eq!(
+            normalize("first(); /* keep note */"),
+            "first(); /* keep note */"
+        );
+        assert_eq!(
+            normalize("first(); /* keep note */ // trailing"),
+            "first(); /* keep note */ // trailing"
+        );
+        assert_eq!(
+            normalize("first(); /* start\n continued */ second();"),
+            "first(); /* start\n continued */ second();"
         );
     }
 
