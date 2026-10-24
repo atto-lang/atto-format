@@ -2035,3 +2035,52 @@ fnc standalone(): void {}
     assert!(!once.contains("mtd mtd bar"), "{once}");
     assert_eq!(once, oreslang_format::format_source_with_mtd(&once).unwrap());
 }
+
+
+#[test]
+fn mtd_migration_handles_defaults_and_ignores_literals_and_comments() {
+    let source = r#"define class Config as
+// foo(int n = 2): void {}
+pub calculate(int n = 2): int { return n; }
+method(): void {}
+mtd(): void {}
+fnc old(): void {}
+static fnc independent(): void {}
+end
+fnc top(): void {
+  // mtd local(): void {}
+  val text = "foo() -> void :: end";
+}
+"#;
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(migrated.contains("pub mtd calculate("), "{migrated}");
+    assert!(migrated.contains("mtd method() -> void {"), "{migrated}");
+    assert!(migrated.contains("mtd mtd() -> void {"), "{migrated}");
+    assert!(migrated.contains("mtd old() -> void {"), "{migrated}");
+    assert!(migrated.contains("static fnc independent() -> void {"), "{migrated}");
+    assert!(migrated.contains("// foo(int n = 2): void {}"), "{migrated}");
+    assert!(migrated.contains("val text = \"foo() -> void :: end\";"), "{migrated}");
+    assert!(!migrated.contains("mtd top()"), "{migrated}");
+    assert_eq!(migrated, oreslang_format::format_source_with_mtd(&migrated).unwrap());
+}
+
+#[test]
+fn end_delimited_method_end_does_not_close_its_class() {
+    let source = r#"define class Pair as
+mtd first() -> int ::
+if true then
+return 1;
+else
+return 2;
+fi
+end
+second(): int { return 3; }
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  mtd first() -> int ::\n"), "{formatted}");
+    assert!(formatted.contains("    if true then\n"), "{formatted}");
+    assert!(formatted.contains("      return 1;\n"), "{formatted}");
+    assert!(formatted.contains("    end\n  second() -> int {"), "{formatted}");
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
