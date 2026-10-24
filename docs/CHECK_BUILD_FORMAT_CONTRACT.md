@@ -51,3 +51,23 @@ compiler admission, and semantic/AST checks wherever available. Formatter
 syntax-only tests and mock compiler harnesses cannot substitute for actual
 compiler runs. Keep auto-`--write` out of check/build; do not silently repair
 syntax or bulk-mutate a checkout.
+
+## Multiline braces and ambiguity boundaries
+
+A recognized executable control opener is placed on its own physical line
+even when the closer appears later in the file. A joined `} else {`, `}
+catch {` or `} finally {` is separated into distinct lines. Consecutive
+executable actions such as `first(); second();` inside the body are split.
+
+Conversely, multiline `infer struct { ... }` values and parenthesized
+argument expressions must remain lexically intact; a semicolon inside either
+is not an executable statement boundary. An attached typed literal such as
+`Point{x: 1}`, or an expression whose first `{` may be a data value,
+is deliberately **not** rewritten as a control brace by the lexical pass.
+The compiler, not a guessing formatter, is responsible for disambiguation.
+
+The passing bar is **executed**, exact-head `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` on the
+stable/MSRV toolchains, and parse→format→parse checks against actual Java
+and LLVM compilers. A GitHub Actions job that records **zero executed steps**
+is blocked runner admission, not compiler/test evidence.
