@@ -1559,6 +1559,32 @@ fn is_single_compile_time_literal(initializer: &str, ty: &str) -> bool {
 // Used only when a caller explicitly requests the source-migration spelling.
 // This is contextual and intentionally does not rewrite functions, statics,
 // constructors, class fields, comments, literals or nested callable bodies.
+// A leading generic type is not necessarily a generic method. For example,
+// `List<int> items = []` must remain a class field during --insert-mtd.
+// Require the generic header to close immediately before a parameter list.
+fn generic_method_parameter_list(suffix: &str) -> bool {
+    if !suffix.starts_with('<') {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, ch) in suffix.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return suffix[i + ch.len_utf8()..].trim_start().starts_with('(');
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     let words = visible_word_spans(line, initial);
     if words.is_empty() {
@@ -1586,7 +1612,7 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
         return line.to_string();
     }
     let suffix = line[words[index].end..].trim_start();
-    if !suffix.starts_with('(') && !suffix.starts_with('<') {
+    if !suffix.starts_with('(') && !generic_method_parameter_list(suffix) {
         return line.to_string();
     }
     // A default parameter may contain '='; don't mistake that for an
