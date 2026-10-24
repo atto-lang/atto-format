@@ -2084,3 +2084,36 @@ end
     assert!(formatted.contains("  end\n  second() -> int {"), "{formatted}");
     assert_eq!(formatted, format_source(&formatted).unwrap());
 }
+
+
+#[test]
+fn multiline_class_and_actor_methods_own_their_keyword_end() {
+    let source = r#"define class C as
+mtd sum(
+int first,
+int second
+) -> int ::
+return first + second;
+end
+next(): int { return 10; }
+end
+define actor Worker as
+process(
+int item
+) -> int ::
+return item;
+end
+later(): int { return 4; }
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains(") -> int ::\n"), "{once}");
+    assert!(once.contains("  end\n  next() -> int {"), "{once}");
+    assert!(once.contains("  end\n  later() -> int {"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(migrated.contains("mtd sum("), "{migrated}");
+    assert!(migrated.contains("mtd process("), "{migrated}");
+    assert!(migrated.contains("mtd later() -> int {"), "{migrated}");
+    assert_eq!(migrated, oreslang_format::format_source_with_mtd(&migrated).unwrap());
+}
