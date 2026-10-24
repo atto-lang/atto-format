@@ -95,7 +95,10 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     // passes. Do not manufacture a blank line for an already-open header.
     let Some(close_at) = close_at else {
         let after = &line[open_at + 1..];
-        if after.trim().is_empty() {
+        // Keep a trailing line comment attached to the opening header.
+        // Moving it onto a fresh line would change which source line owns
+        // the comment and create unnecessary layout churn.
+        if after.trim().is_empty() || after.trim_start().starts_with("//") {
             return line.to_string();
         }
         return format!("{}\n{}", &line[..open_at + 1], after.trim_start());
@@ -236,6 +239,23 @@ mod tests {
     fn keeps_already_separated_multiline_control_bodies_stable() {
         let source = "if ready {\nwork();\n}\nfi";
         assert_eq!(normalize(source).unwrap(), source);
+    }
+
+    #[test]
+    fn multiline_control_keeps_opening_line_comment_attached() {
+        let input = "if ready { // comment contains }; else and ;\nwork(); next();\n}";
+        let expected = "if ready { // comment contains }; else and ;\nwork();\n next();\n}";
+        assert_eq!(normalize(input).unwrap(), expected);
+        assert_eq!(normalize(expected).unwrap(), expected);
+    }
+
+    #[test]
+    fn multiline_control_still_splits_real_code_after_opening_brace() {
+        let input = "if ready { /* comment */ work(); next();\nmore();\n}";
+        let formatted = normalize(input).unwrap();
+        assert!(formatted.contains("if ready {\n"));
+        assert!(formatted.contains("/* comment */ work();\n next();"));
+        assert_eq!(normalize(&formatted).unwrap(), formatted);
     }
 
     #[test]
