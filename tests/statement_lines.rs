@@ -168,3 +168,20 @@ fn block_comment_between_executable_actions_is_not_a_statement_shield() {
     assert!(formatted.contains("  third(); /* trailing only */\n"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn braced_control_comments_do_not_shield_following_actions() {
+    let source = "fnc run() -> void {\nif ready { run(); } /* closer note */ next();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  }\n  /* closer note */ next();\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn block_comment_between_control_closer_and_else_stays_attached() {
+    let source = "fnc run() -> void {\nif ready { run();\n} /* arm note */ else { fallback(); }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  } /* arm note */\n  else {\n"), "{formatted}");
+    assert!(formatted.contains("    fallback();\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
