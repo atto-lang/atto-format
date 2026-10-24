@@ -159,3 +159,12 @@ fn control_header_literals_do_not_trigger_record_brace_guard() {
     assert!(formatted.contains("    first();\n    second();\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn block_comment_between_executable_actions_is_not_a_statement_shield() {
+    let source = "fnc run() -> void {\nfirst(); /* an inline comment */ second();\nthird(); /* trailing only */\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  first();\n  /* an inline comment */ second();\n"), "{formatted}");
+    assert!(formatted.contains("  third(); /* trailing only */\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
