@@ -85,7 +85,15 @@ pub(crate) fn normalize(source: &str) -> String {
             }
         }
         let Some(closing) = closing else {
-            result.push_str(line);
+            let open_at = punctuation[opening].0;
+            let tail = &line[open_at + 1..];
+            if tail.trim().is_empty() || tail.trim_start().starts_with("//") {
+                result.push_str(line);
+            } else {
+                result.push_str(&line[..open_at + 1]);
+                result.push('\n');
+                result.push_str(tail.trim_start());
+            }
             continue;
         };
 
