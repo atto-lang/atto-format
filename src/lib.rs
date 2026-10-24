@@ -1587,9 +1587,9 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     if !suffix.starts_with('(') && !suffix.starts_with('<') {
         return line.to_string();
     }
-    if !line.contains('(') || line.contains('=') {
-        return line.to_string();
-    }
+    // A default parameter may contain '='; don't mistake that for an
+    // assignment outside a method. The direct class/actor scope, plain
+    // declaration prefix and name-adjacent '(' / '<' are the admission gate.
     let mut out = String::with_capacity(line.len() + 4);
     out.push_str(&line[..words[index].start]);
     out.push_str("mtd ");
