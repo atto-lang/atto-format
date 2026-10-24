@@ -62,7 +62,15 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
         return line.to_string();
     };
     let open_at = punctuation[opening].0;
-    if !is_control_header(&line[..open_at]) {
+    let header = &line[..open_at];
+    // Attached braces (Point{x: 1}, ready{...}) are ambiguous in an
+    // evolving grammar. Likewise an opening brace after an expression
+    // operator may be a data value, not a control body. Require a distinct
+    // brace token rather than rewriting a possibly typed record literal.
+    if header.chars().last().is_some_and(|ch| !ch.is_whitespace())
+        || header.trim_end().ends_with('=')
+        || !is_control_header(header)
+    {
         return line.to_string();
     }
 
@@ -211,6 +219,17 @@ mod tests {
         assert!(actual.contains("third();\n fourth();"));
         assert!(actual.contains("}\nelse {\nfallback();\n}"));
         assert_eq!(normalize(&actual).unwrap(), actual);
+    }
+
+    #[test]
+    fn ambiguous_attached_record_braces_are_never_control_openers() {
+        for source in [
+            "if item == Point{x: 1} { run(); }",
+            "if value == {x: 1} { run(); }",
+            "if ready{ run(); }",
+        ] {
+            assert_eq!(normalize(source).unwrap(), source);
+        }
     }
 
     #[test]
