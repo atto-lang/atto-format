@@ -2117,3 +2117,21 @@ end
     assert!(migrated.contains("mtd later() -> int {"), "{migrated}");
     assert_eq!(migrated, oreslang_format::format_source_with_mtd(&migrated).unwrap());
 }
+
+
+#[test]
+fn mtd_migration_distinguishes_generic_fields_from_generic_methods() {
+    let source = r#"define class Storage as
+List<int> items = []
+Map<int, int> counts = {}
+generic<T>(T value): T { return value; }
+nested<T, List<int>>(T value): T { return value; }
+end
+"#;
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(!migrated.contains("mtd List"), "{migrated}");
+    assert!(!migrated.contains("mtd Map"), "{migrated}");
+    assert!(migrated.contains("mtd generic<T>("), "{migrated}");
+    assert!(migrated.contains("mtd nested<T, List<int>>("), "{migrated}");
+    assert_eq!(migrated, oreslang_format::format_source_with_mtd(&migrated).unwrap());
+}
