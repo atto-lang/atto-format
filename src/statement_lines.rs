@@ -10,7 +10,7 @@ use crate::LexState;
 // Unlike rescanning the entire suffix at every semicolon, this has linear
 // total cost across ordinary and generated long lines. Quoted literals are
 // executable tokens here, never mistaken for comments.
-fn next_code_after_comments(mut remaining: &str) -> Option<&str> {
+pub(crate) fn next_code_after_comments(mut remaining: &str) -> Option<&str> {
     loop {
         remaining = remaining.trim_start();
         if remaining.is_empty() || remaining.starts_with("//") {
