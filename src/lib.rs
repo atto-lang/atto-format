@@ -1608,6 +1608,37 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
         // below by the '(' immediately after a true method name.
         return line.to_string();
     }
+    // Computed symbol methods are also immediate instance methods, but
+    // their declaration begins with '[' rather than an identifier:
+    //     pub [Symbol.iterator](): T {}
+    // Do not mistake arbitrary array/map expressions for symbol methods.
+    if word(index) == "Symbol" {
+        if let Some(open) = line[..words[index].start].rfind('[') {
+            let prefix = &line[..open];
+            let prefix_ok = if index == 0 {
+                prefix.trim().is_empty()
+            } else {
+                plain_word_prefix(prefix, &words[..index])
+                    && prefix[words[index - 1].end..].trim().is_empty()
+            };
+            if prefix_ok {
+                if let Some(tail) = line[words[index].end..].strip_prefix('.') {
+                    if let Some((name, after)) = tail.split_once(']') {
+                        if !name.is_empty()
+                            && name.chars().all(is_ident_char)
+                            && after.trim_start().starts_with('(')
+                        {
+                            let mut out = String::with_capacity(line.len() + 4);
+                            out.push_str(&line[..open]);
+                            out.push_str("mtd ");
+                            out.push_str(&line[open..]);
+                            return out;
+                        }
+                    }
+                }
+            }
+        }
+    }
     if !plain_word_prefix(line, &words[..=index]) {
         return line.to_string();
     }
