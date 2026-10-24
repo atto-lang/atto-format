@@ -6,16 +6,34 @@
 
 use crate::LexState;
 
+// Track opaque data braces across physical lines. Ordinary executable
+// control/callable braces do not inhibit statement splitting in their bodies;
+// inline data/record braces must, even when their fields span multiple lines.
+fn starts_data_brace(prefix: &str) -> bool {
+    let before = prefix.trim_end();
+    if before.ends_with('=') || before.ends_with(':') {
+        return true;
+    }
+    let tail = before
+        .rsplit(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+        .next()
+        .unwrap_or("");
+    matches!(tail, "struct" | "record" | "state")
+}
+
 pub(crate) fn normalize(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut lex = LexState::default();
+    let (mut parens, mut brackets, mut opaque_data_braces) = (0usize, 0usize, 0usize);
 
     for (line_no, line) in source.split('\n').enumerate() {
         if line_no != 0 {
             out.push('\n');
         }
         let mut chars = line.char_indices().peekable();
-        let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
+        // Local executable braces only suppress splitting while still on the
+        // same source line. Across a newline, their bodies are statements.
+        let mut inline_executable_braces = 0usize;
         let mut cuts = Vec::new();
 
         while let Some((at, ch)) = chars.next() {
@@ -55,9 +73,16 @@ pub(crate) fn normalize(source: &str) -> String {
                 ')' => parens = parens.saturating_sub(1),
                 '[' => brackets += 1,
                 ']' => brackets = brackets.saturating_sub(1),
-                '{' => braces += 1,
-                '}' => braces = braces.saturating_sub(1),
-                ';' if parens == 0 && brackets == 0 && braces == 0 => {
+                '{' if opaque_data_braces > 0 || starts_data_brace(&line[..at]) => {
+                    opaque_data_braces += 1;
+                }
+                '{' => inline_executable_braces += 1,
+                '}' if opaque_data_braces > 0 => opaque_data_braces -= 1,
+                '}' => inline_executable_braces = inline_executable_braces.saturating_sub(1),
+                ';' if parens == 0
+                    && brackets == 0
+                    && opaque_data_braces == 0
+                    && inline_executable_braces == 0 => {
                     let remainder = line[at + 1..].trim_start();
                     // 'if condition; then' is a supported compatibility
                     // spelling. Never terminate its header. Keep comments
@@ -125,5 +150,29 @@ mod tests {
     fn comments_never_create_actions() {
         let source = "call(); // fake(); next();\n/* comment; */ more();";
         assert_eq!(normalize(source), source);
+    }
+
+    #[test]
+    fn multiline_data_braces_keep_inner_semicolons_opaque() {
+        let source = "const row = infer struct {\na: 1; b: 2\n}; go();";
+        assert_eq!(
+            normalize(source),
+            "const row = infer struct {\na: 1; b: 2\n};\n go();"
+        );
+    }
+
+    #[test]
+    fn multiline_calls_keep_inner_semicolons_opaque() {
+        let source = "call(\n  first(); second(),\n  third()\n); finish();";
+        assert_eq!(
+            normalize(source),
+            "call(\n  first(); second(),\n  third()\n);\n finish();"
+        );
+    }
+
+    #[test]
+    fn executable_body_lines_still_split_after_an_open_brace() {
+        let source = "if ready {\nfirst(); second();\n}";
+        assert_eq!(normalize(source), "if ready {\nfirst();\n second();\n}");
     }
 }
