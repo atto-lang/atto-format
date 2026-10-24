@@ -197,6 +197,28 @@ mod tests {
     }
 
     #[test]
+    fn multiline_callable_opening_is_separated() {
+        let input = "fnc run() -> void { first(); second();\nthird();\n}";
+        let expected = "fnc run() -> void {\nfirst(); second();\nthird();\n}";
+        assert_eq!(normalize(input), expected);
+        assert_eq!(normalize(expected), expected);
+    }
+
+    #[test]
+    fn multiline_callable_keeps_trailing_line_comment() {
+        let input = "fnc run() -> void { // body begins on next line\nfirst();\n}";
+        assert_eq!(normalize(input), input);
+    }
+
+    #[test]
+    fn multiline_callable_preserves_leading_block_comment() {
+        let input = "fnc run() -> void { /* header detail */ first();\nsecond();\n}";
+        let expected = "fnc run() -> void {\n/* header detail */ first();\nsecond();\n}";
+        assert_eq!(normalize(input), expected);
+        assert_eq!(normalize(expected), expected);
+    }
+
+    #[test]
     fn record_return_type_braces_are_not_inline_executable_bodies() {
         for source in [
             "fnc f() -> {foo: int, bar: string} ::\nreturn value;\nend",
