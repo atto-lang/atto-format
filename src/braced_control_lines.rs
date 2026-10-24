@@ -100,10 +100,10 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     // passes. Do not manufacture a blank line for an already-open header.
     let Some(close_at) = close_at else {
         let after = &line[open_at + 1..];
-        // Keep a trailing line comment attached to the opening header.
-        // Moving it onto a fresh line would change which source line owns
-        // the comment and create unnecessary layout churn.
-        if after.trim().is_empty() || after.trim_start().starts_with("//") {
+        // A comment-only suffix remains attached to the opening header.
+        // A block comment followed by actual executable code, however,
+        // must not shield that code from statement separation.
+        if statement_lines::next_code_after_comments(after).is_none() {
             return line.to_string();
         }
         return format!("{}\n{}", &line[..open_at + 1], after.trim_start());
@@ -119,10 +119,12 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
         expanded.push('\n');
     }
     expanded.push('}');
-    // A line comment belongs to the closing brace and must not move.
-    if trailing.trim_start().starts_with("//") || trailing.trim_start().starts_with("/*") {
+    // A comment-only suffix belongs to the closing brace. If a block
+    // comment is followed by executable code, move the whole suffix to a
+    // separate physical line instead of leaving code beside the closer.
+    if statement_lines::next_code_after_comments(trailing).is_none() {
         expanded.push_str(trailing);
-    } else if !trailing.trim().is_empty() {
+    } else {
         expanded.push('\n');
         expanded.push_str(trailing.trim_start());
     }
@@ -139,13 +141,21 @@ fn split_leading_closer(line: &str, punctuation: &[(usize, char)]) -> Option<Str
         return None;
     }
     let suffix = line[first.0 + 1..].trim_start();
+    let code = statement_lines::next_code_after_comments(suffix)?;
     if !["else", "elif", "elseif", "catch", "finally", "fi"]
         .iter()
-        .any(|word| starts_word(suffix, word))
+        .any(|word| starts_word(code, word))
     {
         return None;
     }
-    Some(format!("{}\n{}", &line[..first.0 + 1], suffix))
+    // Preserve intervening block comments with the closing brace; only
+    // separate the following control arm.
+    let comment = suffix[..suffix.len() - code.len()].trim_end();
+    if comment.is_empty() {
+        Some(format!("{}\n{}", &line[..first.0 + 1], code))
+    } else {
+        Some(format!("{} {}\n{}", &line[..first.0 + 1], comment, code))
+    }
 }
 
 fn pass(source: &str) -> String {
@@ -275,6 +285,31 @@ mod tests {
         assert!(formatted.contains("if ready {\n"));
         assert!(formatted.contains("/* comment */ work();\n next();"));
         assert_eq!(normalize(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn block_comments_before_actions_do_not_hide_closer_boundaries() {
+        let input = "if ready { /* note only */\nwork();\n}";
+        assert_eq!(normalize(input).unwrap(), input);
+
+        let mixed = "if ready { /* body */ work();\nmore();\n}";
+        let output = normalize(mixed).unwrap();
+        assert!(output.starts_with("if ready {\n/* body */ work();"));
+        assert_eq!(normalize(&output).unwrap(), output);
+
+        let after = "if ready { work(); } /* note */ next();";
+        let actual = normalize(after).unwrap();
+        assert!(actual.contains("}\n/* note */ next();"));
+        assert_eq!(normalize(&actual).unwrap(), actual);
+    }
+
+    #[test]
+    fn leading_closer_comments_stay_with_the_closer_not_else_arm() {
+        let input = "if ready { work();\n} /* branch note */ else { fallback(); }";
+        let actual = normalize(input).unwrap();
+        assert!(actual.contains("} /* branch note */\nelse {"), "{actual}");
+        assert!(actual.contains("fallback();\n}"));
+        assert_eq!(normalize(&actual).unwrap(), actual);
     }
 
     #[test]
