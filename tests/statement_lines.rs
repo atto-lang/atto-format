@@ -71,3 +71,35 @@ fn compact_keyword_if_nested_in_inline_brace_is_expanded() {
     assert!(formatted.contains("    fi\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn multiline_braced_control_actions_have_one_statement_per_line() {
+    let source = "fnc run() -> void {\nif ready { first(); second();\nthird(); fourth();\n} else { fallback(); }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  if ready {\n    first();\n    second();\n"));
+    assert!(formatted.contains("    third();\n    fourth();\n"));
+    assert!(formatted.contains("  }\n  else {\n    fallback();\n  }"));
+    assert!(is_formatted(&formatted).unwrap());
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn multiline_data_literals_and_call_arguments_are_not_split() {
+    let source = "fnc run() -> void {\nconst record = infer struct {\na: 1; b: 2\n}; next();\ncall(\n  first(); second(),\n  third()\n); finish();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("a: 1; b: 2"));
+    assert!(formatted.contains("first(); second(),"));
+    assert!(formatted.contains("  next();"));
+    assert!(formatted.contains("  finish();"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn inline_control_comment_and_string_payloads_are_stable() {
+    let source = "fnc run() -> void {\nif ready { log(\"} else {;\"); /* if else; */ first(); second();\n} else { fallback(); }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("log(\"} else {;\");"));
+    assert!(formatted.contains("/* if else; */"));
+    assert!(formatted.contains("  else {\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
