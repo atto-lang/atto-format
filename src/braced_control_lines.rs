@@ -4,7 +4,12 @@
 use crate::{FormatError, LexState, inline_blocks, starts_word, statement_lines};
 
 fn is_control_header(source: &str) -> bool {
-    let text = source.trim_start();
+    // Treat comments and quoted data as opaque when looking for a record
+    // introducer. A literal containing "infer struct" is not a typed record
+    // expression and must not suppress an executable control-body split.
+    let mut state = LexState::default();
+    let visible: String = crate::scan_visible(source, &mut state).into_iter().collect();
+    let text = visible.trim_start();
     for keyword in [
         "if", "elif", "elseif", "else", "for", "while", "loop",
         "try", "catch", "finally",
@@ -206,6 +211,20 @@ mod tests {
             normalize(source).unwrap(),
             "if ready {\n work(\"} ;\");\n} // comment; }"
         );
+    }
+
+    #[test]
+    fn quoted_data_and_comments_do_not_suppress_a_real_control_block() {
+        let input = "if title == \"infer struct\" { first(); second(); }";
+        let actual = normalize(input).unwrap();
+        assert!(actual.contains("if title == \"infer struct\" {\n"));
+        assert!(actual.contains("first();\n second();\n}"));
+        assert_eq!(normalize(&actual).unwrap(), actual);
+
+        let comment = "if ready /* infer struct */ { work(); }";
+        let formatted = normalize(comment).unwrap();
+        assert!(formatted.contains("if ready /* infer struct */ {\n"));
+        assert!(formatted.contains("work();\n}"));
     }
 
     #[test]
