@@ -103,3 +103,41 @@ fn inline_control_comment_and_string_payloads_are_stable() {
     assert!(formatted.contains("  else {\n"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn multiline_callable_first_line_actions_are_separated() {
+    let source = "fnc run() -> void { first(); second();\nthird(); fourth();\n}\n";
+    let expected = "fnc run() -> void {\n  first();\n  second();\n  third();\n  fourth();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn multiline_callable_preserves_comment_payload_and_statement_order() {
+    let source = "fnc run() -> void { /* ; } */ first(); second();\nthird();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("/* ; } */ first();\n"));
+    assert!(formatted.contains("    second();\n") || formatted.contains("  second();\n"));
+    assert!(formatted.contains("  third();\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn multiline_callable_line_comment_remains_on_opening_line() {
+    let source = "fnc run() -> void { // body note; }\nfirst(); second();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("{ // body note; }\n"));
+    assert!(formatted.contains("  first();\n  second();\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn record_return_braces_are_not_treated_as_callable_bodies() {
+    let source = "fnc build() -> { count: int } { first(); second();\nreturn value;\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("-> { count: int } {\n"));
+    assert!(formatted.contains("  first();\n  second();\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
