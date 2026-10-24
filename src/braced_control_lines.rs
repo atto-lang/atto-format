@@ -81,9 +81,16 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
             _ => {}
         }
     }
-    // Do not reformat incomplete or cross-line braces heuristically.
+    // The opening brace is unambiguously a control-body delimiter, even
+    // when its matching closer is on a later physical line. Split only this
+    // boundary; leave the remainder and nested lexical structure to later
+    // passes. Do not manufacture a blank line for an already-open header.
     let Some(close_at) = close_at else {
-        return line.to_string();
+        let after = &line[open_at + 1..];
+        if after.trim().is_empty() {
+            return line.to_string();
+        }
+        return format!("{}\n{}", &line[..open_at + 1], after.trim_start());
     };
 
     let body = &line[open_at + 1..close_at];
@@ -106,6 +113,25 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     expanded
 }
 
+// Control closers on a preceding line may be joined to a following arm:
+// `} else {`, `} catch {`, `} finally {` or `} fi`. A data brace
+// cannot legally introduce any of these continuations, so this remains
+// syntax-directed and does not depend on tracking a guessed brace owner.
+fn split_leading_closer(line: &str, punctuation: &[(usize, char)]) -> Option<String> {
+    let first = punctuation.first()?;
+    if first.1 != '}' || !line[..first.0].trim().is_empty() {
+        return None;
+    }
+    let suffix = line[first.0 + 1..].trim_start();
+    if !["else", "elif", "elseif", "catch", "finally", "fi"]
+        .iter()
+        .any(|word| starts_word(suffix, word))
+    {
+        return None;
+    }
+    Some(format!("{}\n{}", &line[..first.0 + 1], suffix))
+}
+
 fn pass(source: &str) -> String {
     let mut output = String::with_capacity(source.len());
     let mut lex = LexState::default();
@@ -114,7 +140,11 @@ fn pass(source: &str) -> String {
             output.push('\n');
         }
         let punctuation = inline_blocks::visible_punctuation(line, &mut lex);
-        output.push_str(&expand_one_line(line, &punctuation));
+        if let Some(split) = split_leading_closer(line, &punctuation) {
+            output.push_str(&split);
+        } else {
+            output.push_str(&expand_one_line(line, &punctuation));
+        }
     }
     output
 }
@@ -174,8 +204,26 @@ mod tests {
     }
 
     #[test]
-    fn ignores_incomplete_and_multiline_brace_bodies() {
+    fn opens_multiline_control_bodies_and_separates_joined_else() {
+        let source = "if ready { first(); second();\nthird(); fourth();\n} else { fallback(); }";
+        let actual = normalize(source).unwrap();
+        assert!(actual.contains("if ready {\nfirst();\n second();"));
+        assert!(actual.contains("third();\n fourth();"));
+        assert!(actual.contains("}\nelse {\nfallback();\n}"));
+        assert_eq!(normalize(&actual).unwrap(), actual);
+    }
+
+    #[test]
+    fn keeps_already_separated_multiline_control_bodies_stable() {
         let source = "if ready {\nwork();\n}\nfi";
         assert_eq!(normalize(source).unwrap(), source);
+    }
+
+    #[test]
+    fn does_not_break_record_literals_across_lines() {
+        let source = "const row = infer struct {\na: 1; b: 2\n}; go();";
+        let actual = normalize(source).unwrap();
+        assert_eq!(actual, "const row = infer struct {\na: 1; b: 2\n};\n go();");
+        assert_eq!(normalize(&actual).unwrap(), actual);
     }
 }
