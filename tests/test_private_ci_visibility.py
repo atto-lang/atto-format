@@ -1,6 +1,10 @@
 """Offline fail-closed regressions; no network, source checkout, or CI upload."""
 import unittest
-from scripts.verify_private_ci_visibility import Denied, check_metadata, verify
+import json
+import os
+import urllib.request
+from unittest import mock
+from scripts.verify_private_ci_visibility import Denied, NoRedirect, check_metadata, fetch_metadata, verify
 
 SOURCE = "ores-truffle-oreslang/oreslang-format"
 DESTINATION = "example-org/private-ci-carrier"
@@ -12,6 +16,47 @@ def metadata(name, number):
 
 
 class PreflightTests(unittest.TestCase):
+    def test_authenticated_metadata_fetch_disables_ambient_proxy(self):
+        # A CI host may set HTTPS_PROXY. Never send the scoped read token
+        # through an inherited proxy just to check repository visibility.
+        expected = metadata(DESTINATION, 202)
+        called = []
+
+        class Response:
+            status = 200
+            def __init__(self, url):
+                self.url = url
+            def geturl(self):
+                return self.url
+            def read(self, limit):
+                self.limit = limit
+                return json.dumps(expected).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        class Opener:
+            def open(self, request, timeout):
+                called.append((request, timeout))
+                return Response(request.full_url)
+
+        def build_opener(*handlers):
+            self.assertTrue(any(
+                isinstance(h, urllib.request.ProxyHandler) and h.proxies == {}
+                for h in handlers), handlers)
+            self.assertTrue(any(isinstance(h, NoRedirect) for h in handlers))
+            return Opener()
+
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://untrusted.invalid:8123"}):
+            with mock.patch("scripts.verify_private_ci_visibility.urllib.request.build_opener",
+                            side_effect=build_opener):
+                self.assertEqual(fetch_metadata(DESTINATION, "fake-token"), expected)
+
+        self.assertEqual(len(called), 1)
+        self.assertEqual(called[0][0].get_header("Authorization"), "Bearer fake-token")
+        self.assertEqual(called[0][1], 8)
+
     def test_approved_metadata_only(self):
         calls = []
         def fetch(name, token):
