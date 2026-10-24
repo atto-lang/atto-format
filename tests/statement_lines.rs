@@ -185,3 +185,20 @@ fn block_comment_between_control_closer_and_else_stays_attached() {
     assert!(formatted.contains("    fallback();\n"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+
+#[test]
+fn compact_keyword_if_elif_else_has_one_control_or_action_per_line() {
+    let source = "fnc run() -> void {\nif first then a(); elif second then b(); else c(); fi\n}\n";
+    let formatted = format_source(source).unwrap();
+
+    assert!(formatted.contains("  if first then\n    a();\n"), "{formatted}");
+    assert!(formatted.contains("  elif second then\n    b();\n"), "{formatted}");
+    assert!(formatted.contains("  else\n    c();\n"), "{formatted}");
+    assert!(formatted.contains("  fi\n"), "{formatted}");
+    assert!(!formatted.contains("then a();"), "{formatted}");
+    assert!(!formatted.contains("then b();"), "{formatted}");
+    assert!(!formatted.contains("else c();"), "{formatted}");
+    assert!(is_formatted(&formatted).unwrap());
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
