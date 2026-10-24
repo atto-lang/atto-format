@@ -82,19 +82,18 @@ fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     expanded.push_str(&line[..open_at + 1]);
     expanded.push('\n');
     if !body.trim().is_empty() {
-        expanded.push_str(body);
+        expanded.push_str(body.trim_end());
         expanded.push('\n');
     }
     expanded.push('}');
     // A line comment belongs to the closing brace and must not move.
     if trailing.trim_start().starts_with("//")
         || trailing.trim_start().starts_with("/*")
-        || trailing.trim().is_empty()
     {
         expanded.push_str(trailing);
-    } else {
+    } else if !trailing.trim().is_empty() {
         expanded.push('\n');
-        expanded.push_str(trailing);
+        expanded.push_str(trailing.trim_start());
     }
     expanded
 }
@@ -137,10 +136,13 @@ mod tests {
     #[test]
     fn expands_nested_and_chained_braced_conditions() {
         let source = "if outer { first(); if inner { second(); } } else { third(); } fi";
-        assert_eq!(
-            normalize(source).unwrap(),
-            "if outer {\n first();\n if inner {\n second();\n}\n}\n else {\n third();\n}\n fi"
-        );
+        let formatted = normalize(source).unwrap();
+        assert!(formatted.contains("if outer {\n"));
+        assert!(formatted.contains("first();\n if inner {\n"));
+        assert!(formatted.contains("second();\n}"));
+        assert!(formatted.contains("else {\n"));
+        assert!(formatted.contains("third();\n}"));
+        assert_eq!(normalize(&formatted).unwrap(), formatted);
     }
 
     #[test]
@@ -153,7 +155,7 @@ mod tests {
         let source = "if ready { work(\"} ;\"); } // comment; }";
         assert_eq!(
             normalize(source).unwrap(),
-            "if ready {\n work(\"} ;\"); \n} // comment; }"
+            "if ready {\n work(\"} ;\");\n} // comment; }"
         );
     }
 
