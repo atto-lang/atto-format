@@ -67,8 +67,8 @@ pub(crate) fn normalize(source: &str) -> String {
             continue;
         };
 
-        // Keep incomplete and multiline bodies on the existing formatter path.
-        // Never splice a newline across a line comment or string token.
+        // A verified callable opener may have its closer on a later line.
+        // The opening is safe to split; quoted punctuation remains opaque.
         let mut depth = 0usize;
         let mut closing = None;
         for (index, &(_, ch)) in punctuation.iter().enumerate().skip(opening) {
@@ -231,6 +231,12 @@ mod tests {
         // The second brace, after a completed record type, is an actual body.
         let braced = "fnc build() -> {foo: int} { return value; }";
         assert!(normalize(braced).contains("{foo: int} {\n"));
+
+        // The return record's own opening brace must remain untouched when
+        // the executable body has no closing brace until a subsequent line.
+        let multiline = "fnc build() -> {foo: int} { first(); second();\n}";
+        let expected = "fnc build() -> {foo: int} {\nfirst(); second();\n}";
+        assert_eq!(normalize(multiline), expected);
     }
 
     #[test]
