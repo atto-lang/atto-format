@@ -60,3 +60,14 @@ fn formatter_does_not_invent_an_action_when_expanding_control_flow() {
     assert!(formatted.contains("    x();\n"));
     assert!(!formatted.contains("do();"));
 }
+
+#[test]
+fn compact_keyword_if_nested_in_inline_brace_is_expanded() {
+    let source = "fnc run() -> void {\nif outer { if inner then act(); fi }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("  if outer {\n"));
+    assert!(formatted.contains("    if inner then\n"));
+    assert!(formatted.contains("      act();\n"));
+    assert!(formatted.contains("    fi\n"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
