@@ -1,0 +1,2 @@
+// Shared scalar subset: compact physical layout must remain compiler-admissible.
+pub fnc main(): int { return 42; }   
