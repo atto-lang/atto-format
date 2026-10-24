@@ -1573,10 +1573,11 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     }
     if index >= words.len() || matches!(
         word(index),
-        "fnc" | "fn" | "method" | "static" | "constructor" |
-        "let" | "val" | "const" | "final" | "mtd"
+        "fnc" | "fn" | "static" | "constructor" |
+        "let" | "val" | "const" | "final"
     ) {
-        // mtd() as a literal method name is still legal without insertion.
+        // Existing contextual method and mtd prefixes are distinguished
+        // below by the '(' immediately after a true method name.
         return line.to_string();
     }
     if !plain_word_prefix(line, &words[..=index]) {
