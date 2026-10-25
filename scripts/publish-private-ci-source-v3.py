@@ -921,6 +921,8 @@ def exact_source_tree(source_pr, source_commit):
         if (path.startswith("/") or ".." in parts or ".git" in parts
                 or "\\" in path or any(ord(c) < 32 or ord(c) == 127 for c in path)):
             raise Denied("source tree path unsafe")
+        if ".cargo" in parts:
+            raise Denied("source tree contains project .cargo configuration")
         sha = valid_sha(entry.get("sha"), "source blob SHA")
         size = entry.get("size")
         if (not isinstance(size, int) or isinstance(size, bool)
@@ -1211,7 +1213,7 @@ def publish(repository, source_pr, source_commit, test_plan, now=None):
         method="POST",
         payload={
             "message": (
-                "ci: exact private LLVM PR tree\n\n"
+                "ci: exact private formatter PR tree\n\n"
                 "Oreslang-CI-Receipt-SHA256: " + receipt_digest
             ),
             "tree": root_sha,

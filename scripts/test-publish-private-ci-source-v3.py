@@ -803,6 +803,40 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
             with self.assertRaisesRegex(v3.Denied, "size differs"):
                 v3.exact_source_tree(669, "9" * 40)
 
+    def test_source_tree_rejects_project_cargo_config_before_blob_read(self):
+        seen = []
+        def api(route, method="GET", payload=None):
+            seen.append(route)
+            if route.endswith("/pulls/669"):
+                return {
+                    "number": 669,
+                    "state": "open",
+                    "head": {
+                        "sha": "9" * 40,
+                        "repo": {"full_name": v3.SOURCE_REPO},
+                    },
+                    "base": {"ref": "main"},
+                }
+            if "/git/commits/" in route:
+                return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
+            if "/git/trees/" in route:
+                return {
+                    "sha": SOURCE_TREE,
+                    "truncated": False,
+                    "tree": [{
+                        "path": ".cargo/config.toml",
+                        "type": "blob",
+                        "mode": "100644",
+                        "sha": "2" * 40,
+                        "size": 1,
+                    }],
+                }
+            raise AssertionError(route)
+        with patch.object(v3, "gh_api", side_effect=api):
+            with self.assertRaisesRegex(v3.Denied, "project .cargo"):
+                v3.exact_source_tree(669, "9" * 40)
+        self.assertFalse(any("/git/blobs/" in route for route in seen))
+
     def test_source_tree_rejects_symlink_mode_before_blob_read(self):
         seen = []
         def api(route, method="GET", payload=None):
