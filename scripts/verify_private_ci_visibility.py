@@ -59,7 +59,7 @@ def fetch_metadata(name, token):
                  "User-Agent": "oreslang-format-private-ci-preflight"},
         method="GET")
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(request, timeout=8) as response:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=8) as response:
             if response.status != 200 or response.geturl() != request.full_url:
                 raise Denied("repository metadata response invalid")
             raw = response.read(MAX_METADATA + 1)

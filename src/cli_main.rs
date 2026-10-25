@@ -1,4 +1,4 @@
-use oreslang_format::{FormatError, format_source, is_formatted};
+use oreslang_format::{FormatError, format_source, format_source_with_mtd};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -18,6 +18,9 @@ MODES:
     --check     Do not write files; exit 1 if any input is not canonical
     --stdout    Print one formatted file to stdout instead of writing it
 
+MIGRATION:
+    --insert-mtd  Insert optional 'mtd' before bare class/actor methods
+
 WRITE SAFETY:
     --ok-to-mod-dirty-files
                 Allow --write to modify tracked files with staged/unstaged changes
@@ -36,7 +39,7 @@ PATHS:
     Files are formatted directly. Directories are traversed recursively and
     only *.ores files are selected. '-' reads stdin and writes stdout.
 
-There are intentionally no style flags or configuration files.
+There are intentionally no general style flags or configuration files.
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +79,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut mode = Mode::DryRun;
+    let mut insert_mtd = false;
     let mut explicit_mode: Option<&'static str> = None;
     let mut policy = WritePolicy::default();
     let mut paths = Vec::new();
@@ -102,6 +106,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     "--stdout" => {
                         select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?
                     }
+                    "--insert-mtd" => insert_mtd = true,
                     "--ok-to-mod-dirty-files" => policy.allow_dirty_tracked = true,
                     "--ok-to-mod-untracked-files" => policy.allow_untracked = true,
                     "--ok-to-mod-outside-git" => policy.allow_outside_git = true,
@@ -156,7 +161,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
         let mut input = String::new();
         io::stdin().read_to_string(&mut input)?;
-        let formatted = format_source(&input)?;
+        let formatted = if insert_mtd {
+            format_source_with_mtd(&input)?
+        } else {
+            format_source(&input)?
+        };
 
         if mode == Mode::Check {
             return Ok(if formatted == input {
@@ -175,7 +184,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Err("--stdout requires exactly one filesystem file".into());
         }
         let input = fs::read_to_string(&paths[0])?;
-        let formatted = format_source(&input)?;
+        let formatted = if insert_mtd {
+            format_source_with_mtd(&input)?
+        } else {
+            format_source(&input)?
+        };
         io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -186,7 +199,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Mode::DryRun => {
             for path in files {
                 let input = fs::read_to_string(&path)?;
-                if !is_formatted(&input)? {
+                let formatted = if insert_mtd {
+                    format_source_with_mtd(&input)?
+                } else {
+                    format_source(&input)?
+                };
+                if formatted != input {
                     println!("would format {}", path.display());
                 }
             }
@@ -196,7 +214,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let mut dirty = false;
             for path in files {
                 let input = fs::read_to_string(&path)?;
-                if !is_formatted(&input)? {
+                let formatted = if insert_mtd {
+                    format_source_with_mtd(&input)?
+                } else {
+                    format_source(&input)?
+                };
+                if formatted != input {
                     eprintln!("needs formatting: {}", path.display());
                     dirty = true;
                 }
@@ -207,7 +230,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 ExitCode::SUCCESS
             })
         }
-        Mode::Write => write_files(files, policy),
+        Mode::Write => write_files(files, policy, insert_mtd),
         Mode::Stdout => unreachable!("handled above"),
     }
 }
@@ -232,12 +255,17 @@ fn select_mode(
 fn write_files(
     files: Vec<PathBuf>,
     policy: WritePolicy,
+    insert_mtd: bool,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut changes = Vec::new();
 
     for path in files {
         let input = fs::read_to_string(&path)?;
-        let formatted = format_source(&input)?;
+        let formatted = if insert_mtd {
+            format_source_with_mtd(&input)?
+        } else {
+            format_source(&input)?
+        };
         if formatted != input {
             changes.push((path, input, formatted));
         }

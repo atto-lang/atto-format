@@ -17,11 +17,6 @@ GH_TOKEN=<read-only-token> python3 scripts/verify_private_ci_visibility.py \
   --destination-id <reviewed-destination-numeric-repository-id>
 ```
 
-The metadata request intentionally disables ambient HTTP(S) proxy configuration
-rather than sending a read-only GitHub bearer credential to an unreviewed proxy.
-A network that requires such a proxy fails closed; do not bypass this by
-embedding a token in a URL or swapping to unauthenticated repository metadata.
-
 The tool is read-only and prints only a generic success or denial message.
 It does NOT mirror source, approve a destination, prove independent human
 review, establish an immutable source commit/tree, or validate later

@@ -67,8 +67,8 @@ pub(crate) fn normalize(source: &str) -> String {
             continue;
         };
 
-        // A verified callable opener may have its closer on a later line.
-        // The opening is safe to split; quoted punctuation remains opaque.
+        // Keep incomplete and multiline bodies on the existing formatter path.
+        // Never splice a newline across a line comment or string token.
         let mut depth = 0usize;
         let mut closing = None;
         for (index, &(_, ch)) in punctuation.iter().enumerate().skip(opening) {
@@ -85,15 +85,7 @@ pub(crate) fn normalize(source: &str) -> String {
             }
         }
         let Some(closing) = closing else {
-            let open_at = punctuation[opening].0;
-            let tail = &line[open_at + 1..];
-            if tail.trim().is_empty() || tail.trim_start().starts_with("//") {
-                result.push_str(line);
-            } else {
-                result.push_str(&line[..open_at + 1]);
-                result.push('\n');
-                result.push_str(tail.trim_start());
-            }
+            result.push_str(line);
             continue;
         };
 
@@ -142,7 +134,7 @@ pub(crate) fn normalize(source: &str) -> String {
 
 /// Return byte offsets of syntax punctuation, excluding strings and comments.
 /// Scan state is carried across lines so multiline block comments are opaque.
-pub(crate) fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
+fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
     let mut result = Vec::new();
     let mut chars = line.char_indices().peekable();
     while let Some((at, ch)) = chars.next() {
@@ -197,28 +189,6 @@ mod tests {
     }
 
     #[test]
-    fn multiline_callable_opening_is_separated() {
-        let input = "fnc run() -> void { first(); second();\nthird();\n}";
-        let expected = "fnc run() -> void {\nfirst(); second();\nthird();\n}";
-        assert_eq!(normalize(input), expected);
-        assert_eq!(normalize(expected), expected);
-    }
-
-    #[test]
-    fn multiline_callable_keeps_trailing_line_comment() {
-        let input = "fnc run() -> void { // body begins on next line\nfirst();\n}";
-        assert_eq!(normalize(input), input);
-    }
-
-    #[test]
-    fn multiline_callable_preserves_leading_block_comment() {
-        let input = "fnc run() -> void { /* header detail */ first();\nsecond();\n}";
-        let expected = "fnc run() -> void {\n/* header detail */ first();\nsecond();\n}";
-        assert_eq!(normalize(input), expected);
-        assert_eq!(normalize(expected), expected);
-    }
-
-    #[test]
     fn record_return_type_braces_are_not_inline_executable_bodies() {
         for source in [
             "fnc f() -> {foo: int, bar: string} ::\nreturn value;\nend",
@@ -231,12 +201,6 @@ mod tests {
         // The second brace, after a completed record type, is an actual body.
         let braced = "fnc build() -> {foo: int} { return value; }";
         assert!(normalize(braced).contains("{foo: int} {\n"));
-
-        // The return record's own opening brace must remain untouched when
-        // the executable body has no closing brace until a subsequent line.
-        let multiline = "fnc build() -> {foo: int} { first(); second();\n}";
-        let expected = "fnc build() -> {foo: int} {\nfirst(); second();\n}";
-        assert_eq!(normalize(multiline), expected);
     }
 
     #[test]

@@ -1984,3 +1984,202 @@ fn return_suffix_identifiers_keep_binary_operators() {
         assert_eq!(formatted, format_source(&formatted).unwrap());
     }
 }
+
+#[test]
+fn class_methods_accept_bare_and_mtd_double_colon_terminators() {
+    let source = r#"define class X1 as
+foo(): void {}
+end
+define class X2 as
+foo() -> void ::
+end
+end
+define class X3 as
+mtd foo(): void {}
+end
+define class X4 as
+mtd foo() -> void ::
+end
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("foo() -> void {"), "{once}");
+    assert!(once.contains("foo() -> void ::"), "{once}");
+    assert!(once.contains("mtd foo() -> void {"), "{once}");
+    assert!(once.contains("mtd foo() -> void ::"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn optional_mtd_insertion_is_idempotent_and_scope_aware() {
+    let source = r#"define class C as
+foo(): void {}
+mtd bar() -> void ::
+end
+static fnc helper(): void {}
+mtd(): void {}
+end
+define actor A as
+suspend work(): void {}
+end
+fnc standalone(): void {}
+"#;
+    let once = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(once.contains("mtd foo() -> void {"), "{once}");
+    assert!(once.contains("mtd bar() -> void ::"), "{once}");
+    assert!(once.contains("static fnc helper() -> void {"), "{once}");
+    assert!(once.contains("mtd mtd() -> void {"), "{once}");
+    assert!(once.contains("suspend mtd work() -> void {"), "{once}");
+    assert!(once.contains("fnc standalone() -> void {"), "{once}");
+    assert!(!once.contains("mtd mtd bar"), "{once}");
+    assert_eq!(
+        once,
+        oreslang_format::format_source_with_mtd(&once).unwrap()
+    );
+}
+
+#[test]
+fn mtd_migration_handles_defaults_and_ignores_literals_and_comments() {
+    let source = r#"define class Config as
+// foo(int n = 2): void {}
+pub calculate(int n = 2): int { return n; }
+method(): void {}
+mtd(): void {}
+fnc old(): void {}
+static fnc independent(): void {}
+end
+fnc top(): void {
+  // mtd local(): void {}
+  val text = "foo() -> void :: end";
+}
+"#;
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(migrated.contains("pub mtd calculate("), "{migrated}");
+    assert!(migrated.contains("mtd method() -> void {"), "{migrated}");
+    assert!(migrated.contains("mtd mtd() -> void {"), "{migrated}");
+    assert!(migrated.contains("mtd old() -> void {"), "{migrated}");
+    assert!(
+        migrated.contains("static fnc independent() -> void {"),
+        "{migrated}"
+    );
+    assert!(
+        migrated.contains("// foo(int n = 2): void {}"),
+        "{migrated}"
+    );
+    assert!(
+        migrated.contains("val text = \"foo() -> void :: end\";"),
+        "{migrated}"
+    );
+    assert!(!migrated.contains("mtd top()"), "{migrated}");
+    assert_eq!(
+        migrated,
+        oreslang_format::format_source_with_mtd(&migrated).unwrap()
+    );
+}
+
+#[test]
+fn end_delimited_method_end_does_not_close_its_class() {
+    let source = r#"define class Pair as
+mtd first() -> int ::
+if true then
+return 1;
+else
+return 2;
+fi
+end
+second(): int { return 3; }
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("  mtd first() -> int ::\n"),
+        "{formatted}"
+    );
+    assert!(formatted.contains("    if true then\n"), "{formatted}");
+    assert!(formatted.contains("      return 1;\n"), "{formatted}");
+    assert!(
+        formatted.contains("  end\n  second() -> int {"),
+        "{formatted}"
+    );
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
+fn multiline_class_and_actor_methods_own_their_keyword_end() {
+    let source = r#"define class C as
+mtd sum(
+int first,
+int second
+) -> int ::
+return first + second;
+end
+next(): int { return 10; }
+end
+define actor Worker as
+process(
+int item
+) -> int ::
+return item;
+end
+later(): int { return 4; }
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains(") -> int ::\n"), "{once}");
+    assert!(once.contains("  end\n  next() -> int {"), "{once}");
+    assert!(once.contains("  end\n  later() -> int {"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(migrated.contains("mtd sum("), "{migrated}");
+    assert!(migrated.contains("mtd process("), "{migrated}");
+    assert!(migrated.contains("mtd later() -> int {"), "{migrated}");
+    assert_eq!(
+        migrated,
+        oreslang_format::format_source_with_mtd(&migrated).unwrap()
+    );
+}
+
+#[test]
+fn mtd_migration_distinguishes_generic_fields_from_generic_methods() {
+    let source = r#"define class Storage as
+List<int> items = []
+Map<int, int> counts = {}
+generic<T>(T value): T { return value; }
+nested<T, List<int>>(T value): T { return value; }
+end
+"#;
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(!migrated.contains("mtd List"), "{migrated}");
+    assert!(!migrated.contains("mtd Map"), "{migrated}");
+    assert!(migrated.contains("mtd generic<T>("), "{migrated}");
+    assert!(migrated.contains("mtd nested<T, List<int>>("), "{migrated}");
+    assert_eq!(
+        migrated,
+        oreslang_format::format_source_with_mtd(&migrated).unwrap()
+    );
+}
+
+#[test]
+fn symbol_instance_method_migration_preserves_computed_method_name() {
+    let source = r#"define class Iter as
+[Symbol.iterator](): int { return 1; }
+pub [Symbol.dispose]() -> void ::
+end
+mtd [Symbol.custom](): int { return 2; }
+end
+"#;
+    let normal = format_source(source).unwrap();
+    assert!(!normal.contains("mtd [Symbol.iterator]"), "{normal}");
+    let once = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(once.contains("mtd [Symbol.iterator]() -> int {"), "{once}");
+    assert!(
+        once.contains("pub mtd [Symbol.dispose]() -> void ::"),
+        "{once}"
+    );
+    assert!(once.contains("mtd [Symbol.custom]() -> int {"), "{once}");
+    assert!(!once.contains("mtd mtd [Symbol.custom]"), "{once}");
+    assert_eq!(
+        once,
+        oreslang_format::format_source_with_mtd(&once).unwrap()
+    );
+}

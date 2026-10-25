@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,24 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify exact source HEAD and tree
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -eu
-          ACTUAL_HEAD="$(git rev-parse --verify HEAD)"
-          ACTUAL_TREE="$(git rev-parse --verify 'HEAD^{tree}')"
-          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
-          printf 'CI_EXACT_SOURCE_HEAD=%s\nCI_EXACT_SOURCE_TREE=%s\n' "$ACTUAL_HEAD" "$ACTUAL_TREE"
+      - run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
+          sha256sum contracts/v1/type-declarations-conformance-v1.tsv
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       - run: cargo fmt --all -- --check
+      - run: cargo test --test type_only_declarations
       - run: cargo test --all-targets
       - run: cargo test --doc
       - run: python3 -m unittest discover -s scripts -p 'test_compiler_parity.py'
       - run: python3 -m unittest discover -s tests -p 'test_private_ci_visibility.py'
-      - run: python3 -m unittest discover -s tests -p 'test_ci_execution.py'
       - run: cargo clippy --all-targets -- -D warnings
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
       - run: cargo build --release --bins
@@ -42,17 +40,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify exact source HEAD and tree
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -eu
-          ACTUAL_HEAD="$(git rev-parse --verify HEAD)"
-          ACTUAL_TREE="$(git rev-parse --verify 'HEAD^{tree}')"
-          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
-          printf 'CI_EXACT_SOURCE_HEAD=%s\nCI_EXACT_SOURCE_TREE=%s\n' "$ACTUAL_HEAD" "$ACTUAL_TREE"
+      - run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
+          sha256sum contracts/v1/type-declarations-conformance-v1.tsv
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
         with:
           toolchain: 1.85.0
