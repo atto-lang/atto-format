@@ -1,0 +1,7 @@
+/.github/CODEOWNERS @ORESoftware
+/.github/private-ci-approved-repositories.txt @ORESoftware
+/.github/private-ci-carrier-contracts.json @ORESoftware
+/.github/workflows/* @ORESoftware
+/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md @ORESoftware
+/scripts/verify_private_ci_visibility.py @ORESoftware
+/tests/test_private_ci_visibility.py @ORESoftware
