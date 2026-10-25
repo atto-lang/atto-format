@@ -1553,6 +1553,7 @@ fn canonicalize_declaration_line(
             .then(|| canonicalize_final_const_literal_field(line, &words))
             .flatten()
     })
+    .or_else(|| canonicalize_declared_type_only(line, &words))
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_defined_type_alias(line, &words))
@@ -1560,6 +1561,49 @@ fn canonicalize_declaration_line(
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .unwrap_or_else(|| line.to_string())
+}
+
+/// Normalize only explicitly declared type-only source headers. The contextual
+/// 'declare' token in callable names, strings or comments must remain untouched.
+/// Legacy 'define trait/interface/type' source stays valid; this canonicalizer
+/// does not silently change a historical declaration's source kind.
+fn canonicalize_declared_type_only(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_prefix_word =
+        |word: &str| matches!(word, "declare" | "pub" | "private" | "type" | "trait" | "interface");
+    let prefix_len = words
+        .iter()
+        .take_while(|span| is_prefix_word(&line[span.start..span.end]))
+        .count();
+    if prefix_len < 2 || prefix_len >= words.len() {
+        return None;
+    }
+    let prefix = &words[..prefix_len];
+    if !plain_word_prefix(line, &words[..=prefix_len]) {
+        return None;
+    }
+
+    let mut declaration = false;
+    let mut visibility: Option<&str> = None;
+    let mut kind: Option<&str> = None;
+    for span in prefix {
+        let word = &line[span.start..span.end];
+        match word {
+            "declare" if !declaration => declaration = true,
+            "pub" | "private" if visibility.is_none() => visibility = Some(word),
+            "type" | "trait" | "interface" if kind.is_none() => kind = Some(word),
+            _ => return None,
+        }
+    }
+    if !declaration {
+        return None;
+    }
+    let kind = kind?;
+    let mut canonical = vec!["declare"];
+    if let Some(visibility) = visibility {
+        canonical.push(visibility);
+    }
+    canonical.push(kind);
+    Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
 /// Canonical simple, end-delimited module header: `define module M as`.
@@ -2144,6 +2188,24 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             }
         }
     }
+    // Type-only 'declare' creates no executable value, but an interface or
+    // trait with an end-delimited body still needs a formatting block frame.
+    // A transparent alias (`declare type ... = ...;`) has no closing 'end'.
+    if let Some(rest) = line.strip_prefix("declare ") {
+        let mut words = rest.split_whitespace();
+        let first = words.next()?;
+        let kind = if matches!(first, "pub" | "private") {
+            words.next()?
+        } else {
+            first
+        };
+        return match kind {
+            "interface" => Some(DefineKind::Interface),
+            "trait" => Some(DefineKind::Trait),
+            _ => None,
+        };
+    }
+
     let mut words = line.split_whitespace();
     if words.next()? != "define" {
         return None;
