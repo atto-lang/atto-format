@@ -364,7 +364,6 @@ fn non_utf8_paths_are_preserved_as_os_strings() {
     }
 }
 
-
 #[test]
 fn insert_mtd_is_an_opt_in_migration_not_a_default() {
     let repo = TempRepo::new("insert-mtd");

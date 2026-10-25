@@ -1,0 +1,4 @@
+# Private CI destinations explicitly approved for formatter source transfer.
+# No repositories are approved by default.
+# Any future entry requires independent @ORESoftware review on protected source main.
+# Format: exact owner/repo ONE SPACE immutable numeric GitHub repository ID.

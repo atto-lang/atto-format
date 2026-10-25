@@ -654,8 +654,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
-        let instance_member = keyword_stack.is_empty()
-            && in_direct_instance_container(&define_stack, &brace_stack);
+        let instance_member =
+            keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
         content = canonicalize_declaration_line(
             &content,
             lex,
@@ -772,8 +772,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         // A class/actor instance method may omit 'fnc' even when its
         // parameter list spans lines. Its close line can still open a
         // keyword-delimited body, but only with the explicit '::' marker.
-        let direct_instance_member =
-            in_direct_instance_container(&define_stack, &brace_stack);
+        let direct_instance_member = in_direct_instance_container(&define_stack, &brace_stack);
         let multiline_end_delimited_callable = closes_multiline_callable
             && (pending_explicit_callable_parameters || direct_instance_member)
             && is_multiline_end_delimited_callable_close(structural)
@@ -942,7 +941,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         if let Some(kind) = define_kind(structural) {
-            if !structural.contains('{') && !ends_statement(structural) {
+            // Empty type-only bodies may keep their matching `as end` on
+            // one line; they must not leave a phantom block frame behind.
+            let compact_empty_type = matches!(kind, DefineKind::Trait | DefineKind::Interface)
+                && structural.trim_end().ends_with(" as end");
+            if !structural.contains('{') && !ends_statement(structural) && !compact_empty_type {
                 next_order += 1;
                 define_stack.push(DefineFrame {
                     kind,
@@ -1592,18 +1595,27 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     }
     let word = |index: usize| &line[words[index].start..words[index].end];
     let mut index = 0;
-    while index < words.len() && matches!(
-        word(index),
-        "pub" | "private" | "async" | "suspend" | "suspends" |
-        "critical" | "structural" | "abstract"
-    ) {
+    while index < words.len()
+        && matches!(
+            word(index),
+            "pub"
+                | "private"
+                | "async"
+                | "suspend"
+                | "suspends"
+                | "critical"
+                | "structural"
+                | "abstract"
+        )
+    {
         index += 1;
     }
-    if index >= words.len() || matches!(
-        word(index),
-        "fnc" | "fn" | "static" | "constructor" |
-        "let" | "val" | "const" | "final"
-    ) {
+    if index >= words.len()
+        || matches!(
+            word(index),
+            "fnc" | "fn" | "static" | "constructor" | "let" | "val" | "const" | "final"
+        )
+    {
         // Existing contextual method and mtd prefixes are distinguished
         // below by the '(' immediately after a true method name.
         return line.to_string();
@@ -1675,6 +1687,7 @@ fn canonicalize_declaration_line(
             .then(|| canonicalize_final_const_literal_field(line, &words))
             .flatten()
     })
+    .or_else(|| canonicalize_declared_type_only(line, &words))
     .or_else(|| canonicalize_class_declaration(line, &words))
     .or_else(|| canonicalize_defined_interface_or_contract(line, &words))
     .or_else(|| canonicalize_defined_type_alias(line, &words))
@@ -1682,6 +1695,53 @@ fn canonicalize_declaration_line(
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .unwrap_or_else(|| line.to_string())
+}
+
+/// Normalize only explicitly declared type-only source headers. The contextual
+/// 'declare' token in callable names, strings or comments must remain untouched.
+/// Legacy 'define trait/interface/type' source stays valid; this canonicalizer
+/// does not silently change a historical declaration's source kind.
+fn canonicalize_declared_type_only(line: &str, words: &[WordSpan]) -> Option<String> {
+    let is_prefix_word = |word: &str| {
+        matches!(
+            word,
+            "declare" | "pub" | "private" | "type" | "trait" | "interface"
+        )
+    };
+    let prefix_len = words
+        .iter()
+        .take_while(|span| is_prefix_word(&line[span.start..span.end]))
+        .count();
+    if prefix_len < 2 || prefix_len >= words.len() {
+        return None;
+    }
+    let prefix = &words[..prefix_len];
+    if !plain_word_prefix(line, &words[..=prefix_len]) {
+        return None;
+    }
+
+    let mut declaration = false;
+    let mut visibility: Option<&str> = None;
+    let mut kind: Option<&str> = None;
+    for span in prefix {
+        let word = &line[span.start..span.end];
+        match word {
+            "declare" if !declaration => declaration = true,
+            "pub" | "private" if visibility.is_none() => visibility = Some(word),
+            "type" | "trait" | "interface" if kind.is_none() => kind = Some(word),
+            _ => return None,
+        }
+    }
+    if !declaration {
+        return None;
+    }
+    let kind = kind?;
+    let mut canonical = vec!["declare"];
+    if let Some(visibility) = visibility {
+        canonical.push(visibility);
+    }
+    canonical.push(kind);
+    Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
 /// Canonical simple, end-delimited module header: `define module M as`.
@@ -2266,6 +2326,24 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             }
         }
     }
+    // Type-only 'declare' creates no executable value, but an interface or
+    // trait with an end-delimited body still needs a formatting block frame.
+    // A transparent alias (`declare type ... = ...;`) has no closing 'end'.
+    if let Some(rest) = line.strip_prefix("declare ") {
+        let mut words = rest.split_whitespace();
+        let first = words.next()?;
+        let kind = if matches!(first, "pub" | "private") {
+            words.next()?
+        } else {
+            first
+        };
+        return match kind {
+            "interface" => Some(DefineKind::Interface),
+            "trait" => Some(DefineKind::Trait),
+            _ => None,
+        };
+    }
+
     let mut words = line.split_whitespace();
     if words.next()? != "define" {
         return None;
@@ -2316,13 +2394,19 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
     let mut newest: Option<(usize, bool)> = None;
 
     for frame in defines {
-        let allowed = matches!(frame.kind, DefineKind::Module | DefineKind::Class | DefineKind::Actor);
+        let allowed = matches!(
+            frame.kind,
+            DefineKind::Module | DefineKind::Class | DefineKind::Actor
+        );
         if newest.is_none_or(|(order, _)| frame.order > order) {
             newest = Some((frame.order, allowed));
         }
     }
     for frame in braces {
-        let allowed = matches!(frame.kind, BraceKind::Module | BraceKind::Class | BraceKind::Actor);
+        let allowed = matches!(
+            frame.kind,
+            BraceKind::Module | BraceKind::Class | BraceKind::Actor
+        );
         if newest.is_none_or(|(order, _)| frame.order > order) {
             newest = Some((frame.order, allowed));
         }
@@ -2345,7 +2429,8 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
-    if !line.contains('(') || (!standalone && !instance_member)
+    if !line.contains('(')
+        || (!standalone && !instance_member)
         || (instance_member && !line.ends_with("::"))
     {
         return false;
