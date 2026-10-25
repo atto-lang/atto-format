@@ -93,3 +93,44 @@ fn named_alias_extension_method_preserves_contextual_mtd_and_on() {
     assert!(formatted.contains("code.double()"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+
+#[test]
+fn shared_complete_type_declaration_corpus_is_format_stable() {
+    let contract = include_str!("../contracts/v1/type-declarations-conformance-v1.tsv");
+    let mut ids = std::collections::HashSet::new();
+    let mut count = 0;
+    for line in contract.lines().filter(|line| !line.is_empty() && !line.starts_with('#')) {
+        let fields: Vec<&str> = line.splitn(5, '\t').collect();
+        assert_eq!(fields.len(), 5, "malformed shared vector: {line}");
+        let (id, result) = (fields[0], fields[1]);
+        assert!(ids.insert(id), "duplicate shared id: {id}");
+        assert!(result == "+" || result == "-", "bad expected outcome: {id}");
+        let source = fields[4].replace("\\n", "\n");
+        match format_source(&source) {
+            Ok(formatted) => {
+                assert_eq!(
+                    format_source(&formatted).expect("format-after-format"),
+                    formatted,
+                    "formatter non-idempotent: {id}"
+                );
+                // A formatter is not a compiler. An incomplete alias may format, but
+                // must not be repaired into a misleading completed declaration.
+                if id.starts_with("incomplete-") {
+                    assert!(!formatted.contains("Code ="), "invalid alias repaired: {id}");
+                }
+                if result == "+" {
+                    assert!(formatted.contains("type ") || formatted.contains("trait "),
+                        "missing type-only declaration in positive vector: {id}");
+                }
+            }
+            Err(error) => {
+                if result == "+" {
+                    panic!("formatter rejected positive {id}: {error:?}");
+                }
+            }
+        }
+        count += 1;
+    }
+    assert_eq!(count, 22, "shared corpus drift");
+}
