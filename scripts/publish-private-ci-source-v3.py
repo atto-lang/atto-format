@@ -32,6 +32,9 @@ PREFIX = "private-oreslang-source"
 RECEIPT_PATH = "ci/oreslang-receipt.json"
 
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$")
+APPROVAL = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*) ([1-9][0-9]*)$"
+)
 HANDOFF_REF = re.compile(
     r"^ci/(?:oreslang-[0-9a-f]{40}|authorized-[0-9a-f]{40})$"
 )
@@ -458,17 +461,23 @@ def remote_source_file(path, main_sha, max_bytes):
 def parse_allowlist(raw, repository):
     lines = canonical_security_lines(raw, "allowlist")
     seen = set()
-    allowed = False
+    approved_id = None
     for line in lines:
         if not line or line.startswith("#"):
             continue
-        if not NAME.fullmatch(line) or line.casefold() in seen:
-            raise Denied("allowlist contains invalid/duplicate entry")
-        seen.add(line.casefold())
-        if line.casefold() == repository.casefold():
-            allowed = True
-    if not allowed:
+        match = APPROVAL.fullmatch(line)
+        if match is None:
+            raise Denied("allowlist requires exact owner/repo numeric-id pairs")
+        slug, numeric_id = match.groups()
+        key = slug.casefold()
+        if key in seen:
+            raise Denied("allowlist contains duplicate repository identities")
+        seen.add(key)
+        if key == repository.casefold():
+            approved_id = int(numeric_id)
+    if approved_id is None:
         raise Denied("destination absent from protected allowlist")
+    return approved_id
 
 
 def safe_path(value, prefix, suffix):
@@ -676,7 +685,7 @@ def protected_authority(repository, source_pr, test_plan):
     local_allow = read_local_regular(POLICY_PATH, MAX_POLICY)
     if local_allow != remote_allow:
         raise Denied("local allowlist differs from protected source main")
-    parse_allowlist(remote_allow, repository)
+    approved_repository_id = parse_allowlist(remote_allow, repository)
 
     remote_contract, _ = remote_source_file(CONTRACT_PATH, main_sha, MAX_POLICY)
     local_contract = read_local_regular(CONTRACT_PATH, MAX_POLICY)
@@ -685,6 +694,8 @@ def protected_authority(repository, source_pr, test_plan):
     contract = parse_contract(
         remote_contract, repository, source_pr, test_plan
     )
+    if approved_repository_id != contract["repository_id"]:
+        raise Denied("allowlist repository ID differs from carrier contract")
     return main_sha, contract
 
 

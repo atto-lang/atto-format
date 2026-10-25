@@ -67,15 +67,89 @@ def carrier_contract(review_pr=None):
 
 class FormatterPrivateCiV3Test(unittest.TestCase):
     def test_allowlist_is_exact_and_fail_closed(self):
-        v3.parse_allowlist(b"# x\ntrusted/ci\n", "trusted/ci")
+        self.assertEqual(
+            v3.parse_allowlist(b"# x\ntrusted/ci 42\n", "trusted/ci"), 42
+        )
         for raw in (
             b"# empty\n",
-            b"trusted/*\n",
-            b"trusted/ci \n",
-            b"trusted/ci\nTRUSTED/CI\n",
+            b"trusted/* 42\n",
+            b"trusted/ci\n",
+            b"trusted/ci 0\n",
+            b"trusted/ci 42\nTRUSTED/CI 42\n",
         ):
             with self.subTest(raw=raw), self.assertRaises(v3.Denied):
                 v3.parse_allowlist(raw, "trusted/ci")
+
+    def test_protected_authority_rejects_allowlist_contract_id_mismatch(self):
+        with (
+            patch.object(v3, "authorized_source_main_sha", return_value=PROTECTED),
+            patch.object(
+                v3, "remote_source_file",
+                side_effect=[
+                    (b"publisher", v3.git_blob_sha(b"publisher")),
+                    (b"/.github/CODEOWNERS @ORESoftware\n"
+                     b"/.github/workflows/* @ORESoftware\n"
+                     b"/.github/private-ci-approved-repositories.txt @ORESoftware\n"
+                     b"/.github/private-ci-carrier-contracts.json @ORESoftware\n"
+                     b"/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md @ORESoftware\n"
+                     b"/scripts/publish-private-ci-source-v3.py @ORESoftware\n"
+                     b"/scripts/test-publish-private-ci-source-v3.py @ORESoftware\n"
+                     b"/scripts/verify_private_ci_visibility.py @ORESoftware\n"
+                     b"/tests/test_private_ci_visibility.py @ORESoftware\n", "1" * 40),
+                    (b"trusted/ci 41\n", "2" * 40),
+                    (json.dumps({
+                        "schema": 1,
+                        "carriers": {
+                            "trusted/ci": {
+                                "repository_id": 42,
+                                "base_sha": BASE,
+                                "workflow_path": ".github/workflows/oreslang-exact-tree-carrier.yml",
+                                "workflow_blob_sha": WORKFLOW,
+                                "test_plans": {
+                                    "ci/test-plans/format-pr669.json": {
+                                        "blob_sha": PLAN_BLOB,
+                                        "allowed_prs": [669],
+                                    }
+                                },
+                            }
+                        },
+                    }).encode(), "3" * 40),
+                ],
+            ),
+            patch.object(v3, "read_local_regular",
+                         side_effect=[b"publisher",
+                                      b"/.github/CODEOWNERS @ORESoftware\n"
+                                      b"/.github/workflows/* @ORESoftware\n"
+                                      b"/.github/private-ci-approved-repositories.txt @ORESoftware\n"
+                                      b"/.github/private-ci-carrier-contracts.json @ORESoftware\n"
+                                      b"/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md @ORESoftware\n"
+                                      b"/scripts/publish-private-ci-source-v3.py @ORESoftware\n"
+                                      b"/scripts/test-publish-private-ci-source-v3.py @ORESoftware\n"
+                                      b"/scripts/verify_private_ci_visibility.py @ORESoftware\n"
+                                      b"/tests/test_private_ci_visibility.py @ORESoftware\n",
+                                      b"trusted/ci 41\n",
+                                      json.dumps({
+                                          "schema": 1,
+                                          "carriers": {
+                                              "trusted/ci": {
+                                                  "repository_id": 42,
+                                                  "base_sha": BASE,
+                                                  "workflow_path": ".github/workflows/oreslang-exact-tree-carrier.yml",
+                                                  "workflow_blob_sha": WORKFLOW,
+                                                  "test_plans": {
+                                                      "ci/test-plans/format-pr669.json": {
+                                                          "blob_sha": PLAN_BLOB,
+                                                          "allowed_prs": [669],
+                                                      }
+                                                  },
+                                              }
+                                          },
+                                      }).encode()]),
+        ):
+            with self.assertRaisesRegex(v3.Denied, "repository ID differs"):
+                v3.protected_authority(
+                    "trusted/ci", 669, "ci/test-plans/format-pr669.json"
+                )
 
     def test_contract_pins_repo_base_workflow_plan_and_pr(self):
         raw = json.dumps(
