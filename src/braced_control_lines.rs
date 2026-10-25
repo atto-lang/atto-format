@@ -46,6 +46,53 @@ fn is_control_header(source: &str) -> bool {
     false
 }
 
+fn begins_control_header(source: &str) -> bool {
+    let mut state = LexState::default();
+    let visible: String = crate::scan_visible(source, &mut state).into_iter().collect();
+    let text = visible.trim_start();
+    for keyword in [
+        "if", "elif", "elseif", "else", "for", "while", "loop",
+        "try", "catch", "finally",
+    ] {
+        if !starts_word(text, keyword) {
+            continue;
+        }
+        let remainder = text[keyword.len()..].trim_start();
+        if matches!(keyword, "else" | "loop" | "try" | "finally")
+            && matches!(remainder.chars().next(), Some('(' | '.' | '['))
+        {
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+fn ambiguous_control_brace(line: &str, punctuation: &[(usize, char)]) -> bool {
+    let (mut parens, mut brackets) = (0usize, 0usize);
+    for &(at, ch) in punctuation {
+        match ch {
+            '(' => parens += 1,
+            ')' => parens = parens.saturating_sub(1),
+            '[' => brackets += 1,
+            ']' => brackets = brackets.saturating_sub(1),
+            '{' if parens == 0 && brackets == 0 => {
+                let header = &line[..at];
+                if !begins_control_header(header) {
+                    return false;
+                }
+                let distinct_body_brace =
+                    header.chars().last().is_some_and(char::is_whitespace)
+                        && !header.trim_end().ends_with('=')
+                        && is_control_header(header);
+                return !distinct_body_brace;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn expand_one_line(line: &str, punctuation: &[(usize, char)]) -> String {
     let (mut parens, mut brackets) = (0usize, 0usize);
     let mut opening = None;
@@ -158,7 +205,7 @@ fn split_leading_closer(line: &str, punctuation: &[(usize, char)]) -> Option<Str
     }
 }
 
-fn pass(source: &str) -> String {
+fn pass(source: &str) -> Result<String, FormatError> {
     let mut output = String::with_capacity(source.len());
     let mut lex = LexState::default();
     for (index, line) in source.split('\n').enumerate() {
@@ -166,13 +213,19 @@ fn pass(source: &str) -> String {
             output.push('\n');
         }
         let punctuation = inline_blocks::visible_punctuation(line, &mut lex);
+        if ambiguous_control_brace(line, &punctuation) {
+            return Err(FormatError::new(
+                index + 1,
+                "ambiguous compact control brace; separate data/record braces from the control body",
+            ));
+        }
         if let Some(split) = split_leading_closer(line, &punctuation) {
             output.push_str(&split);
         } else {
             output.push_str(&expand_one_line(line, &punctuation));
         }
     }
-    output
+    Ok(output)
 }
 
 /// Repeat until nested compact blocks and statement-separated blocks settle.
@@ -181,7 +234,7 @@ fn pass(source: &str) -> String {
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
     let mut current = statement_lines::normalize(source);
     for _ in 0..64 {
-        let next = statement_lines::normalize(&pass(&current));
+        let next = statement_lines::normalize(&pass(&current)?);
         if next == current {
             return Ok(current);
         }
