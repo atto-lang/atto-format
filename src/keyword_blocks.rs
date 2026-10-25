@@ -110,6 +110,15 @@ fn statement_boundary(tokens: &[Token<'_>], index: usize) -> bool {
         )
 }
 
+// A contextual identifier used as a call, index, or member is not
+// a control-flow delimiter.
+fn is_keyword_delimiter(tokens: &[Token<'_>], index: usize) -> bool {
+    let prev = index.checked_sub(1).and_then(|i| tokens.get(i));
+    let next = tokens.get(index + 1);
+    prev.is_none_or(|token| token.text != ".")
+        && !next.is_some_and(|token| matches!(token.text, "(" | "[" | "."))
+}
+
 fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
@@ -132,7 +141,7 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
             "{" if parens == 0 && brackets == 0 => return false,
             "then" | "do" if parens == 0 && brackets == 0 => {
                 let absolute = start + offset;
-                if absolute == 0 || tokens[absolute - 1].text != "." {
+                if is_keyword_delimiter(tokens, absolute) {
                     return true;
                 }
             }
@@ -141,6 +150,111 @@ fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
     }
 
     false
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderTerminator {
+    Keyword,
+    Brace,
+}
+
+fn first_top_level_header_terminator(
+    tokens: &[Token<'_>],
+    start: usize,
+) -> Option<HeaderTerminator> {
+    let (mut parens, mut brackets) = (0usize, 0usize);
+
+    for token in tokens.iter().skip(start) {
+        match token.text {
+            "(" => parens += 1,
+            ")" => parens = parens.saturating_sub(1),
+            "[" => brackets += 1,
+            "]" => brackets = brackets.saturating_sub(1),
+            "{" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Brace),
+            "then" | "do" if parens == 0 && brackets == 0 => {
+                return Some(HeaderTerminator::Keyword);
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn collapse_multiline_keyword_headers(source: &str) -> String {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let first = lines[index];
+        let mut first_state = LexState::default();
+        let first_lexed = lex_line(first, &mut first_state);
+        let first_tokens = &first_lexed.tokens;
+        let header_start = first_tokens
+            .first()
+            .is_some_and(|token| matches!(token.text, "if" | "elif" | "elseif"));
+        let first_terminator = first_top_level_header_terminator(first_tokens, 1);
+
+        if !header_start
+            || first_lexed.line_comment.is_some()
+            || first_lexed.block_comment_seen
+            || first_terminator.is_some()
+        {
+            output.push(first.to_string());
+            index += 1;
+            continue;
+        }
+
+        let mut joined = first.trim_end().to_string();
+        let mut cursor = index + 1;
+        let mut complete = None;
+        let mut unsafe_to_join = false;
+
+        while cursor < lines.len() {
+            let next = lines[cursor];
+            if next.trim().is_empty() {
+                unsafe_to_join = true;
+                break;
+            }
+
+            let mut next_state = LexState::default();
+            let next_lexed = lex_line(next, &mut next_state);
+            if next_lexed.line_comment.is_some() || next_lexed.block_comment_seen {
+                unsafe_to_join = true;
+                break;
+            }
+
+            joined.push(' ');
+            joined.push_str(next.trim());
+
+            let mut joined_state = LexState::default();
+            let joined_lexed = lex_line(&joined, &mut joined_state);
+            match first_top_level_header_terminator(&joined_lexed.tokens, 1) {
+                Some(HeaderTerminator::Keyword) => {
+                    complete = Some(cursor);
+                    break;
+                }
+                Some(HeaderTerminator::Brace) => {
+                    unsafe_to_join = true;
+                    break;
+                }
+                _ => {}
+            }
+
+            cursor += 1;
+        }
+
+        if let Some(last) = complete.filter(|_| !unsafe_to_join) {
+            output.push(joined);
+            index = last + 1;
+        } else {
+            output.push(first.to_string());
+            index += 1;
+        }
+    }
+
+    output.join("\n")
 }
 
 fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
@@ -180,14 +294,19 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
                     | "await"
                     | "then"
                     | "do"
+                    | "and"
+                    | "or"
             )
         )
         || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
-        || ["on", "when", "case", "default", "as", "is", "with", "over"]
-            .iter()
-            .any(|word| crate::starts_word(next, word))
+        || next.starts_with("/*")
+        || [
+            "on", "when", "case", "default", "as", "is", "with", "over", "and", "or",
+        ]
+        .iter()
+        .any(|word| crate::starts_word(next, word))
 }
 
 fn split_keyword_blocks(source: &str) -> String {
@@ -202,7 +321,9 @@ fn split_keyword_blocks(source: &str) -> String {
         let scanned = lex_line(line, &mut lex);
         let tokens = scanned.tokens;
         let mut cuts: Vec<usize> = Vec::new();
-        let mut saw_keyword_arm = false;
+        // A keyword if may have opened on a previous line. Every logical
+        // statement in its body still needs its own line.
+        let mut saw_keyword_arm = !frames.is_empty();
         let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
 
         for (index, token) in tokens.iter().enumerate() {
@@ -234,7 +355,7 @@ fn split_keyword_blocks(source: &str) -> String {
                 "then" | "do"
                     if frames.last() == Some(&Phase::Header)
                         && index > 0
-                        && tokens[index - 1].text != "." =>
+                        && is_keyword_delimiter(&tokens, index) =>
                 {
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Body;
@@ -244,14 +365,22 @@ fn split_keyword_blocks(source: &str) -> String {
                         cuts.push(token.end);
                     }
                 }
-                "elif" | "elseif" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "elif" | "elseif"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
                         *frame = Phase::Header;
                     }
                 }
-                "else" if !frames.is_empty() && statement_boundary(&tokens, index) => {
+                "else"
+                    if !frames.is_empty()
+                        && statement_boundary(&tokens, index)
+                        && is_keyword_delimiter(&tokens, index) =>
+                {
                     saw_keyword_arm = true;
                     cuts.push(token.start);
                     if let Some(frame) = frames.last_mut() {
@@ -266,6 +395,7 @@ fn split_keyword_blocks(source: &str) -> String {
                     }
                 }
                 "fi" if frames.last() == Some(&Phase::Body)
+                    && is_keyword_delimiter(&tokens, index)
                     && (statement_boundary(&tokens, index)
                         || inline_return_before(&tokens, index)
                         || tokens
@@ -353,6 +483,9 @@ fn terminate_simple_returns(source: &str) -> String {
             && !code.ends_with('<')
             && !code.ends_with('|')
             && !code.ends_with('&')
+            && !tokens
+                .last()
+                .is_some_and(|token| matches!(token.text, "and" | "or"))
             && !code.contains("->")
             && !code.contains("=>")
             && !tokens
@@ -371,7 +504,12 @@ fn terminate_simple_returns(source: &str) -> String {
             }
             invalid |= parens < 0 || brackets < 0;
         }
-        let next = lines.get(index + 1).map_or("", |line| line.trim_start());
+        let next = lines
+            .iter()
+            .skip(index + 1)
+            .map(|line| line.trim_start())
+            .find(|line| !line.is_empty() && !line.starts_with("//"))
+            .unwrap_or("");
         let definitely_complete = bare_return
             || (simple_expression_return
                 && !return_expression_is_multiline(tokens, next)
@@ -393,12 +531,27 @@ fn terminate_simple_returns(source: &str) -> String {
 
 /// Break compact conditional arms and safely terminate full-line returns.
 pub(crate) fn normalize(source: &str) -> String {
-    terminate_simple_returns(&split_keyword_blocks(source))
+    let collapsed = collapse_multiline_keyword_headers(source);
+    terminate_simple_returns(&split_keyword_blocks(&collapsed))
 }
 
 #[cfg(test)]
 mod tests {
     use super::normalize;
+
+    #[test]
+    fn expands_multiline_keyword_if_header_before_compact_body() {
+        assert_eq!(
+            normalize("if ready &&\n   permitted; do return false; fi"),
+            "if ready && permitted; do\n return false;\nfi"
+        );
+    }
+
+    #[test]
+    fn multiline_braced_if_is_not_collapsed_into_keyword_form() {
+        let source = "if ready &&\n   permitted\n{\nwork();\n}";
+        assert_eq!(normalize(source), source);
+    }
 
     #[test]
     fn expands_keyword_if_with_terminator() {

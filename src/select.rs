@@ -4,13 +4,13 @@ use crate::FormatError;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy)]
-struct Token<'a> {
-    text: &'a str,
-    start: usize,
-    end: usize,
+pub(crate) struct Token<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
-fn tokens(source: &str) -> Vec<Token<'_>> {
+pub(crate) fn tokens(source: &str) -> Vec<Token<'_>> {
     let mut result = Vec::new();
     let mut chars = source.char_indices().peekable();
     while let Some((start, c)) = chars.next() {
@@ -80,7 +80,7 @@ fn line_start(source: &str, pos: usize) -> usize {
     source[..pos].rfind('\n').map_or(0, |i| i + 1)
 }
 
-fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
+pub(crate) fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     if !source[line_start(source, pos)..pos].trim().is_empty() {
         if edits
             .range(..=pos)
@@ -95,7 +95,7 @@ fn break_before(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     }
 }
 
-fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
+pub(crate) fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     let rest = source[pos..].split('\n').next().unwrap_or("").trim();
     // A trailing comment belongs to this header/closer.
     if !rest.is_empty() && !rest.starts_with("//") && !rest.starts_with("/*") {
@@ -103,7 +103,7 @@ fn break_after(source: &str, pos: usize, edits: &mut BTreeMap<usize, String>) {
     }
 }
 
-fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
+pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (i, token) in tokens.iter().enumerate().skip(open) {
         match token.text {
@@ -144,6 +144,100 @@ fn matching_open(close: &str) -> Option<&'static str> {
 
 fn pop_matching(nesting: &mut Vec<&str>, close: &str) -> bool {
     matching_open(close).is_some_and(|expected| nesting.pop() == Some(expected))
+}
+
+/// Locate a slim arrow terminating an executable select arm header, without
+/// mistaking a record destructuring pattern for the arm's statement block.
+/// Legacy arrowless bodies intentionally return None for migration compatibility.
+fn slim_arrow_before_select_body(
+    tokens: &[Token<'_>],
+    start: usize,
+    limit: usize,
+) -> Option<usize> {
+    let mut nesting = Vec::new();
+    let mut i = start;
+    while i < limit {
+        match tokens[i].text {
+            "(" | "[" => nesting.push(tokens[i].text),
+            ")" | "]" => {
+                if !pop_matching(&mut nesting, tokens[i].text) {
+                    return None;
+                }
+            }
+            "{" if nesting.is_empty() => {
+                // A record projection may begin directly at the header or
+                // follow a binding kind/type. It is a projection *only* when
+                // its balanced closing brace is immediately followed by ->.
+                // Otherwise this first brace is the legacy statement body.
+                let end = matching_brace(tokens, i)?;
+                return (end + 2 < limit
+                    && tokens[end + 1].text == "-"
+                    && tokens[end + 2].text == ">")
+                    .then_some(end + 1);
+            }
+            "-" if nesting.is_empty() && i + 1 < limit && tokens[i + 1].text == ">" => {
+                return Some(i);
+            }
+            ";" if nesting.is_empty() => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Reject malformed executable arrows and incomplete typed binding headers
+/// instead of wrapping tokens that belong to the header into a synthetic body.
+/// This check is restricted to the token range after the *readiness colon*.
+fn invalid_legacy_arm_header(
+    tokens: &[Token<'_>],
+    start: usize,
+    limit: usize,
+    read_binding: bool,
+) -> bool {
+    let mut i = start;
+    let mut nesting = Vec::new();
+    while i < limit {
+        match tokens[i].text {
+            "(" | "[" => nesting.push(tokens[i].text),
+            ")" | "]" => {
+                if !pop_matching(&mut nesting, tokens[i].text) {
+                    // Preserve the established delimiter diagnostic from
+                    // the unbraced-body parser below.
+                    return false;
+                }
+            }
+            "=" if nesting.is_empty() && tokens.get(i + 1).is_some_and(|t| t.text == ">") => {
+                return true; // '=>' never delimits an executable select arm.
+            }
+            "{" if nesting.is_empty() => {
+                let Some(end) = matching_brace(tokens, i) else {
+                    return true; // unclosed pattern/body
+                };
+                if end + 2 < limit && tokens[end + 1].text == "=" && tokens[end + 2].text == ">" {
+                    return true; // '{fields} => {body}' is never an arm.
+                }
+                if !read_binding {
+                    return false;
+                }
+                // '{' can be the legacy body, but not the right-hand side of
+                // an unfinished 'name: {record}' type annotation.
+                return i > start && tokens[i - 1].text == ":";
+            }
+            ";" if nesting.is_empty() => return false,
+            ":" if nesting.is_empty()
+                && read_binding
+                && (i == start + 1
+                    || (i == start + 2
+                        && matches!(tokens[start].text, "const" | "val" | "let"))) =>
+            {
+                return true; // typed 'name: T' without the required arrow
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
@@ -275,40 +369,57 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 if header == close || tokens[header].text != ":" {
                     return Err(error(tokens[arm].start, "select arm requires ':'"));
                 }
-                let mut body = header + 1;
-                if (read || await_future)
-                    && tokens
-                        .get(body)
-                        .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
-                {
-                    if !tokens.get(body + 1).is_some_and(|t| {
-                        t.text
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_alphabetic() || c == '_')
-                            && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    }) {
+                if let Some(arrow) = slim_arrow_before_select_body(&tokens, header + 1, close) {
+                    let body = arrow + 2; // tokenizer represents '->' as '-' and '>'
+                    if tokens.get(body).is_none_or(|t| t.text != "{") {
                         return Err(error(
-                            tokens[arm].start,
-                            if read {
-                                "readch select arm binding requires a name"
-                            } else {
-                                "await select arm binding requires a name"
-                            },
+                            tokens[arrow].start,
+                            "select slim arrow '->' must be followed by a braced arm body",
                         ));
                     }
-                    body += 2; // binding kind and name
-                    if tokens.get(body).is_some_and(|t| t.text == ";") {
-                        removed.insert(tokens[body].start);
-                        body += 1;
-                    }
-                }
-                let header_end = if body > 0 && tokens[body - 1].text == ";" {
-                    tokens[body - 2].end
+                    (body, tokens[body - 1].end)
                 } else {
-                    tokens[body - 1].end
-                };
-                (body, header_end)
+                    if invalid_legacy_arm_header(&tokens, header + 1, close, read || await_future) {
+                        return Err(error(
+                            tokens[arm].start,
+                            "invalid select arm header: typed bindings require '->', and executable '=>' is forbidden",
+                        ));
+                    }
+                    let mut body = header + 1;
+                    if (read || await_future)
+                        && tokens
+                            .get(body)
+                            .is_some_and(|t| matches!(t.text, "val" | "let" | "const"))
+                    {
+                        if !tokens.get(body + 1).is_some_and(|t| {
+                            t.text
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_alphabetic() || c == '_')
+                                && t.text.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        }) {
+                            return Err(error(
+                                tokens[arm].start,
+                                if read {
+                                    "readch select arm binding requires a name"
+                                } else {
+                                    "await select arm binding requires a name"
+                                },
+                            ));
+                        }
+                        body += 2; // binding kind and name
+                        if tokens.get(body).is_some_and(|t| t.text == ";") {
+                            removed.insert(tokens[body].start);
+                            body += 1;
+                        }
+                    }
+                    let header_end = if body > 0 && tokens[body - 1].text == ";" {
+                        tokens[body - 2].end
+                    } else {
+                        tokens[body - 1].end
+                    };
+                    (body, header_end)
+                }
             };
             if body < close && tokens[body].text == "{" {
                 let end = matching_brace(&tokens, body)

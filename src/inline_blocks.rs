@@ -45,7 +45,14 @@ pub(crate) fn normalize(source: &str) -> String {
                     .into_iter()
                     .collect();
                 let header = visible.trim_start().trim_end();
-                if header.ends_with("struct") || header.ends_with("trait") {
+                // A brace immediately after the return arrow (or a
+                // record/struct type introducer) belongs to a return type,
+                // not the callable body. A later body brace is still eligible.
+                if header.ends_with("struct")
+                    || header.ends_with("trait")
+                    || header.ends_with("record")
+                    || header.ends_with("->")
+                {
                     return None;
                 }
                 if is_callable_body_header(&format!("{header} {{"), false) {
@@ -179,6 +186,21 @@ mod tests {
             normalize(source),
             "fnc run() -> String {\n val s = \"};\";\n /* ; } */ return s;\n}"
         );
+    }
+
+    #[test]
+    fn record_return_type_braces_are_not_inline_executable_bodies() {
+        for source in [
+            "fnc f() -> {foo: int, bar: string} ::\nreturn value;\nend",
+            "fnc g() -> record {foo: int} as\nreturn value;\nend",
+            "fnc h() -> struct {foo: int} ::\nreturn value;\nend",
+        ] {
+            assert_eq!(normalize(source), source);
+        }
+
+        // The second brace, after a completed record type, is an actual body.
+        let braced = "fnc build() -> {foo: int} { return value; }";
+        assert!(normalize(braced).contains("{foo: int} {\n"));
     }
 
     #[test]

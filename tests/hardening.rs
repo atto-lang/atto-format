@@ -4,10 +4,10 @@ use oreslang_format::{format_source, is_formatted};
 fn minified_keyword_conditionals_expand_without_existing_semicolons() {
     let input = r#"fnc choose(bool a, bool b) -> int { if a then return 1 fi if b then return 2 fi return 3 }"#;
     let expected = r#"fnc choose(bool a, bool b) -> int {
-  if a; then
+  if a then
     return 1;
   fi
-  if b; then
+  if b then
     return 2;
   fi
   return 3;
@@ -31,7 +31,7 @@ fi
 }
 "#;
     let expected = r#"fnc stop() -> void {
-  if ready; then
+  if ready then
     while busy; do
       tick();
     done
@@ -46,13 +46,13 @@ fi
 fn fi_identifier_can_still_be_returned_inside_keyword_if() {
     let input = r#"fnc read() -> int {
 const fi = 7;
-if ready; then return fi; fi
+if ready then return fi; fi
 return 0
 }
 "#;
     let expected = r#"fnc read() -> int {
   const fi = 7;
-  if ready; then
+  if ready then
     return fi;
   fi
   return 0;
@@ -79,7 +79,7 @@ work();
 fallback();
 }
 fi
-if again; then
+if again then
 while busy; do
 tick();
 done
@@ -101,7 +101,7 @@ fn literals_and_argument_semicolons_do_not_create_fake_statement_splits() {
     let input =
         r#"fnc check() -> Result { if ready then return parse("fi; then", callback(1, 2)) fi }"#;
     let expected = r#"fnc check() -> Result {
-  if ready; then
+  if ready then
     return parse("fi; then", callback(1, 2));
   fi
 }
@@ -141,12 +141,12 @@ fi
 #[test]
 fn actual_keyword_then_after_nested_contextual_tokens_still_expands() {
     let input = r#"fnc check() -> int {
-if predicate(then) && helper.do(); then return 1 fi
+if predicate(then) && helper.do() then return 1 fi
 return 0
 }
 "#;
     let expected = r#"fnc check() -> int {
-  if predicate(then) && helper.do(); then
+  if predicate(then) && helper.do() then
     return 1;
   fi
   return 0;

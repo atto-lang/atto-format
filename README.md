@@ -6,17 +6,60 @@ There is deliberately **one format and no style configuration**. The same Rust
 library powers the CLI, so editor integrations, CI, and local development use
 identical behavior.
 
+## Canonical concrete field syntax (pre-1.0)
+
+In direct class member declarations, use `final` to seal
+the member slot and `mut` to permit mutation through a referenced value.
+Local binding declarations retain `const` / `val` / `let` and `=`.
+
+```ores
+define class Foo as
+  int counter: 5;
+  final int limit: 6;
+  final mut Map cache: new Map();
+end
+```
+
+The formatter migrates typed member `let T x = value` to `T x: value`,
+`const T x = value` to `final T x: value`, and
+`val T x = value` to `final mut T x: value` (with analogous
+`const mut` and `let mut` forms). Rewrites are limited to recognized
+direct class members; ambiguous declarations are preserved for
+compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
+or lexical declarations inside callables.
+
+Uninitialized legacy class members (including `val T x;` followed by
+constructor-body initialization) are deliberately left unchanged. Rewriting
+them to `final mut T x;` would manufacture a compiler error before the
+coordinated breaking migration has removed those legacy semantics.
+
+The language's final initialization rules are compiler constraints, not
+formatter transformations. Formatting does not make an uninitialized final
+field valid, and formatter output is not proof that all backends support
+the full field contract.
+
 ## Canonical style
 
 - two spaces per indentation level, never tabs for indentation;
+- callable parameter lists are expanded one parameter per line when they have 4+ parameters, or when they have 3+ parameters and either a parameter name contains at least two underscores or the combined parameter-name width exceeds 60 columns; continuation parameters are indented one additional two-space level and the closing `)` returns to the callable declaration indentation;
 - static `select`, `nb select`, and `try select` arms are indented one level;
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
+- brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
+- braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
+- direct type-first class field initializers canonically use `:`: `final int foo = 5`
+  becomes `final int foo: 5`, and `string bar = "100"` becomes
+  `string bar: "100"`; ordinary assignments, name-first declarations,
+  comments, string literals, and nested method bodies are never rewritten;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
+- in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
+  explicit `method name(...)` remains explicit, and `static fnc` is preserved;
+  instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
-- interface/trait callable signatures use the type-level fat arrow `=>`;
-- conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; optional semantics-free `as` or `::` may separate the complete return type from the body and permit compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
+- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
@@ -30,7 +73,7 @@ For example:
 
 ```ores
 pub define class User extends Entity implements Named, Serializable as
-  pub val String name;
+  pub final String name: "guest";
 end
 
 fnc pub async refresh() {
@@ -53,8 +96,22 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-Conditional compatibility spellings are migrated automatically: deprecated
-`if ... do` becomes `if ...; then`, `elseif` becomes `elif`, and a
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
+
+```ores
+fnc classify(int x) -> tuple (int, int, string) ::
+  if x > 0 then
+    return (1, x, "positive");
+  else
+    return (0, x, "non-positive");
+  fi
+end
+```
+
+The formatter recognizes this only at file/module declaration scope and only with an explicit slim-arrow return type. A callable-header `do` is never interpreted as a `done`-terminated control-flow block; compact `do ... end` source is expanded before structural indentation. It fails closed instead of interpreting an `end`-delimited class method, static class implementation, or actor callable as a free function. The contextual `tuple (...)` spelling is preserved as a type spelling; formatting does not invent a separate tuple runtime form.
+
+Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
+`if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
 single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
 unchanged; the deprecation applies only to using `do` as an if/branch
 introducer.
@@ -113,6 +170,64 @@ For semantic safety, multiline string/template literals currently fail closed
 instead of being rewritten. This prevents indentation, trailing-whitespace, or
 line-ending normalization from changing literal runtime bytes while parser-backed
 literal preservation is still being completed.
+
+## Unused imports and module initialization safety
+
+Oreslang source imports participate in the compiler's dependency graph. Importing
+a source module can execute its `init()` hook, even when no selected binding is
+referenced; removing the import edge can therefore change program behavior.
+**The formatter preserves unreviewed imports by default.** It never deletes
+imports. Once a developer has verified that an import is safe to deactivate,
+put an exact `// oresfmt: pure-import` marker immediately above that import
+(or as an exact trailing comment on the import's final line). The formatter
+then comments out the whole unused import, leaving the declaration readable:
+
+```ores
+// oresfmt: pure-import
+import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main(): void {
+  make();
+}
+```
+
+becomes:
+
+```ores
+// oresfmt: pure-import
+// import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main() -> void {
+  make();
+}
+```
+
+The purity marker is a **human assertion, not a compiler certificate**:
+use it only after checking direct and transitive module initialization.
+Without the marker, an apparently unused import remains active. This applies
+to every import kind, including Java host imports, until a compiler-proven
+side-effect analysis is available. Lexical reference detection still excludes
+comments, quoted strings, import paths, and Symbol literals; aliases are
+resolved by local name and grouped imports remain active when any binding is
+referenced. Unsupported grammar or ambiguous embedded templates fail closed.
+
+Use `// oresfmt: keep-import` for intentionally effectful imports or imports
+that must stay active even if a conflicting purity marker is present.
+`keep-import` always wins. Both markers apply only to one declaration and
+idempotent formatting preserves the original text as comments. Neither CLI
+dry-run nor check mode modifies files; `--write` retains the full filesystem
+and Git safety preflight. See the example:
+
+```ores
+// oresfmt: keep-import
+import module Bootstrap from "./bootstrap";
+```
+
+The long-term goal is compiler-derived import-effect certification from both
+backends, at which point the formatter can comment certified unused imports
+without manual assertions.
 
 ## CLI
 
@@ -175,6 +290,12 @@ Additional write hardening:
   contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
 - write-safety override flags are rejected unless `--write` is active.
 
+CLI exit codes are explicit: `0` means success, `1` means either a
+noncanonical `--check` input or rejected Oreslang source (with an error
+diagnostic), and `2` means CLI usage, filesystem, Git-policy or other tool
+failure. Both `oresfmt` and `oreslang-format` use the same codes. Audit
+scripts must not confuse a syntax rejection with a tool/runner failure.
+
 ## Rust SDK
 
 ```rust
@@ -193,3 +314,19 @@ same bytes.
 Oreslang should have one mechanically enforceable source style. This avoids
 project-specific formatter drift and gives compiler diagnostics, generated
 code, examples, editor integrations, and code review the same layout contract.
+
+## Exception effect annotations (staged grammar)
+
+Proposed optional postfix annotations for named functions and methods
+are `throws(ErrorType)`, `raises(ErrorType)`, and `panics(ErrorType)`.
+The formatter has round-trip preservation tests for these signatures;
+preservation does **not** mean that either production compiler accepts
+or executes the grammar. These three effects remain semantically distinct:
+ordinary catch/trap may handle throw; raise bypasses them and may reach
+a direct deferred recover; actor panic bypasses all local handlers and
+goes to supervisor CONTROL.
+
+A separate initial advisory checker is provided by
+`oreslang-test.cli --effects`. Integration with formatter diagnostics,
+complete callable-effect inference and LSP quick fixes remains pending.
+See the proposed shared contract in oreslang-common-source.
