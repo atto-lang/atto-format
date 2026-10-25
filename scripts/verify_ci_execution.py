@@ -157,6 +157,24 @@ def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json, pr_number
         for required in required_steps:
             if not any(required in executed for executed in executed_names):
                 raise Denied("required CI command did not execute: " + name + " / " + required)
+    # Re-read the live PR after fetching all CI metadata. Otherwise the PR
+    # can advance during this audit and make a stale successful run appear
+    # current. This narrows the race but does not make a receipt a merge lock:
+    # a protected merge gate must still recheck the actual PR head.
+    final_pull = fetch(prefix + "/pulls/" + str(pr_number), token)
+    if not isinstance(final_pull, dict) or final_pull.get("state") != "open" \
+        or not isinstance(final_pull.get("head"), dict) \
+        or final_pull["head"].get("sha") != head \
+        or final_pull["head"].get("ref") != pull["head"]["ref"] \
+        or not isinstance(final_pull["head"].get("repo"), dict) \
+        or type(final_pull["head"]["repo"].get("id")) is not int \
+        or final_pull["head"]["repo"]["id"] != repo_id \
+        or not isinstance(final_pull.get("base"), dict) \
+        or not isinstance(final_pull["base"].get("repo"), dict) \
+        or type(final_pull["base"]["repo"].get("id")) is not int \
+        or final_pull["base"]["repo"]["id"] != repo_id:
+        raise Denied("PR changed while gathering CI execution evidence")
+
     return {"repo": repo, "pr": pr_number, "commit": head, "tree": tree, "run_id": run_id,
             "run_attempt": run["run_attempt"], "jobs": sorted(jobs)}
 
