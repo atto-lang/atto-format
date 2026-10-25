@@ -58,13 +58,14 @@ def fetch_json(path, token):
         raise Denied("invalid GitHub metadata JSON") from None
 
 
-def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json):
+def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json, pr_number=None):
     if not isinstance(repo, str) or not REPO_NAME.fullmatch(repo) or any(
         p in (".", "..") for p in repo.split("/")
     ):
         raise Denied("invalid repository name")
-    if type(repo_id) is not int or repo_id <= 0 or type(run_id) is not int or run_id <= 0:
-        raise Denied("positive integer identity required")
+    if type(repo_id) is not int or repo_id <= 0 or type(run_id) is not int or run_id <= 0 \
+        or type(pr_number) is not int or pr_number <= 0:
+        raise Denied("positive integer repository, PR and run identities required")
     if not isinstance(head, str) or not SHA.fullmatch(head):
         raise Denied("invalid exact source commit SHA")
     if not isinstance(tree, str) or not SHA.fullmatch(tree):
@@ -80,6 +81,19 @@ def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json):
         or identity.get("archived") is not False or identity.get("disabled") is not False:
         raise Denied("source repository identity/private status invalid")
 
+    # A successful old run is not evidence for a PR whose head has moved.
+    pull = fetch(prefix + "/pulls/" + str(pr_number), token)
+    if not isinstance(pull, dict) or pull.get("state") != "open" \
+        or not isinstance(pull.get("base"), dict) or not isinstance(pull.get("head"), dict) \
+        or pull["head"].get("sha") != head or pull["head"].get("ref") is None \
+        or not isinstance(pull["head"].get("repo"), dict) \
+        or type(pull["head"]["repo"].get("id")) is not int \
+        or pull["head"]["repo"]["id"] != repo_id \
+        or not isinstance(pull["base"].get("repo"), dict) \
+        or type(pull["base"]["repo"].get("id")) is not int \
+        or pull["base"]["repo"]["id"] != repo_id:
+        raise Denied("live PR head or repository identity mismatch")
+
     commit = fetch(prefix + "/git/commits/" + head, token)
     if not isinstance(commit, dict) or commit.get("sha") != head \
         or not isinstance(commit.get("tree"), dict) or commit["tree"].get("sha") != tree:
@@ -88,12 +102,26 @@ def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json):
     run = fetch(prefix + "/actions/runs/" + str(run_id), token)
     if not isinstance(run, dict) or run.get("head_sha") != head \
         or run.get("status") != "completed" or run.get("conclusion") != "success" \
-        or run.get("event") not in ("pull_request", "push", "workflow_dispatch") \
+        or run.get("event") != "pull_request" \
+        or run.get("path") != ".github/workflows/ci.yml" \
+        or run.get("head_branch") != pull["head"]["ref"] \
         or type(run.get("run_attempt")) is not int or run["run_attempt"] < 1 \
         or not isinstance(run.get("repository"), dict) \
         or type(run["repository"].get("id")) is not int \
-        or run["repository"]["id"] != repo_id:
-        raise Denied("CI run not completed successfully on exact source head")
+        or run["repository"]["id"] != repo_id \
+        or not isinstance(run.get("head_repository"), dict) \
+        or type(run["head_repository"].get("id")) is not int \
+        or run["head_repository"]["id"] != repo_id:
+        raise Denied("CI run not completed successfully on exact PR head and workflow")
+    associated = run.get("pull_requests")
+    if not isinstance(associated, list) or not any(
+        isinstance(link, dict) and type(link.get("number")) is int
+        and link["number"] == pr_number
+        and isinstance(link.get("head"), dict)
+        and link["head"].get("sha") == head
+        for link in associated
+    ):
+        raise Denied("CI run is not associated with the exact live PR")
 
     jobs_data = fetch(prefix + "/actions/runs/" + str(run_id) + "/jobs?per_page=100", token)
     if not isinstance(jobs_data, dict) or not isinstance(jobs_data.get("jobs"), list) \
@@ -129,7 +157,7 @@ def verify(repo, repo_id, head, tree, run_id, token, fetch=fetch_json):
         for required in required_steps:
             if not any(required in executed for executed in executed_names):
                 raise Denied("required CI command did not execute: " + name + " / " + required)
-    return {"repo": repo, "commit": head, "tree": tree, "run_id": run_id,
+    return {"repo": repo, "pr": pr_number, "commit": head, "tree": tree, "run_id": run_id,
             "run_attempt": run["run_attempt"], "jobs": sorted(jobs)}
 
 
@@ -140,10 +168,12 @@ def main(argv=None):
     parser.add_argument("--head", required=True)
     parser.add_argument("--tree", required=True)
     parser.add_argument("--run-id", required=True, type=int)
+    parser.add_argument("--pr-number", required=True, type=int)
     args = parser.parse_args(argv)
     try:
         receipt = verify(args.repo, args.repo_id, args.head, args.tree, args.run_id,
-                         os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
+                         os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                         pr_number=args.pr_number)
     except Denied as exc:
         print("CI_EVIDENCE_DENIED: " + str(exc), file=sys.stderr)
         return 1
