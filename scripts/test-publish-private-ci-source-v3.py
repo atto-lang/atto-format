@@ -184,6 +184,36 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                 raw, "trusted/ci", 670, "ci/test-plans/format-pr669.json"
             )
 
+    def test_contract_and_plan_reject_extra_pr_authority(self):
+        raw = json.dumps({
+            "schema": 1,
+            "carriers": {
+                "trusted/ci": {
+                    "repository_id": 42,
+                    "base_sha": BASE,
+                    "workflow_path": ".github/workflows/oreslang-exact-tree-carrier.yml",
+                    "workflow_blob_sha": WORKFLOW,
+                    "test_plans": {
+                        "ci/test-plans/format-pr669.json": {
+                            "blob_sha": PLAN_BLOB,
+                            "allowed_prs": [669, 670],
+                        }
+                    },
+                }
+            },
+        }).encode()
+        with self.assertRaisesRegex(v3.Denied, "exactly the source PR"):
+            v3.parse_contract(
+                raw, "trusted/ci", 669, "ci/test-plans/format-pr669.json"
+            )
+
+        doc = json.loads(PLAN)
+        doc["allowed_prs"] = [669, 670]
+        with self.assertRaisesRegex(v3.Denied, "exactly the source PR"):
+            v3.validate_test_plan(
+                (json.dumps(doc) + "\n").encode(), 669
+            )
+
     def test_strict_json_rejects_duplicate_and_nonfinite_values(self):
         with self.assertRaisesRegex(v3.Denied, "duplicate JSON key"):
             v3.strict_json_loads('{"x":1,"x":2}', "fixture")

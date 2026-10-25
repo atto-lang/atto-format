@@ -535,12 +535,8 @@ def parse_contract(raw, repository, source_pr, test_plan):
         raise Denied("test plan absent from protected carrier contract")
     blob_sha = valid_sha(plan.get("blob_sha"), "test plan blob")
     allowed = plan.get("allowed_prs")
-    if (not isinstance(allowed, list) or not allowed
-            or len(set(allowed)) != len(allowed)
-            or any(not isinstance(x, int) or isinstance(x, bool) or x <= 0
-                   for x in allowed)
-            or source_pr not in allowed):
-        raise Denied("source PR not authorized by protected test plan")
+    if allowed != [source_pr]:
+        raise Denied("protected test plan must authorize exactly the source PR")
     return {
         "repository_id": repo_id,
         "base_sha": base_sha,
@@ -587,12 +583,8 @@ def validate_test_plan(plan_bytes, source_pr):
         raise Denied("reviewed test plan has unexpected fields")
 
     allowed = plan.get("allowed_prs")
-    if (not isinstance(allowed, list) or not allowed
-            or source_pr not in allowed
-            or any(not isinstance(value, int) or isinstance(value, bool)
-                   or value <= 0 for value in allowed)
-            or len(set(allowed)) != len(allowed)):
-        raise Denied("reviewed test plan does not authorize source PR")
+    if allowed != [source_pr]:
+        raise Denied("reviewed test plan must authorize exactly the source PR")
 
     required = plan.get("required_source_blobs", {})
     if not isinstance(required, dict):
