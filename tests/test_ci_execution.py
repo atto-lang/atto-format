@@ -107,6 +107,40 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(field=field, value=value), self.assertRaises(Denied):
                 run(data)
 
+    def test_branch_advances_during_receipt_fetch_fails_closed(self):
+        data = fixture()
+        path = f"/repos/{REPO}/pulls/{PR}"
+        seen = []
+
+        def advancing_fetch(key, token):
+            if key == path:
+                seen.append(key)
+                if len(seen) == 2:
+                    changed = copy.deepcopy(data[key])
+                    changed["head"]["sha"] = "c" * 40
+                    return changed
+            return data[key]
+
+        with self.assertRaisesRegex(Denied, "PR changed while gathering"):
+            verify(REPO, ID, HEAD, TREE, RUN, "fake-token",
+                   fetch=advancing_fetch, pr_number=PR)
+        self.assertEqual(len(seen), 2)
+
+    def test_stable_pr_head_is_rechecked_after_job_collection(self):
+        data = fixture()
+        path = f"/repos/{REPO}/pulls/{PR}"
+        count = [0]
+
+        def read_twice(key, token):
+            if key == path:
+                count[0] += 1
+            return data[key]
+
+        evidence = verify(REPO, ID, HEAD, TREE, RUN, "fake-token",
+                          fetch=read_twice, pr_number=PR)
+        self.assertEqual(evidence["commit"], HEAD)
+        self.assertEqual(count[0], 2)
+
     def test_zero_step_no_runner_and_mixed_attempts_fail(self):
         path=f"/repos/{REPO}/actions/runs/{RUN}/jobs?per_page=100"
         for field,value in (("steps", []), ("runner_id", 0), ("runner_name", ""),
