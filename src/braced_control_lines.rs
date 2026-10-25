@@ -291,9 +291,11 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_inline_type_brace_in_condition_is_not_treated_as_body() {
+    fn ambiguous_inline_type_brace_in_condition_fails_closed() {
         let source = "if value == infer struct {count: 1} { run(); }";
-        assert_eq!(normalize(source).unwrap(), source);
+        let error = normalize(source).unwrap_err();
+        assert_eq!(error.line(), 1);
+        assert!(error.message().contains("ambiguous compact control brace"));
     }
 
     #[test]
@@ -307,14 +309,23 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_attached_record_braces_are_never_control_openers() {
+    fn ambiguous_attached_record_braces_fail_closed_instead_of_looking_formatted() {
         for source in [
             "if item == Point{x: 1} { run(); }",
             "if value == {x: 1} { run(); }",
             "if ready{ run(); }",
         ] {
-            assert_eq!(normalize(source).unwrap(), source);
+            let error = normalize(source).unwrap_err();
+            assert_eq!(error.line(), 1, "{source}");
+            assert!(error.message().contains("ambiguous compact control brace"), "{source}");
         }
+    }
+
+    #[test]
+    fn ambiguous_control_brace_reports_the_actual_source_line() {
+        let source = "first();\nif ready{ second(); }\nthird();";
+        let error = normalize(source).unwrap_err();
+        assert_eq!(error.line(), 2);
     }
 
     #[test]
