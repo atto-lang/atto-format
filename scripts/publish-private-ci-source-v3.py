@@ -420,8 +420,13 @@ def source_protection():
     repo = gh_api(f"repos/{SOURCE_REPO}")
     if (repo.get("id") != SOURCE_REPO_ID
             or repo.get("full_name") != SOURCE_REPO
-            or repo.get("private") is not True):
-        raise Denied("source repository identity/privacy mismatch")
+            or repo.get("private") is not True
+            or repo.get("visibility") != "private"
+            or repo.get("default_branch") != SOURCE_BRANCH
+            or repo.get("archived") is not False
+            or repo.get("disabled") is not False
+            or repo.get("fork") is not False):
+        raise Denied("source repository identity/privacy/state mismatch")
     branch = gh_api(f"repos/{SOURCE_REPO}/branches/{SOURCE_BRANCH}")
     if (branch.get("name") != SOURCE_BRANCH
             or branch.get("protected") is not True):
@@ -883,8 +888,12 @@ def verify_source_pr(source_pr, source_commit):
             or head.get("sha") != source_commit
             or not isinstance(head.get("repo"), dict)
             or head["repo"].get("full_name") != SOURCE_REPO
+            or head["repo"].get("id") != SOURCE_REPO_ID
             or not isinstance(base, dict)
-            or base.get("ref") != SOURCE_BRANCH):
+            or base.get("ref") != SOURCE_BRANCH
+            or not isinstance(base.get("repo"), dict)
+            or base["repo"].get("full_name") != SOURCE_REPO
+            or base["repo"].get("id") != SOURCE_REPO_ID):
         raise Denied("source commit is not exact open PR head against main")
     return SOURCE_REPO_ID
 

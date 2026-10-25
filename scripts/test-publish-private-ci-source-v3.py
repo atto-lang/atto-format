@@ -541,6 +541,33 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                 raw, "trusted/ci", 669, "ci/test-plans/format-pr669.json"
             )
 
+    def test_source_protection_rejects_replaced_or_ineligible_source_repo(self):
+        good = {
+            "id": v3.SOURCE_REPO_ID,
+            "full_name": v3.SOURCE_REPO,
+            "private": True,
+            "visibility": "private",
+            "default_branch": v3.SOURCE_BRANCH,
+            "archived": False,
+            "disabled": False,
+            "fork": False,
+        }
+        for field, bad in (
+            ("id", v3.SOURCE_REPO_ID + 1),
+            ("private", False),
+            ("visibility", "public"),
+            ("default_branch", "other"),
+            ("archived", True),
+            ("disabled", True),
+            ("fork", True),
+        ):
+            with self.subTest(field=field, bad=bad):
+                repo = dict(good)
+                repo[field] = bad
+                with patch.object(v3, "gh_api", return_value=repo):
+                    with self.assertRaisesRegex(v3.Denied, "identity/privacy/state"):
+                        v3.source_protection()
+
     def test_authorized_source_main_rejects_unprotected_main(self):
         def api(route, method="GET", payload=None):
             if route == f"repos/{v3.SOURCE_REPO}/branches/{v3.SOURCE_BRANCH}":
@@ -799,9 +826,15 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                     "state": "open",
                     "head": {
                         "sha": "9" * 40,
-                        "repo": {"full_name": v3.SOURCE_REPO},
+                        "repo": {"full_name": v3.SOURCE_REPO, "id": v3.SOURCE_REPO_ID},
                     },
-                    "base": {"ref": "main"},
+                    "base": {
+                        "ref": "main",
+                        "repo": {
+                            "full_name": v3.SOURCE_REPO,
+                            "id": v3.SOURCE_REPO_ID,
+                        },
+                    },
                 }
             if route == f"repos/{v3.SOURCE_REPO}/git/commits/" + "9" * 40:
                 return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
@@ -846,9 +879,15 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                     "state": "open",
                     "head": {
                         "sha": "9" * 40,
-                        "repo": {"full_name": v3.SOURCE_REPO},
+                        "repo": {"full_name": v3.SOURCE_REPO, "id": v3.SOURCE_REPO_ID},
                     },
-                    "base": {"ref": "main"},
+                    "base": {
+                        "ref": "main",
+                        "repo": {
+                            "full_name": v3.SOURCE_REPO,
+                            "id": v3.SOURCE_REPO_ID,
+                        },
+                    },
                 }
             if "/git/commits/" in route:
                 return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
@@ -878,9 +917,15 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                     "state": "open",
                     "head": {
                         "sha": "9" * 40,
-                        "repo": {"full_name": v3.SOURCE_REPO},
+                        "repo": {"full_name": v3.SOURCE_REPO, "id": v3.SOURCE_REPO_ID},
                     },
-                    "base": {"ref": "main"},
+                    "base": {
+                        "ref": "main",
+                        "repo": {
+                            "full_name": v3.SOURCE_REPO,
+                            "id": v3.SOURCE_REPO_ID,
+                        },
+                    },
                 }
             if "/git/commits/" in route:
                 return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
@@ -917,9 +962,15 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                     "state": "open",
                     "head": {
                         "sha": "9" * 40,
-                        "repo": {"full_name": v3.SOURCE_REPO},
+                        "repo": {"full_name": v3.SOURCE_REPO, "id": v3.SOURCE_REPO_ID},
                     },
-                    "base": {"ref": "main"},
+                    "base": {
+                        "ref": "main",
+                        "repo": {
+                            "full_name": v3.SOURCE_REPO,
+                            "id": v3.SOURCE_REPO_ID,
+                        },
+                    },
                 }
             if "/git/commits/" in route:
                 return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
@@ -951,9 +1002,15 @@ class FormatterPrivateCiV3Test(unittest.TestCase):
                     "state": "open",
                     "head": {
                         "sha": "9" * 40,
-                        "repo": {"full_name": v3.SOURCE_REPO},
+                        "repo": {"full_name": v3.SOURCE_REPO, "id": v3.SOURCE_REPO_ID},
                     },
-                    "base": {"ref": "main"},
+                    "base": {
+                        "ref": "main",
+                        "repo": {
+                            "full_name": v3.SOURCE_REPO,
+                            "id": v3.SOURCE_REPO_ID,
+                        },
+                    },
                 }
             if "/git/commits/" in route:
                 return {"sha": "9" * 40, "tree": {"sha": SOURCE_TREE}}
