@@ -9,6 +9,7 @@ objects, copy credentials to another organization, or register runners.
 GH_TOKEN=<metadata-read-only-token> python3 scripts/verify_ci_execution.py \
   --repo ores-truffle-oreslang/oreslang-format \
   --repo-id 1406328272 \
+  --pr-number 92 \
   --head <reviewed-exact-40-character-commit-sha> \
   --tree <reviewed-exact-40-character-root-tree-sha> \
   --run-id <actual-source-repository-actions-run-id>
@@ -17,6 +18,12 @@ GH_TOKEN=<metadata-read-only-token> python3 scripts/verify_ci_execution.py \
 A successful receipt requires:
 
 - An active, private source repository with the exact expected numeric ID.
+- The live, open PR's current head SHA and source/base repository IDs matching
+  the reviewed private source repository. Older passing commits are rejected.
+- The `pull_request` workflow run must originate from the same private source
+  repository and current PR branch, use `.github/workflows/ci.yml`, and list
+  that same PR/head SHA in its GitHub metadata. Other workflows and push-only
+  runs cannot satisfy the receipt.
 - GitHub's immutable commit object pointing to the expected root Git tree.
 - The completed successful workflow run belonging to that repository and commit.
 - Completed, successful `test` and `msrv` jobs on the current run attempt, each
