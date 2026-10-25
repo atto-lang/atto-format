@@ -22,8 +22,15 @@ Missing branch-protection visibility or `protected=false` fails closed. There is
 
 `sonus-auris-test/clients-api-contract` (repository ID `1323599063`) is currently a **review-only** source-free carrier candidate. The formatter plan is intended to bind PR #91, Rust 1.85, the shared type-declaration fixture, focused formatter tests, full offline Cargo tests, clippy, rustdoc, and release binary builds.
 
-This file does not approve Sonus and does not authorize direct connector tree/blob/ref writes. A reviewed V3 publisher must exist in this repository before any formatter source leaves the source repository.
+This file does not approve Sonus and does not authorize direct connector tree/blob/ref writes. The stacked V3 publisher review is itself non-authorizing and must be independently reviewed, merged to protected source `main`, and byte-pinned before any formatter source leaves the source repository.
 
 ## Current blocker
 
 As of 2026-10-25, GitHub reports formatter `main` as `protected: false`. The available GitHub App connection does not expose repository Administration-level branch-protection mutation. An authorized repository administrator must configure and independently verify source-main protection before any source-bearing carrier handoff.
+
+
+## V3 publisher review requirements
+
+The V3 publisher is intentionally narrower than the compiler publishers. Reviewed formatter plans may execute only `python3` or tightly admitted `cargo` subcommands. Cargo test/clippy/rustdoc/build operations must be offline; manifest/config/registry/index/target-dir/path overrides are rejected. Cargo plans must bind the exact `Cargo.toml` blob.
+
+The publisher must refuse every export unless formatter source `main` is live-protected with the required CODEOWNER/review/admin/no-bypass/no-force-push/no-delete controls. Unprotected source review attestation is not a fallback.
