@@ -330,3 +330,19 @@ A separate initial advisory checker is provided by
 `oreslang-test.cli --effects`. Integration with formatter diagnostics,
 complete callable-effect inference and LSP quick fixes remains pending.
 See the proposed shared contract in oreslang-common-source.
+
+## Optional `mtd` migration
+
+The Java compiler accepts both bare instance methods and the contextual `mtd`
+prefix in class/actor bodies. The formatter preserves either by default.
+Use `oresfmt --insert-mtd --stdout path/to/file.ores` to preview an explicit
+method-introducer migration, or `oresfmt --insert-mtd --write path/to/file.ores`
+(with the normal write-safety policy) to apply it. The same switch works with
+`--check` and stdin. It does not convert static `fnc`, top-level `fnc`,
+constructors, or nested callable bodies. Both `foo(): void {}` and
+`foo() -> void :: ... end` remain valid regardless of marker.
+
+The ordinary `format_source` API keeps existing default formatting.
+Library callers that explicitly want the marker can use
+`format_source_with_mtd`. Migration is idempotent and preserves existing
+explicit `mtd` and `method` declarations.
