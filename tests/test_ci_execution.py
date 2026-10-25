@@ -11,6 +11,7 @@ REPO = "ores-truffle-oreslang/oreslang-format"
 HEAD = "a" * 40
 TREE = "b" * 40
 RUN = 333333
+PR = 92
 ID = 1406328272
 
 def fixture():
@@ -23,22 +24,29 @@ def fixture():
     return {
         f"/repos/{REPO}": {"id": ID, "full_name": REPO, "private": True,
                             "visibility": "private", "archived": False, "disabled": False},
+        f"/repos/{REPO}/pulls/{PR}": {"state": "open",
+            "head": {"sha": HEAD, "ref": "feat/hardening", "repo": {"id": ID}},
+            "base": {"repo": {"id": ID}}},
         f"/repos/{REPO}/git/commits/{HEAD}": {"sha": HEAD, "tree": {"sha": TREE}},
         f"/repos/{REPO}/actions/runs/{RUN}": {"head_sha": HEAD, "status": "completed",
                       "conclusion": "success", "event": "pull_request", "run_attempt": 2,
-                      "repository": {"id": ID}},
+                      "path": ".github/workflows/ci.yml", "head_branch": "feat/hardening",
+                      "repository": {"id": ID}, "head_repository": {"id": ID},
+                      "pull_requests": [{"number": PR, "head": {"sha": HEAD}}]},
         f"/repos/{REPO}/actions/runs/{RUN}/jobs?per_page=100": {"total_count": 2,
                                                                             "jobs": jobs},
     }
 
 def run(data=None, **kwargs):
     data = fixture() if data is None else data
-    return verify(REPO, ID, HEAD, TREE, RUN, "fake-token", fetch=lambda path, token: data[path], **kwargs)
+    return verify(REPO, ID, HEAD, TREE, RUN, "fake-token", fetch=lambda path, token: data[path],
+                  pr_number=PR, **kwargs)
 
 class EvidenceTests(unittest.TestCase):
     def test_valid_exact_tree_with_real_steps(self):
         result = run()
         self.assertEqual(result["run_attempt"], 2)
+        self.assertEqual(result["pr"], PR)
         self.assertEqual(result["jobs"], ["msrv", "test"])
 
     def test_private_metadata_and_identity_are_required(self):
@@ -66,6 +74,38 @@ class EvidenceTests(unittest.TestCase):
         data=fixture();data[path]["repository"]["id"]=123
         with self.assertRaises(Denied): run(data)
 
+    def test_stale_or_cross_repository_pr_is_denied(self):
+        path = f"/repos/{REPO}/pulls/{PR}"
+        for operation in (
+            lambda x: x["head"].update(sha="c" * 40),
+            lambda x: x["head"]["repo"].update(id=ID + 1),
+            lambda x: x["base"]["repo"].update(id=ID + 1),
+            lambda x: x.update(state="closed"),
+            lambda x: x["head"].update(ref=None),
+        ):
+            data = fixture()
+            operation(data[path])
+            with self.assertRaises(Denied):
+                run(data)
+        with self.assertRaises(Denied):
+            run(pr_number=False)
+
+    def test_wrong_workflow_or_unassociated_pr_is_denied(self):
+        path = f"/repos/{REPO}/actions/runs/{RUN}"
+        for field, value in (
+            ("path", ".github/workflows/other.yml"),
+            ("event", "push"),
+            ("head_branch", "other-branch"),
+            ("head_repository", {"id": ID + 1}),
+            ("pull_requests", []),
+            ("pull_requests", [{"number": PR + 1, "head": {"sha": HEAD}}]),
+            ("pull_requests", [{"number": PR, "head": {"sha": "c" * 40}}]),
+        ):
+            data = fixture()
+            data[path][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(Denied):
+                run(data)
+
     def test_zero_step_no_runner_and_mixed_attempts_fail(self):
         path=f"/repos/{REPO}/actions/runs/{RUN}/jobs?per_page=100"
         for field,value in (("steps", []), ("runner_id", 0), ("runner_name", ""),
@@ -88,7 +128,7 @@ class EvidenceTests(unittest.TestCase):
                  (REPO, ID, "bad", TREE, RUN, "fake"), (REPO, ID, HEAD, "bad", RUN, "fake")]
         for args in invalid:
             with self.subTest(args=args),self.assertRaises(Denied):
-                verify(*args,fetch=lambda *a: self.fail("unexpected network"))
+                verify(*args,fetch=lambda *a: self.fail("unexpected network"),pr_number=PR)
 
     def test_authenticated_http_disables_proxy_and_redirect(self):
         called=[]
