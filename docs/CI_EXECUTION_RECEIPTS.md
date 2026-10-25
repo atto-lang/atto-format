@@ -31,9 +31,20 @@ A successful receipt requires:
 - The completed successful workflow run belonging to that repository and commit.
 - Completed, successful `test` and `msrv` jobs on the current run attempt, each
   with a nonzero runner ID, nonempty runner name, and successful executed steps.
+- Both Rust jobs explicitly check out `github.event.pull_request.head.sha`
+  on PR events (or `github.sha` on push events), not the implicit
+  `refs/pull/.../merge` synthetic merge commit. Before running tests, each
+  job executes a fail-closed shell assertion that `git rev-parse HEAD`
+  equals the expected SHA and emits `CI_EXACT_SOURCE_HEAD` and
+  `CI_EXACT_SOURCE_TREE` as log receipts. Capture and compare the recorded
+  tree with the reviewed source commit's root tree.
 - Observed step labels for required Rust test, lint, format, build and MSRV
   commands. Missing jobs, partial/paginated job responses, wrong-tree results,
   zero-step conclusions and mixed attempts are denied.
+- **Separate concern:** exact-head validation does not prove that the resulting
+  merge with the target branch builds. Merge compatibility requires its own
+  tested merge-tree evidence before release; do not substitute it for exact-head
+  evidence or vice versa.
 
 A receipt is **metadata evidence**, not an independent test runner, proof that
 step labels faithfully reflect commands, proof of compiler semantic equivalence,
