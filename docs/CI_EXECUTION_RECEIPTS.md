@@ -20,6 +20,9 @@ A successful receipt requires:
 - An active, private source repository with the exact expected numeric ID.
 - The live, open PR's current head SHA and source/base repository IDs matching
   the reviewed private source repository. Older passing commits are rejected.
+  The PR head is re-read **after** all CI metadata to detect a branch update
+  during receipt collection. This is a defensive recheck, **not** an atomic
+  lock: the release/merge gate must independently verify the live head again.
 - The `pull_request` workflow run must originate from the same private source
   repository and current PR branch, use `.github/workflows/ci.yml`, and list
   that same PR/head SHA in its GitHub metadata. Other workflows and push-only
