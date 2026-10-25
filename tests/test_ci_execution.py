@@ -39,8 +39,9 @@ def fixture():
 
 def run(data=None, **kwargs):
     data = fixture() if data is None else data
+    pr_number = kwargs.pop("pr_number", PR)
     return verify(REPO, ID, HEAD, TREE, RUN, "fake-token", fetch=lambda path, token: data[path],
-                  pr_number=PR, **kwargs)
+                  pr_number=pr_number, **kwargs)
 
 class EvidenceTests(unittest.TestCase):
     def test_valid_exact_tree_with_real_steps(self):
