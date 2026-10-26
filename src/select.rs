@@ -288,6 +288,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         break_after(source, tokens[open].end, &mut edits);
         break_before(source, tokens[close].start, &mut edits);
         let mut arm = open + 1;
+        let mut seen_default = false;
         while arm < close {
             if !matches!(tokens[arm].text, "when" | "case" | "default") {
                 return Err(error(
@@ -295,8 +296,21 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     "expected when/case/default inside select",
                 ));
             }
+            if seen_default {
+                return Err(error(
+                    tokens[arm].start,
+                    if tokens[arm].text == "default" {
+                        "select permits at most one default arm"
+                    } else {
+                        "select default arm must be last"
+                    },
+                ));
+            }
             break_before(source, tokens[arm].start, &mut edits);
             let arm_keyword = tokens[arm].text;
+            if arm_keyword == "default" {
+                seen_default = true;
+            }
             if arm_keyword == "case" {
                 edits.entry(tokens[arm].start).or_default().push_str("when");
                 for (offset, _) in source[tokens[arm].start..tokens[arm].end].char_indices() {
