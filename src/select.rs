@@ -120,6 +120,19 @@ pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize>
     None
 }
 
+fn matching_select_end(tokens: &[Token<'_>], over: usize) -> Option<usize> {
+    let mut brace_depth = 0usize;
+    for (i, token) in tokens.iter().enumerate().skip(over + 1) {
+        match token.text {
+            "{" => brace_depth += 1,
+            "}" => brace_depth = brace_depth.checked_sub(1)?,
+            "end" if brace_depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
         "when" | "case" => tokens.get(index + 1).is_some_and(|token| {
@@ -255,7 +268,8 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         {
             open += 1;
         }
-        if tokens.get(open).is_none_or(|t| t.text != "{") {
+        let end_delimited = tokens.get(open).is_some_and(|t| t.text == "over");
+        if !end_delimited && tokens.get(open).is_none_or(|t| t.text != "{") {
             continue;
         }
         let error = |pos: usize, message: &str| {
@@ -264,8 +278,13 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 message,
             )
         };
-        let close = matching_brace(&tokens, open)
-            .ok_or_else(|| error(token.start, "unclosed static select"))?;
+        let close = if end_delimited {
+            matching_select_end(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select over (expected end)"))?
+        } else {
+            matching_brace(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select"))?
+        };
         break_after(source, tokens[open].end, &mut edits);
         break_before(source, tokens[close].start, &mut edits);
         let mut arm = open + 1;
