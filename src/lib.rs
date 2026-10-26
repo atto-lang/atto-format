@@ -675,11 +675,6 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
         content =
             canonicalize_legacy_catchall(&content, define_stack.last(), brace_stack.len(), lex);
-        content = canonicalize_end_delimited_select_arm_keyword(
-            &content,
-            define_stack.last(),
-            brace_stack.len(),
-        );
         let mut structural_lex = lex;
         let structural_content: String = scan_visible(&content, &mut structural_lex)
             .into_iter()
@@ -1149,38 +1144,6 @@ fn canonicalize_legacy_catchall(
 /// initializer `const T x = match<T> ... over` both own the following `end`.
 /// Tokenization prevents literals/comments or `foo.match(...)` from opening a
 /// fictitious block.
-
-fn canonicalize_end_delimited_select_arm_keyword(
-    line: &str,
-    frame: Option<&DefineFrame>,
-    brace_depth: usize,
-) -> String {
-    let Some(frame) = frame else {
-        return line.to_owned();
-    };
-    if frame.kind != DefineKind::Select || frame.brace_depth != brace_depth {
-        return line.to_owned();
-    }
-
-    let tokens = select::tokens(line);
-    let Some(first) = tokens.first() else {
-        return line.to_owned();
-    };
-    if first.text != "case"
-        || !tokens.get(1).is_some_and(|token| {
-            matches!(
-                token.text,
-                "readch" | "writech" | "await" | "timeout" | "cancelled"
-            )
-        })
-    {
-        return line.to_owned();
-    }
-
-    let mut result = line.to_owned();
-    result.replace_range(first.start..first.end, "when");
-    result
-}
 
 fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     let lexed = select::tokens(line);
