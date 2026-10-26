@@ -37,6 +37,19 @@ fn invalid_exports_are_not_repaired_into_different_semantics() {
 }
 
 #[test]
+fn contextual_symbol_binding_exports_are_not_reinterpreted_as_symbol_identity_syntax() {
+    for source in [
+        "export symbol as PublicSymbol;\n",
+        "export {symbol as PublicSymbol};\n",
+        "export symbol;\n",
+    ] {
+        let out = format_source(source).unwrap();
+        assert_eq!(out, source, "{source:?}");
+        assert_eq!(format_source(&out).unwrap(), out);
+    }
+}
+
+#[test]
 fn export_formatting_is_idempotent() {
     let once = format_source(
         "export(package) class {X, Y as Z,};\nexport symbol #ready as #ready;\n",
