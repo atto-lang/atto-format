@@ -529,6 +529,69 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
     Ok(output)
 }
 
+
+fn canonicalize_export_symbol_self_identity(source: &str) -> String {
+    fn export_head(token: &str) -> bool {
+        matches!(
+            token,
+            "export"
+                | "export[file]"
+                | "export[pkg]"
+                | "export[package]"
+                | "export(file)"
+                | "export(pkg)"
+                | "export(package)"
+        )
+    }
+
+    fn simple_symbol(token: &str) -> bool {
+        let Some(rest) = token.strip_prefix('#') else {
+            return false;
+        };
+        let mut chars = rest.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        (first == '_' || first.is_ascii_alphabetic())
+            && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    }
+
+    let mut out = String::with_capacity(source.len());
+    for (index, line) in source.split('\n').enumerate() {
+        if index != 0 {
+            out.push('\n');
+        }
+
+        let trimmed = line.trim();
+        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+        if tokens.len() != 5
+            || !export_head(tokens[0])
+            || tokens[1] != "symbol"
+            || tokens[3] != "as"
+        {
+            out.push_str(line);
+            continue;
+        }
+
+        let Some(rhs) = tokens[4].strip_suffix(';') else {
+            out.push_str(line);
+            continue;
+        };
+        if !simple_symbol(tokens[2]) || !simple_symbol(rhs) || tokens[2] != rhs {
+            out.push_str(line);
+            continue;
+        }
+
+        let indent_len = line.len() - line.trim_start().len();
+        out.push_str(&line[..indent_len]);
+        out.push_str(tokens[0]);
+        out.push_str(" symbol ");
+        out.push_str(tokens[2]);
+        out.push(';');
+    }
+    out
+}
+
 /// Format Oreslang source using the one canonical style.
 ///
 /// The current formatter is intentionally configuration-free:
@@ -567,6 +630,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
+    let normalized = canonicalize_export_symbol_self_identity(&normalized);
     // Legacy/hand-formatted explicit callable headers may already split their
     // parameter list across physical lines. Reassemble only that narrow header
     // shape first so the canonical wrapping rule sees the entire parameter set.
