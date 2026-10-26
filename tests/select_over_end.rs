@@ -162,3 +162,22 @@ fn malformed_unclosed_over_end_fails_closed() {
     .unwrap_err();
     assert!(error.message().contains("expected end"), "{error}");
 }
+
+#[test]
+fn invalid_default_order_fails_closed_for_braced_and_over_end_selects() {
+    for source in [
+        "select { default: {} case readch inbox: val value {} }\n",
+        "select over default: {} case readch inbox: val value {} end\n",
+    ] {
+        let error = format_source(source).unwrap_err();
+        assert!(error.message().contains("select default arm must be last"), "{source}: {error}");
+    }
+
+    for source in [
+        "select { default: {} default: {} }\n",
+        "select over default: {} default: {} end\n",
+    ] {
+        let error = format_source(source).unwrap_err();
+        assert!(error.message().contains("select permits at most one default arm"), "{source}: {error}");
+    }
+}
