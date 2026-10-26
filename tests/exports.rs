@@ -38,6 +38,8 @@ fn invalid_or_semantically_distinct_export_forms_are_never_repaired() {
         "export symbol #ready as #other;\n",
         "export symbol #ready as Ready;\n",
         "export symbol ready as #ready;\n",
+        "export symbol as PublicSymbol;\n",
+        "export {symbol as PublicSymbol};\n",
         "export const ready as 'ready';\n",
         "export string ready as 'ready';\n",
         "export class Foo as \"foo\";\n",
