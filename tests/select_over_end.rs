@@ -19,12 +19,18 @@ side_effect();
 end
 
 nb select random over
+case await future: int value -> {
+use(value);
+}
 default: {
 later();
 }
 end
 
 do nb select over
+case readch inbox: int value -> {
+use(value);
+}
 default: {
 later_side_effect();
 }
@@ -50,12 +56,18 @@ return;
   end
 
   nb select random over
+    when await future: int value -> {
+      use(value);
+    }
     default: {
       later();
     }
   end
 
   do nb select over
+    when readch inbox: int value -> {
+      use(value);
+    }
     default: {
       later_side_effect();
     }
