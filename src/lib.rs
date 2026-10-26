@@ -654,6 +654,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
         content = canonicalize_generator_sugar_line(&content, lex);
+        content = canonicalize_export_line(&content);
         let instance_member =
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
         content = canonicalize_declaration_line(
@@ -1665,6 +1666,50 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     out.push_str(&line[..words[index].start]);
     out.push_str("mtd ");
     out.push_str(&line[words[index].start..]);
+    out
+}
+
+fn canonicalize_export_line(line: &str) -> String {
+    let mut out = line.to_string();
+
+    // Scope aliases are syntax-only compatibility spellings. Canonical output
+    // always uses brackets and the short package spelling.
+    for (from, to) in [
+        ("export(package)", "export[pkg]"),
+        ("export(pkg)", "export[pkg]"),
+        ("export(file)", "export[file]"),
+        ("export[package]", "export[pkg]"),
+    ] {
+        if out.starts_with(from) {
+            out.replace_range(..from.len(), to);
+            break;
+        }
+    }
+
+    // Same-Symbol self identity is redundant, not an alias. Collapse only
+    // the exact simple form; invalid exports remain for compiler diagnostics.
+    let words: Vec<&str> = out.split_whitespace().collect();
+    if words.len() == 5
+        && words[0] == "export"
+        && words[1] == "symbol"
+        && words[3] == "as"
+        && words[2].starts_with('#')
+        && words[4].ends_with(';')
+    {
+        let rhs = &words[4][..words[4].len() - 1];
+        let lhs = words[2];
+        let name = lhs.strip_prefix('#').unwrap_or("");
+        if lhs == rhs
+            && !name.is_empty()
+            && name
+                .chars()
+                .enumerate()
+                .all(|(i, ch)| if i == 0 { ch == '_' || ch.is_ascii_alphabetic() } else { ch == '_' || ch.is_ascii_alphanumeric() })
+        {
+            return format!("export symbol {lhs};");
+        }
+    }
+
     out
 }
 
