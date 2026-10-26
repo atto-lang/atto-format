@@ -557,9 +557,23 @@ fn canonicalize_export_symbol_self_identity(source: &str) -> String {
     }
 
     let mut out = String::with_capacity(source.len());
+    let mut lex = LexState::default();
     for (index, line) in source.split('\n').enumerate() {
         if index != 0 {
             out.push('\n');
+        }
+
+        let initial = lex;
+        let mut next = lex;
+        let _ = scan_visible(line, &mut next);
+        lex = next;
+
+        // Never reinterpret text that begins inside a multiline comment or
+        // literal. This formatter helper is deliberately narrower than the
+        // compiler export parser.
+        if initial.block_comment || initial.quote.is_some() {
+            out.push_str(line);
+            continue;
         }
 
         let trimmed = line.trim();
