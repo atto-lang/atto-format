@@ -45,3 +45,14 @@ fn export_formatting_is_idempotent() {
     let twice = format_source(&once).unwrap();
     assert_eq!(once, twice);
 }
+
+
+#[test]
+fn multiline_block_comment_export_text_is_opaque() {
+    let source = "/*\nexport symbol #ready as #ready;\nexport(package) class X;\n*/\nfnc keep(): void { return; }\n";
+    let out = format_source(source).unwrap();
+    assert!(out.contains("export symbol #ready as #ready;"), "{out}");
+    assert!(out.contains("export(package) class X;"), "{out}");
+    assert!(!out.contains("/*\nexport symbol #ready;"), "{out}");
+    assert_eq!(format_source(&out).unwrap(), out);
+}
