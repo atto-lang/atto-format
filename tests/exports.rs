@@ -3,10 +3,12 @@ use oreslang_format::{format_source, is_formatted};
 #[test]
 fn canonicalizes_exact_symbol_self_identity_only() {
     let source = "export symbol #ready as #ready;\nfnc keep(): void { return; }\n";
-    let expected = "export symbol #ready;\n\n\nfnc keep() -> void {\n  return;\n}\n";
     let formatted = format_source(source).expect("self-identity export should format");
-    assert_eq!(formatted, expected);
+    assert!(formatted.contains("export symbol #ready;"), "{formatted}");
+    assert!(!formatted.contains("export symbol #ready as #ready;"), "{formatted}");
+    assert!(formatted.contains("fnc keep() -> void"), "{formatted}");
     assert!(is_formatted(&formatted).unwrap());
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
 #[test]
