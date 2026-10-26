@@ -137,3 +137,28 @@ end
 "#;
     assert_eq!(format_source(source).unwrap(), expected);
 }
+
+#[test]
+fn compact_over_end_arms_expand_and_case_canonicalizes_to_when() {
+    let source = "nb select over case readch inbox: val value { consume(value); } default: {} end\n";
+    let expected = r#"nb select over
+  when readch inbox: val value {
+    consume(value);
+  }
+  default: {
+  }
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn malformed_unclosed_over_end_fails_closed() {
+    let error = format_source(
+        "select over\ncase readch inbox: val value { consume(value); }\n",
+    )
+    .unwrap_err();
+    assert!(error.message().contains("expected end"), "{error}");
+}
