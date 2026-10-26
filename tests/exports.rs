@@ -76,6 +76,15 @@ fn export_order_grouping_and_aliases_are_preserved() {
 }
 
 #[test]
+fn multiline_block_comment_export_lines_are_opaque() {
+    let source = "/*\nexport symbol #ready as #ready;\n*/\nfnc keep(): void { return; }\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("export symbol #ready as #ready;"), "{formatted}");
+    assert!(!formatted.contains("/*\nexport symbol #ready;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
 fn strings_and_comments_containing_export_text_are_opaque() {
     let source = r#"fnc text(): string {
 return "export symbol #ready as #ready;";
