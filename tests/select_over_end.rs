@@ -140,7 +140,8 @@ end
 
 #[test]
 fn compact_over_end_arms_expand_and_case_canonicalizes_to_when() {
-    let source = "nb select over case readch inbox: val value { consume(value); } default: {} end\n";
+    let source =
+        "nb select over case readch inbox: val value { consume(value); } default: {} end\n";
     let expected = r#"nb select over
   when readch inbox: val value {
     consume(value);
@@ -156,10 +157,8 @@ end
 
 #[test]
 fn malformed_unclosed_over_end_fails_closed() {
-    let error = format_source(
-        "select over\ncase readch inbox: val value { consume(value); }\n",
-    )
-    .unwrap_err();
+    let error = format_source("select over\ncase readch inbox: val value { consume(value); }\n")
+        .unwrap_err();
     assert!(error.message().contains("expected end"), "{error}");
 }
 
@@ -170,7 +169,10 @@ fn invalid_default_order_fails_closed_for_braced_and_over_end_selects() {
         "select over default: {} case readch inbox: val value {} end\n",
     ] {
         let error = format_source(source).unwrap_err();
-        assert!(error.message().contains("select default arm must be last"), "{source}: {error}");
+        assert!(
+            error.message().contains("select default arm must be last"),
+            "{source}: {error}"
+        );
     }
 
     for source in [
@@ -178,6 +180,11 @@ fn invalid_default_order_fails_closed_for_braced_and_over_end_selects() {
         "select over default: {} default: {} end\n",
     ] {
         let error = format_source(source).unwrap_err();
-        assert!(error.message().contains("select permits at most one default arm"), "{source}: {error}");
+        assert!(
+            error
+                .message()
+                .contains("select permits at most one default arm"),
+            "{source}: {error}"
+        );
     }
 }
