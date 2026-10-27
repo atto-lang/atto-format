@@ -122,12 +122,39 @@ pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize>
 
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
-        "when" | "case" => tokens.get(index + 1).is_some_and(|token| {
-            matches!(
-                token.text,
-                "readch" | "writech" | "await" | "timeout" | "cancelled"
-            )
-        }),
+        "when" | "case" => {
+            if tokens.get(index + 1).is_some_and(|token| {
+                matches!(
+                    token.text,
+                    "readch" | "writech" | "await" | "timeout" | "cancelled"
+                )
+            }) {
+                return true;
+            }
+            // Generic Selectable arms are recognized only by the explicit
+            // typed-arrow shape, so an ordinary identifier named 'when'
+            // inside a legacy unbraced body is not mistaken for a new arm.
+            let mut nesting = Vec::new();
+            let mut separator = false;
+            for cursor in index + 1..tokens.len().min(index + 60) {
+                let text = tokens[cursor].text;
+                match text {
+                    "(" | "[" => nesting.push(text),
+                    ")" | "]" if !pop_matching(&mut nesting, text) => return false,
+                    ":" if nesting.is_empty() => separator = true,
+                    "-" if separator
+                        && nesting.is_empty()
+                        && tokens.get(cursor + 1).is_some_and(|t| t.text == ">")
+                        && tokens.get(cursor + 2).is_some_and(|t| t.text == "{") =>
+                    {
+                        return true;
+                    }
+                    "{" | "}" | ";" if nesting.is_empty() => return false,
+                    _ => {}
+                }
+            }
+            false
+        }
         "default" => tokens.get(index + 1).is_some_and(|token| token.text == ":"),
         _ => false,
     }
@@ -288,17 +315,10 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             let read = operation == Some("readch");
             let await_future = operation == Some("await");
             let readiness_without_colon = matches!(operation, Some("timeout" | "cancelled"));
-            if matches!(arm_keyword, "when" | "case")
-                && !matches!(
-                    operation,
-                    Some("readch" | "writech" | "await" | "timeout" | "cancelled")
-                )
-            {
-                return Err(error(
-                    tokens[arm].start,
-                    "select arm must start with readch, writech, await, timeout, or cancelled",
-                ));
-            }
+            let known_operation = matches!(
+                operation,
+                Some("readch" | "writech" | "await" | "timeout" | "cancelled")
+            );
 
             let (body, header_end) = if readiness_without_colon {
                 // timeout/cancelled have no ':' separator and the compiler
@@ -379,6 +399,12 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     (body, tokens[body - 1].end)
                 } else {
+                    if matches!(arm_keyword, "when" | "case") && !known_operation {
+                        return Err(error(
+                            tokens[arm].start,
+                            "select arm must be readch, writech, await, timeout, cancelled, or a typed Selectable arm using '->'",
+                        ));
+                    }
                     if invalid_legacy_arm_header(&tokens, header + 1, close, read || await_future) {
                         return Err(error(
                             tokens[arm].start,
