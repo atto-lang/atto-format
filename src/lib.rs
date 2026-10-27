@@ -3974,6 +3974,8 @@ mod tests {
 "#;
 
         let got = format_source(src).unwrap();
+        assert!(got.contains("gen* values() -> Iterator<int>"));
+        assert!(!got.contains("generator fnc values"));
         assert!(got.contains("rt cooperate;"));
         assert!(got.contains("rt cooperate();"));
         assert!(got.contains("yield 1;"));
