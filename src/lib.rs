@@ -1144,7 +1144,6 @@ fn canonicalize_legacy_catchall(
 /// initializer `const T x = match<T> ... over` both own the following `end`.
 /// Tokenization prevents literals/comments or `foo.match(...)` from opening a
 /// fictitious block.
-
 fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     let lexed = select::tokens(line);
     let mut index = 0usize;
