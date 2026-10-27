@@ -120,6 +120,19 @@ pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize>
     None
 }
 
+fn matching_select_end(tokens: &[Token<'_>], over: usize) -> Option<usize> {
+    let mut brace_depth = 0usize;
+    for (i, token) in tokens.iter().enumerate().skip(over + 1) {
+        match token.text {
+            "{" => brace_depth += 1,
+            "}" => brace_depth = brace_depth.checked_sub(1)?,
+            "end" if brace_depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
         "when" | "case" => {
@@ -282,7 +295,8 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         {
             open += 1;
         }
-        if tokens.get(open).is_none_or(|t| t.text != "{") {
+        let end_delimited = tokens.get(open).is_some_and(|t| t.text == "over");
+        if !end_delimited && tokens.get(open).is_none_or(|t| t.text != "{") {
             continue;
         }
         let error = |pos: usize, message: &str| {
@@ -291,11 +305,17 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 message,
             )
         };
-        let close = matching_brace(&tokens, open)
-            .ok_or_else(|| error(token.start, "unclosed static select"))?;
+        let close = if end_delimited {
+            matching_select_end(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select over (expected end)"))?
+        } else {
+            matching_brace(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select"))?
+        };
         break_after(source, tokens[open].end, &mut edits);
         break_before(source, tokens[close].start, &mut edits);
         let mut arm = open + 1;
+        let mut seen_default = false;
         while arm < close {
             if !matches!(tokens[arm].text, "when" | "case" | "default") {
                 return Err(error(
@@ -303,8 +323,21 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     "expected when/case/default inside select",
                 ));
             }
+            if seen_default {
+                return Err(error(
+                    tokens[arm].start,
+                    if tokens[arm].text == "default" {
+                        "select permits at most one default arm"
+                    } else {
+                        "select default arm must be last"
+                    },
+                ));
+            }
             break_before(source, tokens[arm].start, &mut edits);
             let arm_keyword = tokens[arm].text;
+            if arm_keyword == "default" {
+                seen_default = true;
+            }
             if arm_keyword == "case" {
                 edits.entry(tokens[arm].start).or_default().push_str("when");
                 for (offset, _) in source[tokens[arm].start..tokens[arm].end].char_indices() {
