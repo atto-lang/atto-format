@@ -3301,10 +3301,17 @@ fn canonicalize_generator_sugar_line(line: &str, initial: LexState) -> String {
         let kind_before = words[..index]
             .iter()
             .any(|part| is_callable_kind(&line[part.start..part.end]));
-        let kind_after = words.iter().skip(index + 1).any(|part| {
+        let mut kind_after = false;
+        for part in words.iter().skip(index + 1) {
             let next_word = &line[part.start..part.end];
-            is_modifier_word(next_word) && is_callable_kind(next_word)
-        });
+            if !is_modifier_word(next_word) {
+                break;
+            }
+            if is_callable_kind(next_word) {
+                kind_after = true;
+                break;
+            }
+        }
 
         let next_start = words.get(index + 1).map_or(line.len(), |part| part.start);
         let gap = &line[span.end..next_start];
