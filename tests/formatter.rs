@@ -157,25 +157,51 @@ yield* sync_values();
 return;
 }
 
+generator routine legacy_values(): int {
+yield 7;
+return;
+}
+
+pub gen* canonical(): Iterator<int> {
+yield 8;
+return;
+}
+
 // gen* fnc fake() should stay a comment
+fnc generator(int value) -> int {
+return value;
+}
 fnc math(int gen, int value) -> int {
 return gen * value;
 }
 "#;
-    let expected = r#"generator fnc sync_values() -> Iterator<int> {
+    let expected = r#"gen* sync_values() -> Iterator<int> {
   rt cooperate;
   yield* inner();
   return;
 }
 
 
-async generator fnc async_values() -> AsyncIterator<int> {
+async gen* async_values() -> AsyncIterator<int> {
   rt cooperate();
   yield* sync_values();
   return;
 }
 
+gen* legacy_values() -> int {
+  yield 7;
+  return;
+}
+
+pub gen* canonical() -> Iterator<int> {
+  yield 8;
+  return;
+}
+
 // gen* fnc fake() should stay a comment
+fnc generator(int value) -> int {
+  return value;
+}
 fnc math(int gen, int value) -> int {
   return gen * value;
 }
