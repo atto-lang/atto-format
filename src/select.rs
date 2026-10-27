@@ -120,14 +120,54 @@ pub(crate) fn matching_brace(tokens: &[Token<'_>], open: usize) -> Option<usize>
     None
 }
 
+fn matching_select_end(tokens: &[Token<'_>], over: usize) -> Option<usize> {
+    let mut brace_depth = 0usize;
+    for (i, token) in tokens.iter().enumerate().skip(over + 1) {
+        match token.text {
+            "{" => brace_depth += 1,
+            "}" => brace_depth = brace_depth.checked_sub(1)?,
+            "end" if brace_depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
-        "when" | "case" => tokens.get(index + 1).is_some_and(|token| {
-            matches!(
-                token.text,
-                "readch" | "writech" | "await" | "timeout" | "cancelled"
-            )
-        }),
+        "when" | "case" => {
+            if tokens.get(index + 1).is_some_and(|token| {
+                matches!(
+                    token.text,
+                    "readch" | "writech" | "await" | "timeout" | "cancelled"
+                )
+            }) {
+                return true;
+            }
+            // Generic Selectable arms are recognized only by the explicit
+            // typed-arrow shape, so an ordinary identifier named 'when'
+            // inside a legacy unbraced body is not mistaken for a new arm.
+            let mut nesting = Vec::new();
+            let mut separator = false;
+            for cursor in index + 1..tokens.len().min(index + 60) {
+                let text = tokens[cursor].text;
+                match text {
+                    "(" | "[" => nesting.push(text),
+                    ")" | "]" if !pop_matching(&mut nesting, text) => return false,
+                    ":" if nesting.is_empty() => separator = true,
+                    "-" if separator
+                        && nesting.is_empty()
+                        && tokens.get(cursor + 1).is_some_and(|t| t.text == ">")
+                        && tokens.get(cursor + 2).is_some_and(|t| t.text == "{") =>
+                    {
+                        return true;
+                    }
+                    "{" | "}" | ";" if nesting.is_empty() => return false,
+                    _ => {}
+                }
+            }
+            false
+        }
         "default" => tokens.get(index + 1).is_some_and(|token| token.text == ":"),
         _ => false,
     }
@@ -255,7 +295,8 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         {
             open += 1;
         }
-        if tokens.get(open).is_none_or(|t| t.text != "{") {
+        let end_delimited = tokens.get(open).is_some_and(|t| t.text == "over");
+        if !end_delimited && tokens.get(open).is_none_or(|t| t.text != "{") {
             continue;
         }
         let error = |pos: usize, message: &str| {
@@ -264,11 +305,17 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                 message,
             )
         };
-        let close = matching_brace(&tokens, open)
-            .ok_or_else(|| error(token.start, "unclosed static select"))?;
+        let close = if end_delimited {
+            matching_select_end(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select over (expected end)"))?
+        } else {
+            matching_brace(&tokens, open)
+                .ok_or_else(|| error(token.start, "unclosed static select"))?
+        };
         break_after(source, tokens[open].end, &mut edits);
         break_before(source, tokens[close].start, &mut edits);
         let mut arm = open + 1;
+        let mut seen_default = false;
         while arm < close {
             if !matches!(tokens[arm].text, "when" | "case" | "default") {
                 return Err(error(
@@ -276,8 +323,21 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     "expected when/case/default inside select",
                 ));
             }
+            if seen_default {
+                return Err(error(
+                    tokens[arm].start,
+                    if tokens[arm].text == "default" {
+                        "select permits at most one default arm"
+                    } else {
+                        "select default arm must be last"
+                    },
+                ));
+            }
             break_before(source, tokens[arm].start, &mut edits);
             let arm_keyword = tokens[arm].text;
+            if arm_keyword == "default" {
+                seen_default = true;
+            }
             if arm_keyword == "case" {
                 edits.entry(tokens[arm].start).or_default().push_str("when");
                 for (offset, _) in source[tokens[arm].start..tokens[arm].end].char_indices() {
@@ -288,17 +348,10 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             let read = operation == Some("readch");
             let await_future = operation == Some("await");
             let readiness_without_colon = matches!(operation, Some("timeout" | "cancelled"));
-            if matches!(arm_keyword, "when" | "case")
-                && !matches!(
-                    operation,
-                    Some("readch" | "writech" | "await" | "timeout" | "cancelled")
-                )
-            {
-                return Err(error(
-                    tokens[arm].start,
-                    "select arm must start with readch, writech, await, timeout, or cancelled",
-                ));
-            }
+            let known_operation = matches!(
+                operation,
+                Some("readch" | "writech" | "await" | "timeout" | "cancelled")
+            );
 
             let (body, header_end) = if readiness_without_colon {
                 // timeout/cancelled have no ':' separator and the compiler
@@ -379,6 +432,12 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     (body, tokens[body - 1].end)
                 } else {
+                    if matches!(arm_keyword, "when" | "case") && !known_operation {
+                        return Err(error(
+                            tokens[arm].start,
+                            "select arm must be readch, writech, await, timeout, cancelled, or a typed Selectable arm using '->'",
+                        ));
+                    }
                     if invalid_legacy_arm_header(&tokens, header + 1, close, read || await_future) {
                         return Err(error(
                             tokens[arm].start,

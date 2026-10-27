@@ -4,7 +4,12 @@ use oreslang_format::format_source;
 fn canonicalizes_export_scope_aliases_without_reordering_items() {
     let input = "export(package) class {X, Y as Z,};\nexport(file) type Internal;\n";
     let out = format_source(input).unwrap();
-    assert!(out.contains("export[pkg] class {X, Y as Z,};"));
+    // The existing brace formatter expands grouped exports across lines.
+    // Preserve item order and punctuation while canonicalizing the scope.
+    assert!(
+        out.contains("export[pkg] class {\n  X, Y as Z,\n};"),
+        "{out}"
+    );
     assert!(out.contains("export[file] type Internal;"));
     assert!(out.find("X").unwrap() < out.find("Y as Z").unwrap());
 }
@@ -51,14 +56,12 @@ fn contextual_symbol_binding_exports_are_not_reinterpreted_as_symbol_identity_sy
 
 #[test]
 fn export_formatting_is_idempotent() {
-    let once = format_source(
-        "export(package) class {X, Y as Z,};\nexport symbol #ready as #ready;\n",
-    )
-    .unwrap();
+    let once =
+        format_source("export(package) class {X, Y as Z,};\nexport symbol #ready as #ready;\n")
+            .unwrap();
     let twice = format_source(&once).unwrap();
     assert_eq!(once, twice);
 }
-
 
 #[test]
 fn multiline_block_comment_export_text_is_opaque() {

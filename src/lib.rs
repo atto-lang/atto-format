@@ -1150,7 +1150,7 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     let mut index = 0usize;
     match lexed.first()?.text {
         "return" | "do" => index = 1,
-        "match" | "switch" | "select" => {}
+        "nb" | "try" | "match" | "switch" | "select" => {}
         _ => {
             // Source declaration or assignment: only a direct RHS dispatch
             // expression may own the next end. Do not mistake '==' for '='.
@@ -1162,6 +1162,18 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
             }
             index = eq + 1;
         }
+    }
+
+    // Static select's wait-mode prefix belongs to the dispatch header. This
+    // must work both at statement start (`nb select over`) and after the
+    // procedural marker (`do nb select over`). Without this, the formatter
+    // leaves the corresponding `end` orphaned and rejects otherwise valid
+    // compiler syntax.
+    if lexed
+        .get(index)
+        .is_some_and(|token| matches!(token.text, "nb" | "try"))
+    {
+        index += 1;
     }
 
     match lexed.get(index)?.text {
@@ -1701,10 +1713,13 @@ fn canonicalize_export_line(line: &str) -> String {
         let name = lhs.strip_prefix('#').unwrap_or("");
         if lhs == rhs
             && !name.is_empty()
-            && name
-                .chars()
-                .enumerate()
-                .all(|(i, ch)| if i == 0 { ch == '_' || ch.is_ascii_alphabetic() } else { ch == '_' || ch.is_ascii_alphanumeric() })
+            && name.chars().enumerate().all(|(i, ch)| {
+                if i == 0 {
+                    ch == '_' || ch.is_ascii_alphabetic()
+                } else {
+                    ch == '_' || ch.is_ascii_alphanumeric()
+                }
+            })
         {
             return format!("export symbol {lhs};");
         }

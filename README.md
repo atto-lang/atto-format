@@ -42,8 +42,8 @@ the full field contract.
 
 - two spaces per indentation level, never tabs for indentation;
 - callable parameter lists are expanded one parameter per line when they have 4+ parameters, or when they have 3+ parameters and either a parameter name contains at least two underscores or the combined parameter-name width exceeds 60 columns; continuation parameters are indented one additional two-space level and the closing `)` returns to the callable declaration indentation;
-- static `select`, `nb select`, and `try select` arms are indented one level;
-- every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
+- static `select`, `nb select`, and `try select` arms are indented one level for both `{ ... }` and `over ... end` outer delimiters;
+- every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when` in both delimiter styles;
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
 - braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
@@ -116,7 +116,8 @@ single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
 unchanged; the deprecation applies only to using `do` as an if/branch
 introducer.
 
-Static select arms use the same nesting rules as other blocks:
+Static select arms use the same nesting rules as other blocks. The outer
+selection may be braced or end-delimited:
 
 ```ores
 nb select {
@@ -126,6 +127,14 @@ nb select {
   default: {
   }
 }
+
+nb select over
+  when readch inbox: val value {
+    nb writech replies, value * 10;
+  }
+  default: {
+  }
+end
 ```
 
 The formatter accepts both `when` and legacy `case` for static select arms,
