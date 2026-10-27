@@ -2099,6 +2099,21 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         return None;
     }
 
+    // "fnc generator(...)" names an ordinary callable "generator". The same
+    // contextual word is a generator modifier only when another callable name
+    // follows it (or when the starred prepass has rewritten gen*/generator*).
+    for (index, span) in prefix.iter().enumerate() {
+        if &line[span.start..span.end] != "generator" {
+            continue;
+        }
+        let kind_before = prefix[..index].iter().any(|part| {
+            matches!(&line[part.start..part.end], "fnc" | "routine")
+        });
+        if kind_before && line[span.end..].trim_start().starts_with('(') {
+            return None;
+        }
+    }
+
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
