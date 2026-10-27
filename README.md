@@ -65,7 +65,7 @@ the full field contract.
   - classes: `define [pub|private] [abstract] class Name ... as`;
   - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
   - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
-  - package/module callables: `[pub|private] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - package/module callables use the ordinary `fnc|routine` modifier order; generator declarations canonicalize separately to `[pub|private] [static] [async|suspend] gen* name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
   - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
@@ -164,11 +164,13 @@ multiline expression body, the formatter adds one continuation indent and
 fails closed if the containing statement never reaches its required explicit
 semicolon. Block lambdas keep explicit `return` statements.
 
-Generator declaration aliases accepted by the compiler are normalized:
-`fnc gen* values()` and `fnc generator* values()` become
-`generator fnc values()`. Delegating `yield* source;` is preserved, and only
-the scheduler compatibility spelling `rt yield` is rewritten to
-`rt cooperate`.
+Generator declaration aliases accepted by the compiler are normalized to the
+canonical bare marker: `fnc gen* values()`, `fnc generator* values()`,
+`generator fnc values()`, and `generator routine values()` become
+`gen* values()`. Already-canonical `gen*` stays idempotent, while a callable
+literally named `generator` is preserved. Delegating `yield* source;` is
+preserved, and only the scheduler compatibility spelling `rt yield` is
+rewritten to `rt cooperate`.
 
 The formatter is intentionally conservative about grammar that is still
 changing. It reorders only recognized declaration-modifier prefixes; imports,
