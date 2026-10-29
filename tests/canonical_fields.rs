@@ -201,7 +201,7 @@ fn typed_initialize_end_headers_are_canonical_and_idempotent() {
         "initialize(int id) -> void ::",
     ] {
         let source = format!(
-            "define class Connection as\\n  final int connection_id;\\n  {header}\\n    self.connection_id = id;\\n  end\\nend\\n"
+            "define class Connection as\n  final int connection_id;\n  {header}\n    self.connection_id = id;\n  end\nend\n"
         );
         let formatted = format_source(&source).unwrap();
         assert!(formatted.contains("initialize(int id) -> void ::"), "{formatted}");
@@ -212,15 +212,15 @@ fn typed_initialize_end_headers_are_canonical_and_idempotent() {
 #[test]
 fn rejects_callable_as_without_touching_type_header_as() {
     assert!(format_source(
-        "define class Connection as\\n  initialize(int id) -> void as\\n    self.id = id;\\n  end\\nend\\n"
+        "define class Connection as\n  initialize(int id) -> void as\n    self.id = id;\n  end\nend\n"
     ).is_err());
-    assert!(format_source("fnc f() -> int as return 1; end\\n").is_err());
-    assert!(format_source("define class Connection as\\nend\\n").is_ok());
+    assert!(format_source("fnc f() -> int as return 1; end\n").is_err());
+    assert!(format_source("define class Connection as\nend\n").is_ok());
 }
 
 #[test]
 fn leaves_braced_initializer_body_intact_until_ast_backed_conversion() {
-    let source = "define class C as\\n  initialize(int id): void {\\n    return;\\n  }\\nend\\n";
+    let source = "define class C as\n  initialize(int id): void {\n    return;\n  }\nend\n";
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("initialize(int id) -> void {"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
