@@ -660,7 +660,10 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             instance_member,
             keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
-        if instance_member && pending_callable_parameter_depth == 0 {
+        if keyword_stack.is_empty()
+            && in_direct_storage_container(&define_stack, &brace_stack)
+            && pending_callable_parameter_depth == 0
+        {
             content = canonicalize_initialize_header(&content, lex, line_no)?;
         }
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
