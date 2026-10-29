@@ -456,16 +456,13 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
             output.push_str(line);
             continue;
         };
-        let as_span = words
-            .iter()
-            .copied()
+        let as_span = words.iter().copied()
             .find(|span| span.start > close && word(*span) == "as");
-        let double_colon_span = visible_double_colon_span(line, close, initial);
-        let Some(separator_span) = [as_span, double_colon_span]
-            .into_iter()
-            .flatten()
-            .min_by_key(|span| span.start)
-        else {
+        if as_span.is_some() {
+            return Err(FormatError::new(line_index + 1,
+                "callable bodies cannot use 'as'; use '::'"));
+        }
+        let Some(separator_span) = visible_double_colon_span(line, close, initial) else {
             output.push_str(line);
             continue;
         };
@@ -514,7 +511,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         {
             return Err(FormatError::new(
                 line_index + 1,
-                "callable body separator must be exactly one 'as' or one contiguous '::'",
+                "callable body separator must be one contiguous '::'",
             ));
         }
         output.push_str(line[..separator_span.end].trim_end());
@@ -663,6 +660,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             instance_member,
             keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
+        if instance_member && pending_callable_parameter_depth == 0 {
+            content = canonicalize_initialize_header(&content, lex, line_no)?;
+        }
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
         }
@@ -1381,22 +1381,10 @@ fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<us
 
 fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
     let separator = canonical_storage_field_separator(line, initial)?;
-    // A legacy uninitialized val field may still be filled in its class
-    // constructor. Rewriting it to final mut would manufacture an invalid
-    // declaration before the coordinated breaking constructor migration.
-    // Preserve ALL uninitialized member spellings until both compilers
-    // enforce declaration-site initialization consistently.
-    if line.as_bytes().get(separator) == Some(&b';') {
-        return None;
-    }
     let lhs = &line[..separator];
-    if lhs
-        .chars()
-        .any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
-        || lhs.contains("//")
-        || lhs.contains("/*")
-        || lhs.contains("->")
-        || lhs.contains("=>")
+    if lhs.chars().any(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
+        || lhs.contains("//") || lhs.contains("/*")
+        || lhs.contains("->") || lhs.contains("=>")
     {
         return None;
     }
@@ -1416,30 +1404,39 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
         return None;
     }
     let binding = match &lhs[words[cursor].start..words[cursor].end] {
-        "const" | "final" => {
-            cursor += 1;
-            Some("final")
-        }
         "val" => {
             cursor += 1;
-            Some("final mut")
+            Some("val")
         }
         "let" => {
             cursor += 1;
-            None
+            Some("let")
+        }
+        "final" => {
+            cursor += 1;
+            Some("final")
+        }
+        "const" => {
+            cursor += 1;
+            Some("const")
         }
         _ => None,
     };
-    let mut mutable = false;
-    if cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut" {
-        if binding == Some("final mut") {
-            return None; // duplicate val mut remains a compiler error
+    // Explicit 'let', 'final', and 'const' are semantic, not style choices.
+    // A bare field is already VAL; only explicit VAL is redundant.
+    let mutable = cursor < words.len()
+        && &lhs[words[cursor].start..words[cursor].end] == "mut";
+    if mutable {
+        // Java treats plain VAL as a mutable referent already. Preserve the
+        // explicit spelling for the compiler to diagnose val mut rather than
+        // erasing a possibly-invalid modifier sequence.
+        if binding == Some("val") {
+            return None;
         }
-        mutable = true;
         cursor += 1;
     }
     if words.len() < cursor + 2 {
-        return None; // not a typed field (e.g. legacy name: Type)
+        return None;
     }
     let field = words.last()?;
     if !lhs[field.end..].trim().is_empty() {
@@ -1449,20 +1446,21 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
     if type_and_name.is_empty() || type_and_name.contains("::") {
         return None;
     }
-    // The declaration type may contain generic args, but the text before
-    // the name must not itself contain an initializer or a callable.
+    // Uninitialized fields without VAL need no rewrite. In particular,
+    // leave malformed explicit modifiers alone for the compiler diagnostics.
+    if line.as_bytes().get(separator) == Some(&b';') && binding != Some("val") {
+        return None;
+    }
     let mut prefix = String::new();
     if let Some(vis) = visibility {
         prefix.push_str(vis);
         prefix.push(' ');
     }
-    if let Some(binding) = binding {
+    if let Some(binding) = binding.filter(|b| *b != "val") {
         prefix.push_str(binding);
         prefix.push(' ');
-    } else if mutable {
-        prefix.push_str("mut ");
     }
-    if mutable && binding == Some("final") {
+    if mutable {
         prefix.push_str("mut ");
     }
     prefix.push_str(type_and_name);
@@ -2473,6 +2471,41 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
     }
 
     newest.map(|(_, allowed)| allowed).unwrap_or(true)
+}
+
+/// Restrict initializer rewriting to direct class members and a visible
+/// typed header. No source-body or comment token is rewritten by guesswork.
+fn canonicalize_initialize_header(
+    line: &str, initial: LexState, line_no: usize,
+) -> Result<String, FormatError> {
+    if !starts_word(line, "initialize") {
+        return Ok(line.to_string());
+    }
+    let Some(close) = callable_parameter_close(line, line.len(), initial) else {
+        return Ok(line.to_string());
+    };
+    let tail = &line[close + 1..];
+    let mut lex = LexState::default();
+    let structural: String = scan_visible(tail, &mut lex).into_iter().collect();
+    if contains_word(&structural, "as") {
+        return Err(FormatError::new(
+            line_no,
+            "initialize bodies cannot use 'as'; use '-> void ::' or a braced body",
+        ));
+    }
+    let canonical = canonicalize_callable_arrow(line, "->", initial);
+    let Some(next_close) = callable_parameter_close(&canonical, canonical.len(), initial) else {
+        return Ok(canonical);
+    };
+    let suffix = &canonical[next_close + 1..];
+    // Preserve comments instead of moving a body marker through them.
+    if contains_visible_comment(suffix, LexState::default()) {
+        return Ok(canonical);
+    }
+    if suffix.trim() == "-> void" {
+        return Ok(format!("{canonical} ::"));
+    }
+    Ok(canonical)
 }
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
