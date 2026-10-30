@@ -456,13 +456,20 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
             output.push_str(line);
             continue;
         };
-        let as_span = words.iter().copied()
-            .find(|span| span.start > close && word(*span) == "as");
-        if as_span.is_some() {
+        let double_colon_span = visible_double_colon_span(line, close, initial);
+        // Only 'as' before the body delimiter is a forbidden callable
+        // separator. 'as' after '::' belongs to an ordinary body expression
+        // (e.g. an if-binding) and must not be rejected by the formatter.
+        let invalid_as_separator = words.iter().copied().any(|span| {
+            span.start > close
+                && word(span) == "as"
+                && double_colon_span.is_none_or(|delimiter| span.start < delimiter.start)
+        });
+        if invalid_as_separator {
             return Err(FormatError::new(line_index + 1,
                 "callable bodies cannot use 'as'; use '::'"));
         }
-        let Some(separator_span) = visible_double_colon_span(line, close, initial) else {
+        let Some(separator_span) = double_colon_span else {
             output.push_str(line);
             continue;
         };
