@@ -4622,6 +4622,23 @@ end
     }
 
     #[test]
+    fn initializer_header_canonicalizes_visibilities_and_leaves_methods_unchanged() {
+        for visibility in ["pub ", "private "] {
+            let source = format!("{visibility}initialize(int id): void");
+            let expected = format!("{visibility}initialize(int id) -> void ::");
+            let result = canonicalize_initialize_header(
+                &source, LexState::default(), 1
+            ).unwrap();
+            assert_eq!(result, expected);
+        }
+        let ordinary_method = "pub initialize_now(int id): void";
+        assert_eq!(
+            canonicalize_initialize_header(ordinary_method, LexState::default(), 1).unwrap(),
+            ordinary_method
+        );
+    }
+
+    #[test]
     fn initializer_header_allows_as_in_body_but_not_as_separator() {
         let typed = "initialize(int id): void :: if maybe as const value then";
         let canonical = canonicalize_initialize_header(typed, LexState::default(), 1).unwrap();
