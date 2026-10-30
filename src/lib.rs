@@ -2494,10 +2494,16 @@ fn canonicalize_initialize_header(
     let Some(close) = callable_parameter_close(line, line.len(), initial) else {
         return Ok(line.to_string());
     };
-    let tail = &line[close + 1..];
-    let mut lex = LexState::default();
-    let structural: String = scan_visible(tail, &mut lex).into_iter().collect();
-    if contains_word(&structural, "as") {
+    let delimiter = visible_double_colon_span(line, close, initial);
+    // A visible 'as' before the body delimiter is an invalid initializer
+    // separator. 'as' inside the body may instead be a valid if-binding or
+    // checked cast, including compact single-line initializer bodies.
+    let invalid_as_separator = visible_word_spans(line, initial).into_iter().any(|span| {
+        span.start > close
+            && &line[span.start..span.end] == "as"
+            && delimiter.is_none_or(|marker| span.start < marker.start)
+    });
+    if invalid_as_separator {
         return Err(FormatError::new(
             line_no,
             "initialize bodies cannot use 'as'; use '-> void ::' or a braced body",
