@@ -225,3 +225,16 @@ fn leaves_braced_initializer_body_intact_until_ast_backed_conversion() {
     assert!(formatted.contains("initialize(int id) -> void {"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn compact_callable_as_in_body_is_not_mistaken_for_a_header_separator() {
+    let source = "fnc handle() -> void :: if maybe as const value then return; fi end\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("as const value"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn compact_callable_header_still_rejects_as_separator() {
+    assert!(format_source("fnc handle() -> void as return; end\n").is_err());
+}
