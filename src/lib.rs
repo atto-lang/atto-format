@@ -2488,7 +2488,15 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
 fn canonicalize_initialize_header(
     line: &str, initial: LexState, line_no: usize,
 ) -> Result<String, FormatError> {
-    if !starts_word(line, "initialize") {
+    // Constructor visibility prefixes are part of the class-member
+    // declaration and must not prevent canonicalizing its return/body marker.
+    // Never rewrite ordinary methods merely containing the word initialize.
+    let header = line.trim_start();
+    let header = header
+        .strip_prefix("pub ")
+        .or_else(|| header.strip_prefix("private "))
+        .unwrap_or(header);
+    if !starts_word(header, "initialize") {
         return Ok(line.to_string());
     }
     let Some(close) = callable_parameter_close(line, line.len(), initial) else {
