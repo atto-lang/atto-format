@@ -4612,4 +4612,16 @@ end
         assert!(got.contains("fnc retry() => bool;"));
         assert!(got.contains("pub name() -> String {"));
     }
+
+    #[test]
+    fn initializer_header_allows_as_in_body_but_not_as_separator() {
+        let typed = "initialize(int id): void :: if maybe as const value then";
+        let canonical = canonicalize_initialize_header(typed, LexState::default(), 1).unwrap();
+        assert_eq!(
+            canonical,
+            "initialize(int id) -> void :: if maybe as const value then"
+        );
+        let invalid = "initialize(int id) -> void as return;";
+        assert!(canonicalize_initialize_header(invalid, LexState::default(), 1).is_err());
+    }
 }
