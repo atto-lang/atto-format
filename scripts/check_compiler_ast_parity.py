@@ -348,7 +348,7 @@ def audit_fixture(path, formatter, commands, timeout, expected_sha256=None,
                                 and semantic_ast_sha256(ast)
                                 != expected_ast_sha256):
                             goldens_match = False
-                    except InvalidAst:
+                    except (InvalidAst, RecursionError):
                         status = "invalid_ast"
                 entry[phase + "_status"] = status
             entry["equivalent"] = (entry["original_status"] == "ok"
