@@ -8,6 +8,14 @@ The versioned tests/formatter_fixture_manifest_v1.json pins each positive
 and negative fixture by name and SHA-256. A changed, added, deleted or
 unlisted .ores file blocks verification until the reviewed manifest is updated.
 
+A second, independently reviewed semantic-AST golden manifest is required
+for the full CLI gate. There are intentionally NO checked-in production AST
+goldens yet, because no verified five-backend canonical AST adapter receipt
+has been obtained. The CLI's required --golden-manifest argument must point
+to a reviewed JSON file matching all positive fixture names. A full pass is
+not possible without that manifest; an invented or toy AST digest is not
+production evidence.
+
 This opt-in gate compares original and formatted semantic ASTs for every
 backend, and then compares the canonical semantic AST across Java, LLVM,
 WASM, .NET and Forge. All five are required: missing commands, unsupported
@@ -57,11 +65,32 @@ python3 scripts/check_compiler_ast_parity.py \
   --ast-command 'forge=<approved-forge-adapter> {source}' \
   --cases tests/compiler_parity_cases \
   --negative-cases tests/compiler_negative_cases \
-  --fixture-manifest tests/formatter_fixture_manifest_v1.json
+  --fixture-manifest tests/formatter_fixture_manifest_v1.json \
+  --golden-manifest <reviewed-semantic-ast-goldens.json>
 ~~~
 
 These placeholders are not working commands. Until all five compilers provide
 reviewed adapters, this real-backend gate is NOT EXECUTED and NOT PASSED.
+
+The independent golden JSON envelope is:
+
+~~~json
+{
+  "schema": "oreslang-semantic-ast-golden-v1",
+  "cases": [
+    {"name": "constant-main.ores", "ast_sha256": "<reviewed-64-hex-digest>"}
+  ]
+}
+~~~
+
+This example is **not** a valid complete manifest or a digest value. The
+file must enumerate every positive fixture, sorted by name, with a digest
+computed from the typed and sorted semantic-AST signature as implemented in
+semantic_ast_sha256(). Provenance must come from independently reviewed
+real compiler adapters, not tests' source-free Python mock output. The harness
+checks digest equality, not authorship or review approval; pin the exact
+golden file blob/commit and obtain independent review before promoting it.
+
 
 ## Evidence, test scope and safety
 
@@ -72,11 +101,14 @@ reviewed adapters, this real-backend gate is NOT EXECUTED and NOT PASSED.
   or produce an idempotent formatted result that all five also reject.
   A formatter syntax rejection is reported separately from a successful
   format/parse rejection-preservation check.
-- The manifest must enumerate exactly the positive and negative .ores files.
+- The source manifest must enumerate exactly the positive and negative
+  .ores files. All SHA-256 source pins are preflighted before launching a
+  compiler and rechecked when each source is used. An independent semantic
+  AST golden manifest must enumerate exactly all positive fixtures; a mismatch
+  on any backend fails the full gate. Both manifest hashes appear in the
+  JSON report, but hashes do not authenticate authorship or reviewer approval.
   Invalid digests, duplicates, missing/extra files, missing negative cases,
   symlinks, oversized inputs, compiler errors and malformed ASTs fail closed.
-  A manifest hash is included in the JSON report, but does not authenticate
-  the compiler binaries or review approval.
 - The formatter uses --stdout, never --write. Source bytes, process output
   and run time are bounded; process group termination comes from the
   existing check_compiler_parity.run_process implementation.
