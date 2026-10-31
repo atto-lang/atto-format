@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from check_compiler_ast_parity import (BACKENDS, InvalidAst, audit_fixture,
-                                       main, parse_ast, parse_commands)
+                                       main, parse_ast, parse_commands, typed_ast_signature)
 
 
 class AstParityHarnessTests(unittest.TestCase):
@@ -85,6 +85,20 @@ class AstParityHarnessTests(unittest.TestCase):
         self.assertEqual(
             parse_ast(b'{"schema":"oreslang-semantic-ast-v1","ast":{"x":1}}'),
             {"x": 1})
+
+    def test_semantic_ast_types_and_precision_are_not_collapsed(self):
+        # Python's default equality would wrongly equate bool/int/float.
+        def signature(atom):
+            payload = ('{"schema":"oreslang-semantic-ast-v1",'
+                       '"ast":{"literal":' + atom + '}}').encode()
+            return typed_ast_signature(parse_ast(payload))
+        self.assertNotEqual(signature("true"), signature("1"))
+        self.assertNotEqual(signature("1"), signature("1.0"))
+        self.assertNotEqual(signature("0.123456789012345678901"),
+                            signature("0.123456789012345678902"))
+        self.assertEqual(signature('{"b":2,"a":1}'),
+                         signature('{"a":1,"b":2}'))
+        self.assertNotEqual(signature("[1,2]"), signature("[2,1]"))
 
     def test_parse_commands_requires_exactly_five(self):
         specs = [f"{backend}={self.ast_cmd}" for backend in BACKENDS]
