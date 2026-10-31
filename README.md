@@ -26,14 +26,14 @@ and `final` modifiers because they carry distinct semantics. Redundant
 bare type-first field is implicitly VAL. Type-first initializers may
 canonicalize `=` to `:`. Actor state, module bindings, local bindings,
 nested declarations, malformed or conflicting qualifiers, and ambiguous
-source are not silently migrated. Formatter output alone does not prove
-compiler AST equivalence across backends. No change is made to unsupported named-struct declarations, actor state, trait signatures,
-or lexical declarations inside callables.
+source are not silently migrated, and unsupported named-struct declarations,
+trait signatures, and callable-local declarations are left alone.
+Formatter output alone does not prove compiler AST equivalence across backends.
 
-Uninitialized legacy class members (including `val T x;` followed by
-constructor-body initialization) are deliberately left unchanged. Rewriting
-them to `final mut T x;` would manufacture a compiler error before the
-coordinated breaking migration has removed those legacy semantics.
+For recognized direct class fields, uninitialized `val T x;` becomes
+`T x;` without altering the implicit VAL binding. Uninitialized `let`,
+`const`, and `final` remain explicit. These spellings still require compiler
+validation, especially where constructors assign stored fields.
 
 The language's final initialization rules are compiler constraints, not
 formatter transformations. Formatting does not make an uninitialized final
