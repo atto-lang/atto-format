@@ -28,6 +28,7 @@ MAX_INPUT = 1024 * 1024
 MAX_AST = 2 * 1024 * 1024
 MAX_MANIFEST = 65536
 MANIFEST_SCHEMA = "oreslang-format-fixtures-v1"
+GOLDEN_SCHEMA = "oreslang-semantic-ast-golden-v1"
 FIXTURE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\.ores\Z", re.ASCII)
 HEX64 = re.compile(r"[a-f0-9]{64}\Z", re.ASCII)
 
@@ -92,6 +93,44 @@ def parse_ast(data):
             or not isinstance(obj["ast"], (dict, list)) or not obj["ast"]):
         raise InvalidAst("missing nonempty semantic AST envelope")
     return obj["ast"]
+
+
+def semantic_ast_sha256(ast):
+    # Typed structure is essential: JSON/Python default comparisons can
+    # otherwise collapse distinct bool/int/decimal values.
+    signature = typed_ast_signature(ast)
+    canonical = json.dumps(signature, separators=(",", ":"),
+                           ensure_ascii=True).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def load_golden_manifest(path, accepted_names):
+    try:
+        contents = _read_bounded_regular(path, MAX_MANIFEST)
+        envelope = json.loads(contents.decode("utf-8"),
+                              object_pairs_hook=_no_duplicates,
+                              parse_constant=_nonfinite)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        raise ValueError("independent semantic-AST goldens unavailable") from exc
+    if (not isinstance(envelope, dict)
+            or set(envelope) != {"schema", "cases"}
+            or envelope["schema"] != GOLDEN_SCHEMA
+            or not isinstance(envelope["cases"], list)):
+        raise ValueError("invalid semantic-AST golden manifest")
+    goldens = {}
+    for entry in envelope["cases"]:
+        if (not isinstance(entry, dict)
+                or set(entry) != {"name", "ast_sha256"}
+                or not isinstance(entry["name"], str)
+                or not FIXTURE_NAME.fullmatch(entry["name"])
+                or not isinstance(entry["ast_sha256"], str)
+                or not HEX64.fullmatch(entry["ast_sha256"])
+                or entry["name"] in goldens):
+            raise ValueError("invalid or duplicate AST golden")
+        goldens[entry["name"]] = entry["ast_sha256"]
+    if set(goldens) != set(accepted_names) or list(goldens) != sorted(goldens):
+        raise ValueError("AST goldens must exactly match positive fixture inventory")
+    return goldens, hashlib.sha256(contents).hexdigest()
 
 
 def positive_fixture(path):
@@ -258,7 +297,8 @@ def _run(argv, timeout, limit):
     return stdout, "ok"
 
 
-def audit_fixture(path, formatter, commands, timeout, expected_sha256=None):
+def audit_fixture(path, formatter, commands, timeout, expected_sha256=None,
+                  expected_ast_sha256=None):
     record = {"case": path.name, "ok": False, "backends": {}}
     try:
         original = positive_fixture(path)
@@ -290,6 +330,7 @@ def audit_fixture(path, formatter, commands, timeout, expected_sha256=None):
             record["error"] = "not_idempotent"
             return record
         original_asts = {}
+        goldens_match = expected_ast_sha256 is not None
         for backend in BACKENDS:
             entry = {}
             for phase, candidate in (("original", original_file),
@@ -298,7 +339,12 @@ def audit_fixture(path, formatter, commands, timeout, expected_sha256=None):
                 data, status = _run(argv, timeout, MAX_AST)
                 if status == "ok":
                     try:
-                        entry[phase] = typed_ast_signature(parse_ast(data))
+                        ast = parse_ast(data)
+                        entry[phase] = typed_ast_signature(ast)
+                        if (expected_ast_sha256 is not None
+                                and semantic_ast_sha256(ast)
+                                != expected_ast_sha256):
+                            goldens_match = False
                     except InvalidAst:
                         status = "invalid_ast"
                 entry[phase + "_status"] = status
@@ -318,9 +364,11 @@ def audit_fixture(path, formatter, commands, timeout, expected_sha256=None):
             and all(ast == original_asts[BACKENDS[0]]
                     for ast in original_asts.values())
         )
+        record["golden_verified"] = goldens_match
         record["ok"] = (record["cross_backend_equivalent"]
                         and all(x["equivalent"]
-                                for x in record["backends"].values()))
+                                for x in record["backends"].values())
+                        and (expected_ast_sha256 is None or goldens_match))
         return record
 
 
@@ -355,6 +403,8 @@ def main(argv=None):
     parser.add_argument("--fixture-manifest", type=Path,
                         default=Path(__file__).resolve().parent.parent
                         / "tests" / "formatter_fixture_manifest_v1.json")
+    parser.add_argument("--golden-manifest", type=Path, required=True,
+                        help="independently reviewed positive-case semantic AST digests")
     parser.add_argument("--timeout", type=int, default=30)
     args = parser.parse_args(argv)
     if args.timeout <= 0 or args.timeout > 300:
@@ -369,9 +419,14 @@ def main(argv=None):
     try:
         corpus, manifest_digest = load_manifest(
             args.fixture_manifest, args.cases, args.negative_cases)
+        goldens, golden_digest = load_golden_manifest(
+            args.golden_manifest,
+            [path.name for path, _ in corpus["accepted"]])
     except ValueError as exc:
         parser.error(str(exc))
-    positive = [audit_fixture(path, formatter, commands, args.timeout, sha)
+    positive = [audit_fixture(
+        path, formatter, commands, args.timeout,
+        expected_sha256=sha, expected_ast_sha256=goldens[path.name])
                 for path, sha in corpus["accepted"]]
     negative = [audit_negative_fixture(path, formatter, commands, args.timeout, sha)
                 for path, sha in corpus["rejected"]]
@@ -379,6 +434,7 @@ def main(argv=None):
           and all(record["ok"] for record in negative))
     print(json.dumps({
         "ok": ok, "schema": SCHEMA, "manifest_sha256": manifest_digest,
+        "golden_manifest_sha256": golden_digest,
         "required_backends": list(BACKENDS),
         "accepted_equivalent_cases": sum(x["ok"] for x in positive),
         "negative_preserved_cases": sum(x["ok"] for x in negative),
