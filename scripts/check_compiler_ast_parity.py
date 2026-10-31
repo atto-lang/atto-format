@@ -10,8 +10,8 @@ Missing compiler commands, rejected positive fixtures, malformed ASTs, or
 changed trees fail closed. Offline tests validate the harness only.
 """
 import argparse
+from decimal import Decimal
 import json
-import math
 import os
 from pathlib import Path
 import shlex
@@ -43,17 +43,42 @@ def _nonfinite(_value):
     raise InvalidAst("nonfinite JSON constant")
 
 
-def _finite_float(value):
-    parsed = float(value)
-    if not math.isfinite(parsed):
-        raise InvalidAst("nonfinite JSON number")
-    return parsed
+def _finite_decimal(value):
+    # Do not round distinct high-precision literals to the same binary float.
+    number = Decimal(value)
+    if not number.is_finite() or abs(number.adjusted()) > 308:
+        raise InvalidAst("nonfinite or unbounded JSON number")
+    return number
+
+
+def typed_ast_signature(value):
+    # Python normally considers True == 1 and 1 == 1.0. Those are not the
+    # same semantic AST values. Preserve JSON number/bool types and decimal
+    # precision while disregarding only object key ordering.
+    if isinstance(value, dict):
+        return ("object", tuple(
+            (key, typed_ast_signature(child))
+            for key, child in sorted(value.items())
+        ))
+    if isinstance(value, list):
+        return ("array", tuple(typed_ast_signature(child) for child in value))
+    if isinstance(value, bool):
+        return ("bool", value)
+    if isinstance(value, int):
+        return ("int", value)
+    if isinstance(value, Decimal):
+        return ("decimal", str(value))
+    if isinstance(value, str):
+        return ("string", value)
+    if value is None:
+        return ("null",)
+    raise InvalidAst("unknown semantic AST JSON value")
 
 
 def parse_ast(data):
     try:
         obj = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates,
-                         parse_constant=_nonfinite, parse_float=_finite_float)
+                         parse_constant=_nonfinite, parse_float=_finite_decimal)
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise InvalidAst("invalid AST JSON") from exc
     if (not isinstance(obj, dict) or set(obj) != {"schema", "ast"}
@@ -130,7 +155,7 @@ def audit_fixture(path, formatter, commands, timeout):
                 data, status = _run(argv, timeout, MAX_AST)
                 if status == "ok":
                     try:
-                        entry[phase] = parse_ast(data)
+                        entry[phase] = typed_ast_signature(parse_ast(data))
                     except InvalidAst:
                         status = "invalid_ast"
                 entry[phase + "_status"] = status
