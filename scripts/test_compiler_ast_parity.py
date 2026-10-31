@@ -8,7 +8,8 @@ import unittest
 
 from check_compiler_ast_parity import (BACKENDS, InvalidAst, audit_fixture,
                                        audit_negative_fixture, load_manifest,
-                                       main, parse_ast, parse_commands,
+                                       load_golden_manifest, main, parse_ast,
+                                       parse_commands, semantic_ast_sha256,
                                        typed_ast_signature)
 
 
@@ -60,6 +61,37 @@ class AstParityHarnessTests(unittest.TestCase):
             "rejected": [pin(rejected, "bad.ores")],
         }), encoding="utf-8")
         return accepted, rejected, manifest
+
+    def synthetic_goldens(self, accepted):
+        # This is a toy AST receipt: use only to test the validator.
+        path = accepted.parent / "golden.json"
+        digest = semantic_ast_sha256({"tokens": ["hello", "world"]})
+        path.write_text(json.dumps({
+            "schema": "oreslang-semantic-ast-golden-v1",
+            "cases": [{"name": "good.ores", "ast_sha256": digest}],
+        }), encoding="utf-8")
+        return path
+
+    def test_missing_wrong_or_unpinned_ast_goldens_fail(self):
+        accepted, rejected, manifest = self.pinned_manifest()
+        golden = self.synthetic_goldens(accepted)
+        pins, receipt = load_golden_manifest(golden, ["good.ores"])
+        self.assertEqual(len(receipt), 64)
+        self.assertEqual(set(pins), {"good.ores"})
+        self.assertEqual(pins["good.ores"],
+                         semantic_ast_sha256({"tokens": ["hello", "world"]}))
+        with self.assertRaises(ValueError):
+            load_golden_manifest(accepted / "missing.json", ["good.ores"])
+        with self.assertRaises(ValueError):
+            load_golden_manifest(golden, ["different.ores"])
+        with self.assertRaises(ValueError):
+            load_golden_manifest(golden, ["good.ores", "second.ores"])
+        bad_pin = "0" * 64
+        report = audit_fixture(
+            accepted / "good.ores", self.format_cmd, self.commands, 5,
+            expected_ast_sha256=bad_pin)
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["golden_verified"])
 
     def negative_compiler(self):
         self.compiler.write_text(
@@ -248,10 +280,12 @@ class AstParityHarnessTests(unittest.TestCase):
         accepted, rejected, manifest = self.pinned_manifest()
         commands = sum((["--ast-command", f"{backend}={self.ast_cmd}"]
                         for backend in BACKENDS), [])
+        golden = self.synthetic_goldens(accepted)
         args = (["--formatter", f'"{sys.executable}" "{self.formatter}"',
                  "--cases", str(accepted),
                  "--negative-cases", str(rejected),
-                 "--fixture-manifest", str(manifest)] + commands)
+                 "--fixture-manifest", str(manifest),
+                 "--golden-manifest", str(golden)] + commands)
         self.assertEqual(main(args), 0)
         with self.assertRaises(SystemExit) as context:
             main(args[:-2])
