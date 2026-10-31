@@ -10,7 +10,7 @@ Missing compiler commands, rejected positive fixtures, malformed ASTs, or
 changed trees fail closed. Offline tests validate the harness only.
 """
 import argparse
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -52,7 +52,10 @@ def _nonfinite(_value):
 
 def _finite_decimal(value):
     # Do not round distinct high-precision literals to the same binary float.
-    number = Decimal(value)
+    try:
+        number = Decimal(value)
+    except InvalidOperation as exc:
+        raise InvalidAst("unrepresentable JSON number") from exc
     if not number.is_finite() or abs(number.adjusted()) > 308:
         raise InvalidAst("nonfinite or unbounded JSON number")
     return number
