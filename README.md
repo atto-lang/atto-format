@@ -20,12 +20,14 @@ define class Foo as
 end
 ```
 
-The formatter migrates typed member `let T x = value` to `T x: value`,
-`const T x = value` to `final T x: value`, and
-`val T x = value` to `final mut T x: value` (with analogous
-`const mut` and `let mut` forms). Rewrites are limited to recognized
-direct class members; ambiguous declarations are preserved for
-compiler diagnostics. No change is made to unsupported named-struct declarations, actor state, trait signatures,
+The formatter preserves explicit direct-class-member `let`, `const`,
+and `final` modifiers because they carry distinct semantics. Redundant
+`val T x` is elided only for recognized direct class fields, where the
+bare type-first field is implicitly VAL. Type-first initializers may
+canonicalize `=` to `:`. Actor state, module bindings, local bindings,
+nested declarations, malformed or conflicting qualifiers, and ambiguous
+source are not silently migrated. Formatter output alone does not prove
+compiler AST equivalence across backends. No change is made to unsupported named-struct declarations, actor state, trait signatures,
 or lexical declarations inside callables.
 
 Uninitialized legacy class members (including `val T x;` followed by
@@ -57,7 +59,7 @@ the full field contract.
   explicit `method name(...)` remains explicit, and `static fnc` is preserved;
   instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
-- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; optional semantics-free `as` or `::` may separate the complete return type from the body and permit compact same-line source; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; `::` may separate the complete return type from the body and permit compact same-line source; callable-body `as` is rejected; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
 - module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
