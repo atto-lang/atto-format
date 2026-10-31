@@ -238,3 +238,26 @@ fn compact_callable_as_in_body_is_not_mistaken_for_a_header_separator() {
 fn compact_callable_header_still_rejects_as_separator() {
     assert!(format_source("fnc handle() -> void as return; end\n").is_err());
 }
+
+#[test]
+fn malformed_class_field_modifiers_are_preserved_for_compiler_diagnostics() {
+    // A style-only tool must never erase the first modifier of an invalid
+    // declaration and thereby turn a compiler error into a valid field.
+    for declaration in [
+        "val val int duplicate = 1;",
+        "pub val val int duplicate = 1;",
+        "val let int conflict = 1;",
+        "let let int duplicate = 1;",
+        "const final int conflict = 1;",
+        "mut mut int duplicate = 1;",
+        "pub private int conflicting_visibility = 1;",
+    ] {
+        let source = format!("define class Prefixes as\n  {declaration}\nend\n");
+        let formatted = format_source(&source).unwrap();
+        assert!(
+            formatted.contains(declaration),
+            "invalid declaration was changed: {declaration:?} -> {formatted:?}"
+        );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+}
