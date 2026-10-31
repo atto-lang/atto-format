@@ -240,6 +240,12 @@ class AstParityHarnessTests(unittest.TestCase):
             parse_ast(b'{"schema":"oreslang-semantic-ast-v1","ast":{"x":1}}'),
             {"x": 1})
 
+    def test_unrepresentable_json_exponent_is_invalid_ast(self):
+        invalid = (b'{"schema":"oreslang-semantic-ast-v1",'
+                   b'"ast":{"literal":1e' + b'9' * 22 + b'}}')
+        with self.assertRaises(InvalidAst):
+            parse_ast(invalid)
+
     def test_semantic_ast_types_and_precision_are_not_collapsed(self):
         # Python's default equality would wrongly equate bool/int/float.
         def signature(atom):
