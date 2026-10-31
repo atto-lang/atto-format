@@ -82,19 +82,18 @@ class AstParityHarnessTests(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         self.assertEqual(report["outcome"], "formatted_source_remains_rejected")
 
-    def test_fixture_digest_tampering_fails(self):
+    def test_fixture_digest_tampering_fails_before_execution(self):
         accepted, rejected, manifest = self.pinned_manifest(corrupted=True)
-        cases, _ = load_manifest(manifest, accepted, rejected)
-        case, pin = cases["accepted"][0]
-        self.assertFalse(audit_fixture(
-            case, self.format_cmd, self.commands, 5, pin)["ok"])
+        with self.assertRaisesRegex(ValueError, "reviewed SHA-256"):
+            load_manifest(manifest, accepted, rejected)
+        # Independently recheck the actual bytes used even if a fixture
+        # changes after initial manifest validation.
         self.assertEqual(audit_fixture(
-            case, self.format_cmd, self.commands, 5, pin)["error"],
-            "invalid_fixture")
-        negative_case, negative_pin = cases["rejected"][0]
+            accepted / "good.ores", self.format_cmd, self.commands,
+            5, "0" * 64)["error"], "invalid_fixture")
         self.assertEqual(audit_negative_fixture(
-            negative_case, self.format_cmd, self.commands, 5,
-            negative_pin)["error"], "invalid_or_unpinned_fixture")
+            rejected / "bad.ores", self.format_cmd, self.commands,
+            5, "0" * 64)["error"], "invalid_or_unpinned_fixture")
 
     def test_manifest_inventory_and_traversal_denied(self):
         accepted, rejected, manifest = self.pinned_manifest()
