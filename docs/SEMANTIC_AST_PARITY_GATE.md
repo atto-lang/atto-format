@@ -4,6 +4,10 @@ The existing scripts/check_compiler_parity.py checks compiler admission and
 formatter idempotence. It does not prove that formatting preserves an AST.
 Its Python mock tests are not real compiler evidence.
 
+The versioned tests/formatter_fixture_manifest_v1.json pins each positive
+and negative fixture by name and SHA-256. A changed, added, deleted or
+unlisted .ores file blocks verification until the reviewed manifest is updated.
+
 This opt-in gate compares original and formatted semantic ASTs for every
 backend, and then compares the canonical semantic AST across Java, LLVM,
 WASM, .NET and Forge. All five are required: missing commands, unsupported
@@ -51,7 +55,9 @@ python3 scripts/check_compiler_ast_parity.py \
   --ast-command 'wasm=<approved-wasm-adapter> {source}' \
   --ast-command 'net=<approved-net-adapter> {source}' \
   --ast-command 'forge=<approved-forge-adapter> {source}' \
-  --cases tests/compiler_parity_cases
+  --cases tests/compiler_parity_cases \
+  --negative-cases tests/compiler_negative_cases \
+  --fixture-manifest tests/formatter_fixture_manifest_v1.json
 ~~~
 
 These placeholders are not working commands. Until all five compilers provide
@@ -59,18 +65,27 @@ reviewed adapters, this real-backend gate is NOT EXECUTED and NOT PASSED.
 
 ## Evidence, test scope and safety
 
-- Every .ores file in the cases directory is a positive expected-to-parse
-  fixture. Empty corpora, missing backends, malformed JSON (including
-  duplicate keys, nonfinite numbers and empty AST envelopes), nonregular
-  files, process failures, non-idempotence and AST divergence fail closed.
+- Positive fixtures must be accepted by all five compilers, and their
+  original and formatted semantic ASTs must agree both within and between
+  backends. A negative fixture must be rejected by all five compilers on
+  its original input. The formatter must either reject that invalid input,
+  or produce an idempotent formatted result that all five also reject.
+  A formatter syntax rejection is reported separately from a successful
+  format/parse rejection-preservation check.
+- The manifest must enumerate exactly the positive and negative .ores files.
+  Invalid digests, duplicates, missing/extra files, missing negative cases,
+  symlinks, oversized inputs, compiler errors and malformed ASTs fail closed.
+  A manifest hash is included in the JSON report, but does not authenticate
+  the compiler binaries or review approval.
 - The formatter uses --stdout, never --write. Source bytes, process output
   and run time are bounded; process group termination comes from the
   existing check_compiler_parity.run_process implementation.
 - Tests in scripts/test_compiler_ast_parity.py are source-free mock harness
   self-tests, NOT real Java/LLVM/WASM/.NET/Forge execution.
-- Negative source fixtures require independent tests proving invalid source
-  stays rejected. Existing compiler admission checks cover part of this
-  contract but are not semantic AST proof.
+- The included negative corpus tests a forbidden callable body delimiter,
+  an unclosed callable, and assignment in an if-condition. These cases are
+  validation targets, not yet proven rejected by five real compilers.
+  Additional negative cases must be pinned and reviewed before promotions.
 - Real proof must record exact formatter commit/tree, compiler/adapter SHAs
   and binary identities, fixture manifest/digests, executed steps and runner
   evidence. Zero-step GitHub Actions failures are not compiler test failures.
