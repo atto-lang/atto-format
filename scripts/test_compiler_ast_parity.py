@@ -1,11 +1,15 @@
 """Source-free harness self-tests, NOT real Oreslang compiler evidence."""
 from pathlib import Path
+import hashlib
+import json
 import sys
 import tempfile
 import unittest
 
 from check_compiler_ast_parity import (BACKENDS, InvalidAst, audit_fixture,
-                                       main, parse_ast, parse_commands, typed_ast_signature)
+                                       audit_negative_fixture, load_manifest,
+                                       main, parse_ast, parse_commands,
+                                       typed_ast_signature)
 
 
 class AstParityHarnessTests(unittest.TestCase):
@@ -32,6 +36,125 @@ class AstParityHarnessTests(unittest.TestCase):
         self.format_cmd = [sys.executable, str(self.formatter)]
         self.ast_cmd = f'"{sys.executable}" "{self.compiler}" {{source}}'
         self.commands = {backend: self.ast_cmd for backend in BACKENDS}
+
+    def pinned_manifest(self, corrupted=False):
+        root = Path(self.temp.name) / "pinned"
+        accepted = root / "accepted"
+        rejected = root / "rejected"
+        accepted.mkdir(parents=True, exist_ok=True)
+        rejected.mkdir()
+        (accepted / "good.ores").write_bytes(self.case.read_bytes())
+        (rejected / "bad.ores").write_text("invalid syntax\n", encoding="utf-8")
+
+        def pin(directory, name):
+            contents = (directory / name).read_bytes()
+            digest = hashlib.sha256(contents).hexdigest()
+            if corrupted:
+                digest = "0" * 64
+            return {"name": name, "sha256": digest}
+
+        manifest = root / "manifest.json"
+        manifest.write_text(json.dumps({
+            "schema": "oreslang-format-fixtures-v1",
+            "accepted": [pin(accepted, "good.ores")],
+            "rejected": [pin(rejected, "bad.ores")],
+        }), encoding="utf-8")
+        return accepted, rejected, manifest
+
+    def negative_compiler(self):
+        self.compiler.write_text(
+            "import sys, json\nfrom pathlib import Path\n"
+            "value=Path(sys.argv[-1]).read_text()\n"
+            "if 'invalid' in value: sys.exit(1)\n"
+            "print(json.dumps({'schema': 'oreslang-semantic-ast-v1', "
+            "'ast': {'tokens': value.split()}}))\n", encoding="utf-8")
+
+    def test_pinned_manifest_and_negative_corpus(self):
+        self.negative_compiler()
+        accepted, rejected, manifest = self.pinned_manifest()
+        cases, digest = load_manifest(manifest, accepted, rejected)
+        self.assertEqual(len(cases["accepted"]), 1)
+        self.assertEqual(len(cases["rejected"]), 1)
+        self.assertEqual(len(digest), 64)
+        case, pin = cases["rejected"][0]
+        report = audit_negative_fixture(
+            case, self.format_cmd, self.commands, 5, pin)
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["outcome"], "formatted_source_remains_rejected")
+
+    def test_fixture_digest_tampering_fails(self):
+        accepted, rejected, manifest = self.pinned_manifest(corrupted=True)
+        cases, _ = load_manifest(manifest, accepted, rejected)
+        case, pin = cases["accepted"][0]
+        self.assertFalse(audit_fixture(
+            case, self.format_cmd, self.commands, 5, pin)["ok"])
+        self.assertEqual(audit_fixture(
+            case, self.format_cmd, self.commands, 5, pin)["error"],
+            "invalid_fixture")
+        negative_case, negative_pin = cases["rejected"][0]
+        self.assertEqual(audit_negative_fixture(
+            negative_case, self.format_cmd, self.commands, 5,
+            negative_pin)["error"], "invalid_or_unpinned_fixture")
+
+    def test_manifest_inventory_and_traversal_denied(self):
+        accepted, rejected, manifest = self.pinned_manifest()
+        (rejected / "surprise.ores").write_text("invalid", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            load_manifest(manifest, accepted, rejected)
+        (rejected / "surprise.ores").unlink()
+        spec = json.loads(manifest.read_text())
+        spec["accepted"][0]["name"] = "../good.ores"
+        manifest.write_text(json.dumps(spec))
+        with self.assertRaises(ValueError):
+            load_manifest(manifest, accepted, rejected)
+        spec["accepted"][0]["name"] = "good.ores"
+        spec["rejected"].append(spec["rejected"][0])
+        manifest.write_text(json.dumps(spec))
+        with self.assertRaises(ValueError):
+            load_manifest(manifest, accepted, rejected)
+
+    def test_manifest_duplicate_key_and_missing_negatives_denied(self):
+        accepted, rejected, manifest = self.pinned_manifest()
+        manifest.write_text('{"schema":"oreslang-format-fixtures-v1",'
+                            '"schema":"oreslang-format-fixtures-v1",'
+                            '"accepted":[],"rejected":[]}')
+        with self.assertRaises(ValueError):
+            load_manifest(manifest, accepted, rejected)
+        spec = {"schema": "oreslang-format-fixtures-v1",
+                "accepted": [{"name": "good.ores", "sha256": "0" * 64}],
+                "rejected": []}
+        manifest.write_text(json.dumps(spec))
+        with self.assertRaises(ValueError):
+            load_manifest(manifest, accepted, rejected)
+
+    def test_negative_source_laundered_into_valid_is_blocked(self):
+        self.negative_compiler()
+        case = Path(self.temp.name) / "bad.ores"
+        case.write_text("invalid  syntax\n", encoding="utf-8")
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "value=Path(sys.argv[-1]).read_text()\n"
+            "print(value.replace('invalid', 'hello').replace('  ', ' '), end='')\n")
+        report = audit_negative_fixture(
+            case, self.format_cmd, self.commands, 5,
+            hashlib.sha256(case.read_bytes()).hexdigest())
+        self.assertFalse(report["ok"], report)
+        self.assertEqual(report["error"], "formatter_laundered_invalid_source")
+
+    def test_formatter_syntax_rejection_is_distinct_safe_outcome(self):
+        self.negative_compiler()
+        case = Path(self.temp.name) / "bad.ores"
+        case.write_text("invalid syntax\n", encoding="utf-8")
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "value=Path(sys.argv[-1]).read_text()\n"
+            "sys.exit(1 if 'invalid' in value else 0)\n")
+        report = audit_negative_fixture(
+            case, self.format_cmd, self.commands, 5,
+            hashlib.sha256(case.read_bytes()).hexdigest())
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["outcome"],
+                         "formatter_rejected_invalid_source")
 
     def test_all_five_equivalent_after_format(self):
         record = audit_fixture(self.case, self.format_cmd, self.commands, 5)
@@ -122,13 +245,14 @@ class AstParityHarnessTests(unittest.TestCase):
             "invalid_fixture")
 
     def test_cli_requires_five_commands_and_positive_cases(self):
-        root = Path(self.temp.name) / "cases"
-        root.mkdir()
-        (root / "good.ores").write_bytes(self.case.read_bytes())
+        self.negative_compiler()
+        accepted, rejected, manifest = self.pinned_manifest()
         commands = sum((["--ast-command", f"{backend}={self.ast_cmd}"]
                         for backend in BACKENDS), [])
         args = (["--formatter", f'"{sys.executable}" "{self.formatter}"',
-                 "--cases", str(root)] + commands)
+                 "--cases", str(accepted),
+                 "--negative-cases", str(rejected),
+                 "--fixture-manifest", str(manifest)] + commands)
         self.assertEqual(main(args), 0)
         with self.assertRaises(SystemExit) as context:
             main(args[:-2])
