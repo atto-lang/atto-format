@@ -246,6 +246,16 @@ class AstParityHarnessTests(unittest.TestCase):
         with self.assertRaises(InvalidAst):
             parse_ast(invalid)
 
+    def test_very_deep_json_ast_is_rejected(self):
+        source = (b'{"schema":"oreslang-semantic-ast-v1","ast":'
+                  + b"[" * 700 + b"1" + b"]" * 700 + b"}")
+        try:
+            value = parse_ast(source)
+            with self.assertRaises(RecursionError):
+                typed_ast_signature(value)
+        except InvalidAst:
+            pass
+
     def test_semantic_ast_types_and_precision_are_not_collapsed(self):
         # Python's default equality would wrongly equate bool/int/float.
         def signature(atom):
