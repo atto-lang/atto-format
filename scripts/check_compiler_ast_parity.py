@@ -170,6 +170,15 @@ def load_manifest(path, positive_directory, negative_directory):
                   if item.name.endswith(".ores")}
         if actual != set(pins):
             raise ValueError("fixture inventory does not match pinned manifest")
+        # Verify the entire manifest before running any subprocess. Each
+        # audit_* path rechecks its digest against the bytes it actually uses.
+        for name, digest in pins.items():
+            try:
+                contents = positive_fixture(directory / name)
+            except (OSError, ValueError, UnicodeError) as exc:
+                raise ValueError("invalid pinned fixture") from exc
+            if hashlib.sha256(contents).hexdigest() != digest:
+                raise ValueError("fixture bytes differ from reviewed SHA-256")
         result[field] = [(directory / name, pins[name]) for name in pins]
     return result, hashlib.sha256(raw).hexdigest()
 
