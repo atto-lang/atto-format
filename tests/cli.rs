@@ -431,3 +431,231 @@ fn analyze_refuses_recursive_compiler_configuration() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
+
+#[cfg(unix)]
+fn analyze_command(repo: &TempRepo) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_oresfmt"));
+    command
+        .current_dir(&repo.root)
+        .env_remove("ORESFMT_ANALYZE_ACTIVE")
+        .env_remove("ORESFMT_ANALYZE_TIMEOUT_SECS");
+    command
+}
+
+#[cfg(unix)]
+fn write_script(repo: &TempRepo, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = repo.write(name, &format!("#!/bin/sh\n{body}\n"));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_dash_prefixed_source_cannot_become_a_compiler_option() {
+    let repo = TempRepo::new("analysis-dash-path");
+    repo.write("-x.ores", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", r#"[ "$2" = ./-x.ores ] || exit 9"#);
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "--", "-x.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_gives_the_compiler_a_closed_stdin() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = TempRepo::new("analysis-stdin");
+    repo.write("sample.ores", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", r#"[ -z "$(/bin/cat)" ] || exit 9"#);
+    let mut child = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "sample.ores"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"secret\n").unwrap();
+    drop(stdin);
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_wrapper_leading_back_to_the_formatter_stops_at_one_level() {
+    let repo = TempRepo::new("analysis-wrapper-recursion");
+    repo.write("sample.ores", UNFORMATTED);
+    // The depth cap keeps a regression from spawning without bound.
+    let wrapper = write_script(
+        &repo,
+        "wrapper",
+        r#"echo x >> depth
+[ "$(/usr/bin/wc -l < depth)" -ge 4 ] && exit 0
+exec "$FORMATTER" "$@""#,
+    );
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", wrapper)
+        .env("FORMATTER", env!("CARGO_BIN_EXE_oresfmt"))
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(repo.root.join("depth")).unwrap(), "x\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_path_search_skips_non_executable_shadows() {
+    let repo = TempRepo::new("analysis-path-shadow");
+    repo.write("sample.ores", UNFORMATTED);
+    repo.write("first/oreslang-core", "not executable");
+    write_script(&repo, "second/oreslang-core", "echo ran > ran");
+    let path = format!("{0}/first:{0}/second", repo.root.display());
+    let output = analyze_command(&repo)
+        .env("PATH", path)
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(repo.root.join("ran").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_refuses_the_formatter_found_on_path_through_a_symlink() {
+    use std::os::unix::fs::symlink;
+    let repo = TempRepo::new("analysis-path-symlink");
+    repo.write("sample.ores", UNFORMATTED);
+    fs::create_dir_all(repo.root.join("tools")).unwrap();
+    symlink(
+        env!("CARGO_BIN_EXE_oresfmt"),
+        repo.root.join("tools/oreslang-core"),
+    )
+    .unwrap();
+    let output = analyze_command(&repo)
+        .env("PATH", repo.root.join("tools"))
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_non_executable_shadow_cannot_hide_the_formatter_from_the_self_check() {
+    use std::os::unix::fs::symlink;
+    let repo = TempRepo::new("analysis-shadowed-self");
+    repo.write("sample.ores", UNFORMATTED);
+    repo.write("first/oreslang-core", "not executable");
+    fs::create_dir_all(repo.root.join("second")).unwrap();
+    symlink(
+        env!("CARGO_BIN_EXE_oresfmt"),
+        repo.root.join("second/oreslang-core"),
+    )
+    .unwrap();
+    let path = format!("{0}/first:{0}/second", repo.root.display());
+    let output = analyze_command(&repo)
+        .env("PATH", path)
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("resolves to the formatter"));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_ignores_relative_and_empty_path_entries() {
+    let repo = TempRepo::new("analysis-relative-path");
+    repo.write("sample.ores", UNFORMATTED);
+    write_script(&repo, "oreslang-core", "echo ran > ran");
+    for path in [".", ""] {
+        let output = analyze_command(&repo)
+            .env("PATH", path)
+            .args(["--analyze", "sample.ores"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("not found on PATH"));
+        assert!(!repo.root.join("ran").exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_times_out_a_hung_compiler_and_still_checks_later_files() {
+    let repo = TempRepo::new("analysis-timeout");
+    repo.write("a.ores", UNFORMATTED);
+    repo.write("b.ores", UNFORMATTED);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"[ "$2" = a.ores ] && exec /bin/sleep 30
+echo "$2" >> seen"#,
+    );
+    let started = std::time::Instant::now();
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .env("ORESFMT_ANALYZE_TIMEOUT_SECS", "3")
+        .args(["--analyze", "a.ores", "b.ores"])
+        .output()
+        .unwrap();
+    assert!(started.elapsed().as_secs() < 20);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("analysis timed out after 3s: a.ores")
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("seen")).unwrap(),
+        "b.ores\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_rejects_invalid_timeouts_before_running_anything() {
+    let repo = TempRepo::new("analysis-invalid-timeout");
+    repo.write("sample.ores", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", "echo ran > ran");
+    for value in ["0", "-1", "soon", "86401", ""] {
+        let output = analyze_command(&repo)
+            .env("ORESLANG_BIN", &compiler)
+            .env("ORESFMT_ANALYZE_TIMEOUT_SECS", value)
+            .args(["--analyze", "sample.ores"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "timeout {value:?}");
+        assert!(!repo.root.join("ran").exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_refuses_a_non_executable_compiler_path() {
+    let repo = TempRepo::new("analysis-non-executable");
+    repo.write("sample.ores", UNFORMATTED);
+    let compiler = repo.write("compiler", "not executable");
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not an executable file"));
+}
+
+#[test]
+fn analyze_rejects_insert_mtd() {
+    let repo = TempRepo::new("analysis-insert-mtd");
+    repo.write("sample.ores", UNFORMATTED);
+    let output = repo.run(&["--analyze", "--insert-mtd", "sample.ores"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--insert-mtd cannot be combined"));
+}

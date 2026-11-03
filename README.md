@@ -370,3 +370,10 @@ The caller opt-out `unchecked call()` is preserved verbatim in scope, including
 `await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
 effect assumptions, never runtime failure routing or ordinary compiler checks.
 `ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+
+Each file gets `ORESFMT_ANALYZE_TIMEOUT_SECS` seconds (default 300, maximum 86400);
+a timeout counts as a failed check and only the direct compiler process is killed.
+The compiler runs with stdin closed. A bare `ORESLANG_BIN` name searches absolute
+`PATH` entries only, so a checked-out repository cannot supply the compiler through
+an empty or `.` entry. `ORESFMT_ANALYZE_ACTIVE` is set for the compiler, and a
+formatter that sees it refuses to run, which stops wrappers that lead back here.
