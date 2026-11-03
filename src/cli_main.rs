@@ -220,7 +220,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 let status = Command::new(&executable).arg("--analyze").arg(&path).status()?;
                 failed |= !status.success();
             }
-            return Ok(if failed { ExitCode::from(1) } else { ExitCode::SUCCESS });
+            Ok(if failed { ExitCode::from(1) } else { ExitCode::SUCCESS })
         }
         Mode::DryRun => {
             for path in files {
