@@ -338,6 +338,20 @@ fn end_of_options_allows_dash_prefixed_paths() {
     assert!(String::from_utf8_lossy(&accepted.stderr).contains("needs formatting"));
 }
 
+#[test]
+fn analyze_missing_compiler_fails_without_changing_source() {
+    let repo = TempRepo::new("analysis-missing-compiler");
+    let path = repo.write("sample.ores", UNFORMATTED);
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env("ORESLANG_BIN", repo.root.join("missing-compiler"))
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_paths_are_preserved_as_os_strings() {
@@ -383,4 +397,37 @@ fn insert_mtd_is_an_opt_in_migration_not_a_default() {
     assert!(fs::read_to_string(&path).unwrap().contains("mtd foo()"));
     let checked = repo.run(&["--check", "--insert-mtd", "methods.ores"]);
     assert!(checked.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_delegates_to_compiler_and_preserves_failure_status() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = TempRepo::new("analysis-compiler");
+    let path = repo.write("sample.ores", UNFORMATTED);
+    let compiler = repo.write("compiler", "#!/bin/sh\n[ \"$1\" = --analyze ] || exit 9\n[ \"$2\" = sample.ores ] || exit 9\necho 'failure-warning: missing raises marker' >&2\nexit 1\n");
+    fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("failure-warning"));
+    assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
+}
+
+#[test]
+fn analyze_refuses_recursive_compiler_configuration() {
+    let repo = TempRepo::new("analysis-recursion");
+    repo.write("sample.ores", UNFORMATTED);
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env("ORESLANG_BIN", env!("CARGO_BIN_EXE_oresfmt"))
+        .args(["--analyze", "sample.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
