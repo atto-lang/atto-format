@@ -10,13 +10,19 @@ identical behavior.
 
 - two spaces per indentation level, never tabs for indentation;
 - static `select`, `nb select`, and `try select` arms are indented one level;
-- every `case` and `default` arm has a braced body;
+- every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when`;
+- brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
+- braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
 - LF line endings, no trailing whitespace, one final newline;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
+- in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
+  explicit `method name(...)` remains explicit, and `static fnc` is preserved;
+  instance methods require an explicit lambda to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`;
 - interface/trait callable signatures use the type-level fat arrow `=>`;
-- conditionals canonically use `if ...; then` / `elif ...; then` / `else` / `fi`;
+- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
+- complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
   - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
@@ -52,8 +58,8 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-Conditional compatibility spellings are migrated automatically: deprecated
-`if ... do` becomes `if ...; then`, `elseif` becomes `elif`, and a
+Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
+`if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
 single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
 unchanged; the deprecation applies only to using `do` as an if/branch
 introducer.
@@ -62,7 +68,7 @@ Static select arms use the same nesting rules as other blocks:
 
 ```ores
 nb select {
-  case readch inbox: val value {
+  when readch inbox: val value {
     nb writech replies, value * 10;
   }
   default: {
@@ -70,9 +76,13 @@ nb select {
 }
 ```
 
-The formatter adds braces to legacy unbraced select arms, including read arms
-without a binding and write/default arms. Comments and literals retain their
-contents. Dynamic `select from cases` expressions retain their syntax.
+The formatter accepts both `when` and legacy `case` for static select arms,
+canonicalizes `case` to `when`, and adds braces to legacy unbraced select
+arms, including read arms without a binding and write/default arms. Arm
+boundaries are recognized only outside nested `()`, `[]`, and `{}`;
+mismatched delimiters fail closed instead of being reformatted heuristically.
+Comments and literals retain their contents. Dynamic `select from cases`
+expressions retain their syntax.
 
 Streaming channel writes use ordinary `for ... of ...` loops or
 `for await ... of ...` over an async iterator. Both braced loops and `do`/`done`
@@ -87,6 +97,18 @@ for await const value of events() {
 }
 ```
 
+Expression-bodied lambdas follow the compiler's lexical split: an immediate
+`{` after `->` is the block form; otherwise the body is an expression. For a
+multiline expression body, the formatter adds one continuation indent and
+fails closed if the containing statement never reaches its required explicit
+semicolon. Block lambdas keep explicit `return` statements.
+
+Generator declaration aliases accepted by the compiler are normalized:
+`fnc gen* values()` and `fnc generator* values()` become
+`generator fnc values()`. Delegating `yield* source;` is preserved, and only
+the scheduler compatibility spelling `rt yield` is rewritten to
+`rt cooperate`.
+
 The formatter is intentionally conservative about grammar that is still
 changing. It reorders only recognized declaration-modifier prefixes; imports,
 traits, interfaces, class conformance lists, and unknown modifier spellings are
@@ -96,6 +118,64 @@ For semantic safety, multiline string/template literals currently fail closed
 instead of being rewritten. This prevents indentation, trailing-whitespace, or
 line-ending normalization from changing literal runtime bytes while parser-backed
 literal preservation is still being completed.
+
+## Unused imports and module initialization safety
+
+Oreslang source imports participate in the compiler's dependency graph. Importing
+a source module can execute its `init()` hook, even when no selected binding is
+referenced; removing the import edge can therefore change program behavior.
+**The formatter preserves unreviewed imports by default.** It never deletes
+imports. Once a developer has verified that an import is safe to deactivate,
+put an exact `// oresfmt: pure-import` marker immediately above that import
+(or as an exact trailing comment on the import's final line). The formatter
+then comments out the whole unused import, leaving the declaration readable:
+
+```ores
+// oresfmt: pure-import
+import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main(): void {
+  make();
+}
+```
+
+becomes:
+
+```ores
+// oresfmt: pure-import
+// import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main() -> void {
+  make();
+}
+```
+
+The purity marker is a **human assertion, not a compiler certificate**:
+use it only after checking direct and transitive module initialization.
+Without the marker, an apparently unused import remains active. This applies
+to every import kind, including Java host imports, until a compiler-proven
+side-effect analysis is available. Lexical reference detection still excludes
+comments, quoted strings, import paths, and Symbol literals; aliases are
+resolved by local name and grouped imports remain active when any binding is
+referenced. Unsupported grammar or ambiguous embedded templates fail closed.
+
+Use `// oresfmt: keep-import` for intentionally effectful imports or imports
+that must stay active even if a conflicting purity marker is present.
+`keep-import` always wins. Both markers apply only to one declaration and
+idempotent formatting preserves the original text as comments. Neither CLI
+dry-run nor check mode modifies files; `--write` retains the full filesystem
+and Git safety preflight. See the example:
+
+```ores
+// oresfmt: keep-import
+import module Bootstrap from "./bootstrap";
+```
+
+The long-term goal is compiler-derived import-effect certification from both
+backends, at which point the formatter can comment certified unused imports
+without manual assertions.
 
 ## CLI
 
@@ -117,10 +197,15 @@ oresfmt - < input.ores
 
 # one file -> stdout
 oresfmt --stdout example.ores
+
+# stop option parsing for paths beginning with '-'
+oresfmt --check -- -generated.ores
 ```
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
 alias. Directories are walked recursively and only `.ores` files are selected.
+Filesystem arguments are parsed as native OS strings rather than forced through
+UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
 
 ### Safe writes
 
@@ -146,12 +231,18 @@ These flags only relax write-safety checks. They do not change formatting style.
 
 Additional write hardening:
 
-- explicit symlink inputs are refused, and symlinks found during recursive walks
-  are skipped rather than followed;
-- after the full Git preflight, every file is re-read before the first write, so
-  a concurrent editor/generator change aborts the operation instead of being
-  overwritten from a stale formatter snapshot;
+- explicit symlink inputs are refused, symlinked parent-directory components are
+  refused, and symlinks found during recursive walks are skipped rather than followed;
+- after the full Git preflight, every file is re-read before the first write, and
+  each target is revalidated again immediately before its own write; changed
+  contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
 - write-safety override flags are rejected unless `--write` is active.
+
+CLI exit codes are explicit: `0` means success, `1` means either a
+noncanonical `--check` input or rejected Oreslang source (with an error
+diagnostic), and `2` means CLI usage, filesystem, Git-policy or other tool
+failure. Both `oresfmt` and `oreslang-format` use the same codes. Audit
+scripts must not confuse a syntax rejection with a tool/runner failure.
 
 ## Rust SDK
 
@@ -172,6 +263,7 @@ Oreslang should have one mechanically enforceable source style. This avoids
 project-specific formatter drift and gives compiler diagnostics, generated
 code, examples, editor integrations, and code review the same layout contract.
 
+<<<<<<< HEAD
 ### Failure analysis
 
 `oreslang-format --analyze src/` runs the compiler's static analysis for each
@@ -186,3 +278,20 @@ The caller opt-out `unchecked call()` is preserved verbatim in scope, including
 `await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
 effect assumptions, never runtime failure routing or ordinary compiler checks.
 `ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+=======
+## Exception effect annotations (staged grammar)
+
+Proposed optional postfix annotations for named functions and methods
+are `throws(ErrorType)`, `raises(ErrorType)`, and `panics(ErrorType)`.
+The formatter has round-trip preservation tests for these signatures;
+preservation does **not** mean that either production compiler accepts
+or executes the grammar. These three effects remain semantically distinct:
+ordinary catch/trap may handle throw; raise bypasses them and may reach
+a direct deferred recover; actor panic bypasses all local handlers and
+goes to supervisor CONTROL.
+
+A separate initial advisory checker is provided by
+`oreslang-test.cli --effects`. Integration with formatter diagnostics,
+complete callable-effect inference and LSP quick fixes remains pending.
+See the proposed shared contract in oreslang-common-source.
+>>>>>>> refs/remotes/origin/main

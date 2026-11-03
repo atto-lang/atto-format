@@ -50,7 +50,7 @@ return;
     let expected = r#"fnc demo() -> void {
   val Fnc<int, int> one = |value| -> value * 2;
   val Fnc<int, int> two = |value| ->
-  value * 2;
+    value * 2;
   val Fnc<int, int> typed = (int value) -> value * 3;
   val Fnc<int, {value: int}> wrapped = |value| -> obj{value: value};
   val Fnc<int, int> block = |value| -> {
@@ -85,6 +85,150 @@ fnc demo() -> int {
 }
 "#;
 
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn multiline_expression_lambda_indents_until_its_required_semicolon() {
+    let src = r#"fnc demo() -> void {
+val Fnc<int, int> choose = |value| ->
+value > 0
+? value
+: -value;
+val Fnc<int, int> nested = |value| ->
+apply(|| -> {
+return value;
+});
+return;
+}
+"#;
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, int> choose = |value| ->
+    value > 0
+    ? value
+    : -value;
+  val Fnc<int, int> nested = |value| ->
+    apply(|| -> {
+      return value;
+    });
+  return;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let err =
+        format_source("fnc bad() -> void {\nval Fnc<int, int> f = |value| ->\nvalue * 2\n}\n")
+            .unwrap_err();
+    assert!(err.message().contains("explicit ';'"));
+}
+
+#[test]
+fn structured_expression_lambda_after_assignment_gets_continuation_indent() {
+    let src = r#"fnc demo() -> void {
+val Fnc<int, {value: int}> wrap =
+|value| -> obj{value: value * 2};
+val wrapped = wrap(4);
+return;
+}
+"#;
+    let expected = r#"fnc demo() -> void {
+  val Fnc<int, {value: int}> wrap =
+    |value| -> obj{value: value * 2};
+  val wrapped = wrap(4);
+  return;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn canonicalizes_current_generator_sugar_and_preserves_yield_delegation() {
+    let src = r#"fnc gen* sync_values(): Iterator<int> {
+rt yield;
+yield* inner();
+return;
+}
+
+async fnc generator* async_values(): AsyncIterator<int> {
+rt yield();
+yield* sync_values();
+return;
+}
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+return gen * value;
+}
+"#;
+    let expected = r#"generator fnc sync_values() -> Iterator<int> {
+  rt cooperate;
+  yield* inner();
+  return;
+}
+
+
+async generator fnc async_values() -> AsyncIterator<int> {
+  rt cooperate();
+  yield* sync_values();
+  return;
+}
+
+// gen* fnc fake() should stay a comment
+fnc math(int gen, int value) -> int {
+  return gen * value;
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+    assert!(is_formatted(expected).unwrap());
+}
+
+#[test]
+fn else_followed_by_nested_if_is_not_collapsed_to_elif() {
+    let src = r#"fnc classify(int value) -> int {
+if value < 0 then
+return -1;
+else
+if value == 0 then
+return 0;
+else
+return 1;
+fi
+fi
+}
+"#;
+    let expected = r#"fnc classify(int value) -> int {
+  if value < 0 then
+    return -1;
+  else
+    if value == 0 then
+      return 0;
+    else
+      return 1;
+    fi
+  fi
+}
+"#;
+    assert_eq!(format_source(src).unwrap(), expected);
+}
+
+#[test]
+fn preserves_explicit_receivers_and_native_collection_members() {
+    let src = r#"define class Cursor as
+pub next(self &mut Cursor)() -> int {
+self.index = self.index + 1;
+return self.items.size;
+}
+end
+"#;
+    let expected = r#"define class Cursor as
+  pub next(self &mut Cursor)() -> int {
+    self.index = self.index + 1;
+    return self.items.size;
+  }
+end
+"#;
     assert_eq!(format_source(src).unwrap(), expected);
 }
 
@@ -126,14 +270,14 @@ end
 #[test]
 fn tuple_and_fixed_sequence_metadata_remain_stable() {
     let src = r#"fnc build() => void {
-val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
 val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
 return;
 }
 "#;
 
     let expected = r#"fnc build() -> void {
-  val pair: Tuple<align=64, size=2>[int, string] = (1, "one");
+  val pair: Tuple<align=64, size=2>[int, string] = tuple(1, "one");
   val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
   return;
 }
@@ -170,12 +314,18 @@ return;
 }
 
 #[test]
-fn import_selector_spellings_remain_stable() {
-    let src = r#"import * as util from "../util";
+fn unused_import_selector_spellings_are_commented_not_deleted() {
+    let src = r#"// oresfmt: pure-import
+import * as util from "../util";
+// oresfmt: pure-import
 import module Math from "../math";
+// oresfmt: pure-import
 import actor Worker from "../worker";
+// oresfmt: pure-import
 import class Box from "../box";
+// oresfmt: pure-import
 import types X, Y, Z from "../types";
+// oresfmt: pure-import
 import types (A, B, C) from "../more-types";
 
 define module App as
@@ -185,12 +335,18 @@ return;
 end
 "#;
 
-    let expected = r#"import * as util from "../util";
-import module Math from "../math";
-import actor Worker from "../worker";
-import class Box from "../box";
-import types X, Y, Z from "../types";
-import types (A, B, C) from "../more-types";
+    let expected = r#"// oresfmt: pure-import
+// import * as util from "../util";
+// oresfmt: pure-import
+// import module Math from "../math";
+// oresfmt: pure-import
+// import actor Worker from "../worker";
+// oresfmt: pure-import
+// import class Box from "../box";
+// oresfmt: pure-import
+// import types X, Y, Z from "../types";
+// oresfmt: pure-import
+// import types (A, B, C) from "../more-types";
 
 define module App as
   pub fnc main() -> void {
@@ -277,7 +433,7 @@ fi
 }
 "#;
     let expected = r#"shared actor Cleaner {
-  pub fnc compact() -> void {
+  pub compact() -> void {
     if ready; then
       actor.gc();
     else
@@ -559,11 +715,11 @@ fi
 }
 "#;
     let expected = r#"fnc choose(int value) -> int {
-  if value < 0; then
+  if value < 0 then
     return -1;
   elif value == 0; then
     return 0;
-  elif value == 1; then
+  elif value == 1 then
     return 1;
   else
     return 2;
@@ -667,13 +823,27 @@ fn select_cases_use_spaces_and_braced_bodies_in_every_wait_mode() {
             "actor fnc relay() -> void {{\n\t{mode}select first {{\n\tcase readch inbox: val value\n\t\tnb writech replies, value * 10;\n\tcase writech replies, 0:\n\t\treturn;\n\tdefault:\n\t\treturn;\n\t}}\n}}\n"
         );
         let expected = format!(
-            "actor fnc relay() -> void {{\n  {mode}select first {{\n    case readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    case writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
+            "actor fnc relay() -> void {{\n  {mode}select first {{\n    when readch inbox: val value {{\n      nb writech replies, value * 10;\n    }}\n    when writech replies, 0: {{\n      return;\n    }}\n    default: {{\n      return;\n    }}\n  }}\n}}\n"
         );
         let formatted = format_source(&source).unwrap();
         assert_eq!(formatted, expected);
         assert!(!formatted.contains('\t'));
         assert!(is_formatted(&formatted).unwrap());
     }
+}
+
+#[test]
+fn select_case_is_accepted_but_canonicalized_to_when() {
+    let source = "do nb select { case readch messages: val msg { stdio.println(msg); } }\n";
+    let expected =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(expected).unwrap());
+
+    let already_canonical =
+        "do nb select {\n  when readch messages: val msg {\n    stdio.println(msg);\n  }\n}\n";
+    assert_eq!(format_source(already_canonical).unwrap(), already_canonical);
 }
 
 #[test]
@@ -686,9 +856,9 @@ return;
 } } default: {} }
 "#;
     let expected = r#"select {
-  case readch inbox: val value {
+  when readch inbox: val value {
     nb select {
-      case writech replies, value: { // sent
+      when writech replies, value: { // sent
         stdio.println("case default: { } λ");
       }
       default: { /* skipped */
@@ -708,7 +878,7 @@ return;
 #[test]
 fn select_migration_handles_inline_legacy_arms_nested_expressions_and_empty_arms() {
     let source = "select random { case writech output, make(\"x:y\", [1, 2]): send(); case readch input: const x; default: }\n";
-    let expected = "select random {\n  case writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  case readch input: const x {\n  }\n  default: {\n  }\n}\n";
+    let expected = "select random {\n  when writech output, make(\"x:y\", [1, 2]): {\n    send();\n  }\n  when readch input: const x {\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -737,7 +907,7 @@ fn malformed_static_select_fails_closed() {
 #[test]
 fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
     let source = "select { /* choose */ case readch inbox: val value { /* body */ send(value); } /* next */ default: { /* empty */ } }\n";
-    let expected = "select { /* choose */\n  case readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
+    let expected = "select { /* choose */\n  when readch inbox: val value { /* body */\n    send(value);\n  } /* next */\n  default: { /* empty */\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -746,7 +916,7 @@ fn select_inline_block_comments_do_not_hide_arm_or_body_line_breaks() {
 #[test]
 fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
     let source = "select {\ncase readch input: val x\nfor const value of [x] do\nnb select {\ncase writech output, value:\nreturn;\n}\ndone\ndefault:\n}\n";
-    let expected = "select {\n  case readch input: val x {\n    for const value of [x] do\n      nb select {\n        case writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
+    let expected = "select {\n  when readch input: val x {\n    for const value of [x] do\n      nb select {\n        when writech output, value: {\n          return;\n        }\n      }\n    done\n  }\n  default: {\n  }\n}\n";
     let formatted = format_source(source).unwrap();
     assert_eq!(formatted, expected);
     assert!(is_formatted(&formatted).unwrap());
@@ -756,11 +926,11 @@ fn select_migration_preserves_nested_legacy_select_and_keyword_loop_bodies() {
 fn select_header_separator_ignores_ternary_colons_and_optional_casts() {
     let source = "select { case readch ready ? inbox : other: val x {} case writech output, ready ? 1 : otherReady ? 2 : 3: {} default: {} }\n";
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("case readch ready ? inbox : other: val x {\n"));
-    assert!(formatted.contains("case writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
+    assert!(formatted.contains("when readch ready ? inbox : other: val x {\n"));
+    assert!(formatted.contains("when writech output, ready ? 1 : otherReady ? 2 : 3: {\n"));
     assert!(is_formatted(&formatted).unwrap());
     let cast = format_source("select { case writech output, value as? int: {} }\n").unwrap();
-    assert!(cast.contains("case writech output, value as? int: {\n"));
+    assert!(cast.contains("when writech output, value as? int: {\n"));
     assert!(is_formatted(&cast).unwrap());
 }
 
@@ -771,7 +941,7 @@ if handler_id < 0; do
 return Err("handler_id must be non-negative");
 elseif !pattern.is_valid(); do
 return Err("invalid route pattern");
-else if pattern.size() > self.max_segments_value; then
+else if pattern.size() > self.max_segments_value then
 return Err("route pattern exceeds max_segments");
 else
 return Ok();
@@ -784,7 +954,7 @@ fi
     return Err("handler_id must be non-negative");
   elif !pattern.is_valid(); then
     return Err("invalid route pattern");
-  elif pattern.size() > self.max_segments_value; then
+  elif pattern.size() > self.max_segments_value then
     return Err("route pattern exceeds max_segments");
   else
     return Ok();
@@ -932,8 +1102,487 @@ return;
     assert!(output.contains("val owned = make();"));
     assert!(output.contains("let replaceable = make();"));
     assert!(output.contains("let mut flexible = make();"));
-    assert!(output.contains("case readch input: const job {"));
-    assert!(output.contains("case readch output: val job {"));
+    assert!(output.contains("when readch input: const job {"));
+    assert!(output.contains("when readch output: val job {"));
+}
+
+#[test]
+fn canonicalizes_name_first_parameter_compatibility_to_type_first() {
+    let source = r#"fnc run(job: Job, options: Options): Result {
+return dispatch(job: job, options: options);
+}
+"#;
+    let expected = r#"fnc run(Job job, Options options) -> Result {
+  return dispatch(job: job, options: options);
+}
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn canonicalizes_name_first_parameters_in_methods_and_interface_signatures() {
+    let source = r#"define class Worker as
+pub run(job: Job): Result {
+return process(job);
+}
+end
+
+define interface Runner
+run(job: Job): Result;
+end
+"#;
+    let expected = r#"define class Worker as
+  pub run(Job job) -> Result {
+    return process(job);
+  }
+end
+
+define interface Runner
+  run(Job job) => Result;
+end
+"#;
+
+    let formatted = format_source(source).unwrap();
+    assert_eq!(formatted, expected);
+    assert!(is_formatted(&formatted).unwrap());
+}
+
+#[test]
+fn parameter_order_rewrite_understands_nested_structural_types() {
+    let source = r#"fnc inspect(value: {id: string, active: bool}): string {
+return value.id;
+}
+"#;
+    let expected = r#"fnc inspect({id: string, active: bool} value) -> string {
+  return value.id;
+}
+"#;
+    assert_eq!(format_source(source).unwrap(), expected);
+}
+
+#[test]
+fn legacy_instance_fnc_is_canonicalized_but_explicit_method_and_static_fnc_remain() {
+    let input = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+suspend method explicit_join(group: ActorGroup) {
+group.join()
+}
+static fnc static_send(group: ActorGroup) {
+group.leave()
+}
+end
+define class Client as
+fnc legacy(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+fnc standalone(): int { return 4; }
+"#;
+    let out = format_source(input).unwrap();
+    assert!(out.contains("suspend join_room("), "{out}");
+    assert!(out.contains("  leave_room(ActorGroup group) {"), "{out}");
+    assert!(out.contains("suspend method explicit_join("), "{out}");
+    assert!(out.contains("static fnc static_send("), "{out}");
+    assert!(out.contains("  legacy() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert!(out.contains("fnc standalone() -> int {"), "{out}");
+    assert!(!out.contains("fnc join_room"), "{out}");
+    assert!(!out.contains("fnc leave_room"), "{out}");
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn never_rewrites_nested_or_string_or_comment_fnc() {
+    let src = r#"define actor User as
+fnc call(): String {
+  // fnc marker() is a comment
+  val title = "fnc name()";
+  return title;
+}
+static fnc direct(): int { return 42; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("call() -> String {"));
+    assert!(out.contains("// fnc marker() is a comment"));
+    assert!(out.contains("\"fnc name()\""));
+    assert!(out.contains("static fnc direct()"));
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn modifier_permutations_format_in_one_pass_without_changing_static_dispatch() {
+    let src = r#"define class Client as
+fnc pub legacy(): int { return 1; }
+fnc suspend pub deferred(): int { return 2; }
+pub fnc async compute(): int { return 3; }
+fnc static pub reusable(): int { return 4; }
+fnc method_name(): int { return 5; }
+method method(): int { return 6; }
+end
+"#;
+    let once = format_source(src).unwrap();
+    assert!(once.contains("  pub legacy() -> int {"), "{once}");
+    assert!(once.contains("  pub suspend deferred() -> int {"), "{once}");
+    assert!(once.contains("  pub async compute() -> int {"), "{once}");
+    assert!(
+        once.contains("  pub static fnc reusable() -> int {"),
+        "{once}"
+    );
+    assert!(once.contains("  method_name() -> int {"), "{once}");
+    assert!(once.contains("  method method() -> int {"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn method_normalization_never_mutates_comments_literals_or_static_fnc() {
+    let src = r#"define class Client as
+// fnc ignored(): int
+static fnc keep(): int { return 1; }
+fnc ordinary(): String {
+  return "fnc literal";
+}
+end
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("// fnc ignored(): int"));
+    assert!(formatted.contains("  static fnc keep() -> int"));
+    assert!(formatted.contains("  ordinary() -> String"));
+    assert!(formatted.contains("\"fnc literal\""));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
+fn bare_keyword_actor_end_body_is_an_instance_method_scope() {
+    let src = r#"shared actor Worker as
+fnc handle(): int { return 1; }
+method explicit(): int { return 2; }
+static fnc helper(): int { return 3; }
+end
+"#;
+    let out = format_source(src).unwrap();
+    assert!(out.contains("  handle() -> int {"), "{out}");
+    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert_eq!(out, format_source(&out).unwrap());
+}
+
+#[test]
+fn multiline_connection_actor_method_params_are_indented_and_idempotent() {
+    let source = r#"define actor ConnectionActor as
+final rooms: Map<RoomId, ActorGroup>
+
+suspend fnc join_room(
+group: ActorGroup,
+permit: ActorGroupJoinCapability
+) {
+group.join(permit)
+}
+fnc leave_room(group: ActorGroup) {
+group.leave()
+}
+end
+"#;
+    let expected = r#"define actor ConnectionActor as
+  final rooms: Map<RoomId, ActorGroup>
+
+  suspend join_room(
+    group: ActorGroup,
+    permit: ActorGroupJoinCapability
+  ) {
+    group.join(permit)
+  }
+  leave_room(ActorGroup group) {
+    group.leave()
+  }
+end
+"#;
+    let out = format_source(source).unwrap();
+    assert_eq!(out, expected);
+    assert_eq!(format_source(&out).unwrap(), out);
+}
+
+#[test]
+fn define_shared_actor_is_also_a_method_container() {
+    let source = r#"define shared actor Worker as
+fnc handle(): int { return 7; }
+static fnc utility(): int { return 9; }
+end
+"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains("  handle() -> int {"), "{result}");
+    assert!(
+        result.contains("  static fnc utility() -> int {"),
+        "{result}"
+    );
+    assert_eq!(format_source(&result).unwrap(), result);
+}
+#[test]
+fn braced_switch_fallback_first_and_extra_separators_have_canonical_layout() {
+    let source = r#"
+pub fnc use_switch(string v) : string {
+switch (v) {
+_ {
+return "star";
+},
+case "foo", "car", "mar" {
+return "bar";
+};
+}
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("switch (v) {"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
+    assert!(!formatted.contains("},\n"), "{formatted}");
+    assert!(!formatted.contains("};\n"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn braced_and_end_delimited_match_variants_format_idempotently() {
+    let braced = r#"define actor Counter as
+receive(ActorMail<MessagePatterns> mail): void {
+match mail.value over {
+on is MessagePatterns.Reset as m {
+handle(m.reset);
+},
+on MessagePatterns.Tuple as (m1,m2) {
+handle_pair(m1,m2);
+};
+on _ { return; }
+}
+}
+end
+"#;
+    let canonical = format_source(braced).unwrap();
+    assert!(
+        canonical.contains("on is MessagePatterns.Reset as m {"),
+        "{canonical}"
+    );
+    assert!(
+        canonical.contains("on MessagePatterns.Tuple as (m1,m2) {"),
+        "{canonical}"
+    );
+    assert!(!canonical.contains("},\n"), "{canonical}");
+    assert_eq!(format_source(&canonical).unwrap(), canonical);
+
+    let end_delimited = r#"fnc f(Option<int> v): int {
+match v over
+on Some(value) {
+return value;
+}
+on _ {
+return 0;
+}
+end
+}
+"#;
+    let output = format_source(end_delimited).unwrap();
+    assert!(output.contains("match v over"), "{output}");
+    assert!(output.contains("  end\n"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
+
+#[test]
+fn switch_default_and_match_wildcard_remain_distinct() {
+    let source = r#"fnc choose(string v): string {
+  switch v {
+    _ { return "star"; }
+    case "foo", "car", "mar" { return "bar"; }
+  }
+}
+fnc check(int n): int {
+  match n over {
+    on _ as m { return m; }
+    on 7 { return 42; }
+  }
+}
+fnc other(int n): int {
+  match n over {
+    on default { return 0; }
+  }
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("default {\n"), "{formatted}");
+    assert!(formatted.contains("on _ as m {\n"), "{formatted}");
+    assert!(!formatted.contains("on default"), "{formatted}");
+    assert!(
+        formatted.contains("case \"foo\", \"car\", \"mar\" {"),
+        "{formatted}"
+    );
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn legacy_end_delimited_fallbacks_are_formatted_as_default() {
+    let source = r#"define module M as
+fnc choose(int n): int {
+switch n
+case 7 -> {
+return 42;
+}
+_ -> {
+return 0;
+}
+end
+}
+fnc inspect(int n): int {
+match n over
+on 7 -> {
+return 42;
+}
+on _ as other -> {
+return other;
+}
+end
+}
+end
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("default -> {"), "{once}");
+    assert!(once.contains("on _ as other -> {"), "{once}");
+    assert!(!once.contains("\n  _ ->"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn legacy_default_normalization_never_rewrites_multiline_comment_content() {
+    let src = r#"fnc inspect(int n): int {
+match n over
+/*
+on _ -> { phantom(); }
+*/
+on 7 -> {
+return 7;
+}
+on _ -> {
+return 0;
+}
+end
+}
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("on _ -> { phantom(); }"), "{formatted}");
+    assert!(formatted.contains("on _ -> {"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn typed_match_return_contracts_preserve_named_parameter_and_result_mode() {
+    let source = r#"fnc choose(int n): bool {
+match<ret=bool> n over {
+on 7 { return true; }
+on _ as remaining { return false; }
+}
+}
+fnc procedural(int n): bool {
+do match<ret=bool> n over {
+on _ as remaining { return false; }
+on 7 { return true; }
+}
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(once.contains("match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("do match<ret=bool> n over {"), "{once}");
+    assert!(once.contains("on _ as remaining {"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn generic_defaults_and_named_type_arguments_are_semantically_preserved() {
+    let source = r#"fnc choose<A, B=int, C=B, D=Array<C>, E=string>(A input): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<A=int, D=Array<string>>(7);
+  val int second = choose<E=bool, A=int>(7);
+  val int third = choose<int, _>(7);
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    assert!(
+        once.contains("choose<A, B=int, C=B, D=Array<C>, E=string>"),
+        "{once}"
+    );
+    assert!(once.contains("choose<A=int, D=Array<string>>(7)"), "{once}");
+    assert!(once.contains("choose<E=bool, A=int>(7)"), "{once}");
+    assert!(once.contains("choose<int, _>(7)"), "{once}");
+    assert_eq!(format_source(&once).unwrap(), once);
+    assert!(is_formatted(&once).unwrap());
+}
+
+#[test]
+fn generic_inference_hole_and_comparison_like_tokens_do_not_mutate() {
+    let source = r#"fnc choose<T=int>(): int {
+  return 7;
+}
+fnc use(): int {
+  val int first = choose<T=_>();
+  val int second = choose<Array<_>>();
+  val int third = choose<Option<Array<_>>>();
+  return first + second + third;
+}
+"#;
+    let once = format_source(source).unwrap();
+    for preserved in [
+        "choose<T=_>()",
+        "choose<Array<_>>()",
+        "choose<Option<Array<_>>>()",
+    ] {
+        assert!(once.contains(preserved), "{preserved}: {once}");
+    }
+    assert_eq!(format_source(&once).unwrap(), once);
+}
+
+#[test]
+fn typed_lambda_and_explicit_tuple_record_forms_are_stable() {
+    let source = r#"type Mapper = (int) => int;
+fnc demo(): void {
+const mapper: Mapper = |int n| -> (n * 3) as int;
+const declared = |int n|: int -> n * 3;
+const pair = tuple(4, "four");
+const singleton = tuple(7) as tuple[int];
+const point = struct{x: int, y: int}{x: 3, y: 5};
+const just_x = point as {x: int};
+return;
+}
+"#;
+    let formatted = format_source(source).expect("valid typed lambda and aggregate syntax");
+    for fragment in [
+        "|int n| -> (n * 3) as int",
+        "|int n|: int -> n * 3",
+        "tuple(4, \"four\")",
+        "tuple(7) as tuple[int]",
+        "struct{x: int, y: int}{x: 3, y: 5}",
+        "point as {x: int}",
+    ] {
+        assert!(
+            formatted.contains(fragment),
+            "formatter lost the required syntax {fragment:?}: {formatted}"
+        );
+    }
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
 #[test]

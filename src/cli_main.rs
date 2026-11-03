@@ -1,8 +1,9 @@
-use oreslang_format::{format_source, is_formatted};
+use oreslang_format::{FormatError, format_source, is_formatted};
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const HELP: &str = r#"oresfmt - the canonical Oreslang formatter
@@ -31,6 +32,7 @@ OTHER:
     -h, --help  Print help
     -V, --version
                 Print version
+    --          Stop option parsing; remaining arguments are filesystem paths
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
@@ -68,7 +70,9 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("oresfmt: {err}");
-            ExitCode::from(2)
+            // Syntax/formatting rejection is an ordinary input failure.
+            // Keep usage, Git-policy, filesystem and process failures distinct.
+            ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
         }
     }
 }
@@ -78,7 +82,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut explicit_mode: Option<&'static str> = None;
     let mut policy = WritePolicy::default();
     let mut paths = Vec::new();
+    let mut parse_options = true;
 
+<<<<<<< HEAD
     for arg in env::args().skip(1) {
         match arg.as_str() {
             "--dry-run" => select_mode(&mut mode, &mut explicit_mode, Mode::DryRun, "--dry-run")?,
@@ -101,7 +107,55 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 return Err(format!("unknown option: {arg}").into());
             }
             _ => paths.push(PathBuf::from(arg)),
+=======
+    for arg in env::args_os().skip(1) {
+        if parse_options && arg == OsStr::new("--") {
+            parse_options = false;
+            continue;
+>>>>>>> refs/remotes/origin/main
         }
+
+        if parse_options {
+            if let Some(arg) = arg.to_str() {
+                match arg {
+                    "--dry-run" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::DryRun, "--dry-run")?
+                    }
+                    "--write" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Write, "--write")?
+                    }
+                    "--check" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Check, "--check")?
+                    }
+                    "--stdout" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?
+                    }
+                    "--ok-to-mod-dirty-files" => policy.allow_dirty_tracked = true,
+                    "--ok-to-mod-untracked-files" => policy.allow_untracked = true,
+                    "--ok-to-mod-outside-git" => policy.allow_outside_git = true,
+                    "-h" | "--help" => {
+                        io::stdout().write_all(HELP.as_bytes())?;
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    "-V" | "--version" => {
+                        writeln!(io::stdout(), "oresfmt {}", env!("CARGO_PKG_VERSION"))?;
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    _ if arg.starts_with('-') && arg != "-" => {
+                        return Err(format!("unknown option: {arg}").into());
+                    }
+                    _ => {
+                        paths.push(PathBuf::from(arg));
+                        continue;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Non-UTF-8 arguments are valid filesystem paths. They cannot match
+        // textual options, so preserve their raw OsString bytes.
+        paths.push(PathBuf::from(arg));
     }
 
     if paths.is_empty() {
@@ -150,7 +204,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         let input = fs::read_to_string(&paths[0])?;
         let formatted = format_source(&input)?;
-        print!("{formatted}");
+        io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -244,25 +298,100 @@ fn write_files(
     }
 
     // Re-read the whole write set after Git preflight. This catches editors,
-    // generators, or hooks that changed a file while formatting was being
-    // prepared, instead of overwriting newer bytes with a stale snapshot.
+    // generators, hooks, or path substitutions that changed a target while
+    // formatting was being prepared, before any write begins.
     for (path, original, _) in &changes {
-        let current = fs::read_to_string(path)?;
-        if current.as_bytes() != original.as_bytes() {
-            return Err(format!(
-                "refusing to overwrite file changed during formatter preflight: {}",
-                path.display()
-            )
-            .into());
-        }
+        revalidate_write_target(path, original)?;
     }
 
-    for (path, _, formatted) in changes {
+    for (path, original, formatted) in changes {
+        // Narrow the remaining TOCTOU window by validating each target again
+        // immediately before its write. In particular, refuse if a path or one
+        // of its parent directories was replaced by a symlink after preflight.
+        revalidate_write_target(&path, &original)?;
         fs::write(&path, formatted)?;
         println!("formatted {}", path.display());
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn revalidate_write_target(
+    path: &Path,
+    original: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    reject_symlinked_ancestors(path)?;
+
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("cannot re-inspect write target {}: {err}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "refusing to overwrite write target replaced by symlink: {}",
+            path.display()
+        )
+        .into());
+    }
+    if !metadata.is_file() {
+        return Err(format!(
+            "refusing to overwrite write target that is no longer a regular file: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    let current = fs::read_to_string(path)?;
+    if current.as_bytes() != original.as_bytes() {
+        return Err(format!(
+            "refusing to overwrite file changed during formatter preflight: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+fn reject_symlinked_ancestors(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+
+    let mut current = if parent.is_absolute() {
+        PathBuf::new()
+    } else {
+        env::current_dir()?
+    };
+
+    for component in parent.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                current.pop();
+            }
+            Component::Normal(part) => {
+                current.push(part);
+                let metadata = fs::symlink_metadata(&current).map_err(|err| {
+                    format!(
+                        "cannot inspect path component {} for {}: {err}",
+                        current.display(),
+                        path.display()
+                    )
+                })?;
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "refusing path through symlinked directory: {} (input {})",
+                        current.display(),
+                        path.display()
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn enforce_write_policy(
@@ -391,6 +520,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         )
         .into());
     }
+    reject_symlinked_ancestors(path)?;
     if metadata.is_file() {
         out.push(path.to_path_buf());
         return Ok(());
@@ -424,4 +554,58 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod write_safety_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "oresfmt-write-safety-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        // macOS temp_dir traverses /var -> /private/var. Resolve only our
+        // fixture root so the write guard reaches the mutation under test.
+        fs::canonicalize(root).unwrap()
+    }
+
+    #[test]
+    fn revalidation_rejects_changed_contents() {
+        let root = scratch("changed");
+        let path = root.join("sample.ores");
+        fs::write(&path, "before").unwrap();
+        fs::write(&path, "after").unwrap();
+
+        let err = revalidate_write_target(&path, "before").unwrap_err();
+        assert!(err.to_string().contains("changed during formatter preflight"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revalidation_rejects_leaf_replaced_by_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("leaf-symlink");
+        let path = root.join("sample.ores");
+        let target = root.join("target.ores");
+        fs::write(&path, "before").unwrap();
+        fs::write(&target, "external").unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink(&target, &path).unwrap();
+
+        let err = revalidate_write_target(&path, "before").unwrap_err();
+        assert!(err.to_string().contains("replaced by symlink"));
+        assert_eq!(fs::read_to_string(target).unwrap(), "external");
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
