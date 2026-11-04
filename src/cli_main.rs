@@ -514,12 +514,13 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
     // Never coerce "inconclusive" to either success or a syntax failure.
     let mut outcome: u8 = 0;
     for path in files {
-        let mut child = Command::new(&compiler)
+        let mut command = Command::new(&compiler);
+        command
             .arg("--analyze")
             .arg(compiler_path_argument(&path))
             .env(ANALYZE_GUARD_ENV, "1")
-            .stdin(Stdio::null())
-            .spawn()
+            .stdin(Stdio::null());
+        let mut child = spawn_retrying_busy(&mut command)
             .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
         match wait_with_timeout(&mut child, timeout)? {
             Some(status) if status.success() => {}
@@ -540,6 +541,24 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         }
     }
     Ok(ExitCode::from(outcome))
+}
+
+/// Retries briefly when the kernel reports the executable as open for writing.
+/// A just-written wrapper script can hit this while any concurrently forked
+/// process still holds the writer's descriptor.
+fn spawn_retrying_busy(command: &mut Command) -> std::io::Result<Child> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match command.spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            result => return result,
+        }
+    }
 }
 
 fn analysis_timeout() -> Result<Duration, Box<dyn std::error::Error>> {
