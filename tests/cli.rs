@@ -504,6 +504,33 @@ exit 2"#);
 
 #[cfg(unix)]
 #[test]
+fn analyze_mixed_finding_and_inconclusive_stays_inconclusive() {
+    let repo = TempRepo::new("analysis-mixed-status");
+    let first = repo.write("a.atto", UNFORMATTED);
+    let second = repo.write("b.ores", UNFORMATTED);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"case "$2" in
+ a.atto) echo "finding" >&2; exit 1 ;;
+ b.ores) echo "effects inconclusive" >&2; exit 2 ;;
+ *) exit 9 ;;
+esac"#,
+    );
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "a.atto", "b.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("finding"));
+    assert!(stderr.contains("effects inconclusive"));
+    assert_eq!(fs::read_to_string(first).unwrap(), UNFORMATTED);
+    assert_eq!(fs::read_to_string(second).unwrap(), UNFORMATTED);
+}
+#[cfg(unix)]
+#[test]
 fn analyze_dash_prefixed_source_cannot_become_a_compiler_option() {
     let repo = TempRepo::new("analysis-dash-path");
     repo.write("-x.ores", UNFORMATTED);
