@@ -355,3 +355,25 @@ The ordinary `format_source` API keeps existing default formatting.
 Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
+
+## Failure analysis
+
+`oreslang-format --analyze src/` runs the compiler's static analysis for each
+selected `.ores` file without rewriting or executing source. Set `ORESLANG_BIN`
+to a compiler supporting `--analyze` (default: `oreslang-core`). Diagnostics include
+suggested `throws`, `raises`, and `panics` markers and unresolved calls. Missing
+compilers and failed checks produce a nonzero exit. Warnings remain advisory.
+Formatting preserves failure signatures and explicit `throw`, `raise`, `panic`,
+and deferred `recover()` operations; formatting does not infer or insert markers.
+
+The caller opt-out `unchecked call()` is preserved verbatim in scope, including
+`await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
+effect assumptions, never runtime failure routing or ordinary compiler checks.
+`ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+
+Each file gets `ORESFMT_ANALYZE_TIMEOUT_SECS` seconds (default 300, maximum 86400);
+a timeout counts as a failed check and only the direct compiler process is killed.
+The compiler runs with stdin closed. A bare `ORESLANG_BIN` name searches absolute
+`PATH` entries only, so a checked-out repository cannot supply the compiler through
+an empty or `.` entry. `ORESFMT_ANALYZE_ACTIVE` is set for the compiler, and a
+formatter that sees it refuses to run, which stops wrappers that lead back here.
