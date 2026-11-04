@@ -509,7 +509,7 @@ fn analyze_real_llvm_compiler_bridge_is_inconclusive() {
     use std::ffi::OsString;
     let compiler: OsString = std::env::var_os("ORESLANG_REAL_LLVM_BIN")
         .expect("set ORESLANG_REAL_LLVM_BIN to the exact-head oreslang-llvmc binary");
-    let compiler = fs::canonicalize(compiler)
+    let compiler = fs::canonicalize(PathBuf::from(compiler))
         .expect("ORESLANG_REAL_LLVM_BIN must resolve to the compiled LLVM binary");
     let repo = TempRepo::new("real-llvm-analyze-bridge");
     let valid = "pub routine main(): int {\n    return 0;\n}\n";
