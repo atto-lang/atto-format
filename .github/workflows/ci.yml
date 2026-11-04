@@ -29,6 +29,7 @@ jobs:
       - run: cargo test --all-targets
       - run: cargo test --doc
       - run: python3 -m unittest discover -s scripts -p 'test_compiler_parity.py'
+      - run: python3 -m unittest discover -s scripts -p 'test_compiler_ast_parity.py'
       - run: python3 -m unittest discover -s tests -p 'test_private_ci_visibility.py'
       - run: cargo clippy --all-targets -- -D warnings
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
