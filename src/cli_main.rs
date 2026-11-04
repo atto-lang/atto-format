@@ -4,12 +4,13 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Child, Command, ExitCode, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 const HELP: &str = r#"oresfmt - the canonical Oreslang formatter
 
 USAGE:
-    oresfmt [--dry-run | --write | --check | --stdout] [safety flags] <path>...
+    oresfmt [--dry-run | --write | --check | --stdout | --analyze] [safety flags] <path>...
     oresfmt [--check] -
 
 MODES:
@@ -17,6 +18,9 @@ MODES:
     --write     Rewrite files in place after Git safety checks
     --check     Do not write files; exit 1 if any input is not canonical
     --stdout    Print one formatted file to stdout instead of writing it
+    --analyze   Run compiler static diagnostics without executing or modifying source
+                Uses ORESLANG_BIN (default: oreslang-core) with --analyze
+                Limits each file to ORESFMT_ANALYZE_TIMEOUT_SECS (default: 300)
 
 MIGRATION:
     --insert-mtd  Insert optional 'mtd' before bare class/actor methods
@@ -48,6 +52,7 @@ enum Mode {
     Write,
     Check,
     Stdout,
+    Analyze,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,6 +108,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     "--check" => {
                         select_mode(&mut mode, &mut explicit_mode, Mode::Check, "--check")?
                     }
+                    "--analyze" => {
+                        select_mode(&mut mode, &mut explicit_mode, Mode::Analyze, "--analyze")?
+                    }
                     "--stdout" => {
                         select_mode(&mut mode, &mut explicit_mode, Mode::Stdout, "--stdout")?
                     }
@@ -147,6 +155,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Err("write-safety override flags require --write".into());
     }
 
+    if mode == Mode::Analyze && insert_mtd {
+        return Err("--insert-mtd cannot be combined with --analyze".into());
+    }
+
     let has_stdin = paths
         .iter()
         .any(|path| path.as_os_str() == std::ffi::OsStr::new("-"));
@@ -155,8 +167,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 
     if has_stdin {
-        if mode == Mode::Write {
-            return Err("--write cannot be used with stdin".into());
+        if mode == Mode::Write || mode == Mode::Analyze {
+            return Err("--write/--analyze cannot be used with stdin".into());
         }
 
         let mut input = String::new();
@@ -196,6 +208,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let files = collect_files(&paths)?;
 
     match mode {
+        Mode::Analyze => run_analysis(files),
         Mode::DryRun => {
             for path in files {
                 let input = fs::read_to_string(&path)?;
@@ -476,6 +489,141 @@ fn git_file_state(path: &Path) -> Result<GitFileState, Box<dyn std::error::Error
     }
 }
 
+/// Set on every compiler process so a wrapper, copy or hard link that leads back
+/// to the formatter stops at one level instead of spawning without bound.
+const ANALYZE_GUARD_ENV: &str = "ORESFMT_ANALYZE_ACTIVE";
+const ANALYZE_TIMEOUT_ENV: &str = "ORESFMT_ANALYZE_TIMEOUT_SECS";
+const DEFAULT_ANALYZE_TIMEOUT_SECS: u64 = 300;
+const MAX_ANALYZE_TIMEOUT_SECS: u64 = 86_400;
+
+fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    if env::var_os(ANALYZE_GUARD_ENV).is_some() {
+        return Err("compiler re-entered the formatter; recursive analysis refused".into());
+    }
+    let timeout = analysis_timeout()?;
+    let requested = env::var_os("ORESLANG_BIN").unwrap_or_else(|| "oreslang-core".into());
+    let compiler = resolve_compiler(Path::new(&requested))?;
+    if fs::canonicalize(&compiler)? == fs::canonicalize(env::current_exe()?)? {
+        return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
+    }
+
+    // Preserve the compiler-owned analysis outcomes across multiple files:
+    // 0 = all verified in the backend's explicitly supported subset,
+    // 1 = any source/compilation/process failure,
+    // 2 = at least one inconclusive result, with no failures.
+    // Never coerce "inconclusive" to either success or a syntax failure.
+    let mut outcome: u8 = 0;
+    for path in files {
+        let mut child = Command::new(&compiler)
+            .arg("--analyze")
+            .arg(compiler_path_argument(&path))
+            .env(ANALYZE_GUARD_ENV, "1")
+            .stdin(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
+        match wait_with_timeout(&mut child, timeout)? {
+            Some(status) if status.success() => {}
+            Some(status) if status.code() == Some(2) => {
+                if outcome == 0 {
+                    outcome = 2;
+                }
+            }
+            Some(_) => outcome = 1,
+            None => {
+                eprintln!(
+                    "oresfmt: analysis timed out after {}s: {}",
+                    timeout.as_secs(),
+                    path.display()
+                );
+                outcome = 1;
+            }
+        }
+    }
+    Ok(ExitCode::from(outcome))
+}
+
+fn analysis_timeout() -> Result<Duration, Box<dyn std::error::Error>> {
+    let Some(value) = env::var_os(ANALYZE_TIMEOUT_ENV) else {
+        return Ok(Duration::from_secs(DEFAULT_ANALYZE_TIMEOUT_SECS));
+    };
+    match value.to_str().and_then(|text| text.parse::<u64>().ok()) {
+        Some(seconds @ 1..=MAX_ANALYZE_TIMEOUT_SECS) => Ok(Duration::from_secs(seconds)),
+        _ => Err(format!(
+            "{ANALYZE_TIMEOUT_ENV} must be a whole number of seconds from 1 to {MAX_ANALYZE_TIMEOUT_SECS}"
+        )
+        .into()),
+    }
+}
+
+/// Resolves the compiler once, so the program checked is the program executed.
+/// A bare name only searches absolute PATH entries: an empty or `.` entry must
+/// not let a checked-out repository supply the compiler.
+fn resolve_compiler(requested: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if requested.as_os_str().is_empty() {
+        return Err("ORESLANG_BIN is empty".into());
+    }
+    if requested.is_absolute() || requested.components().count() > 1 {
+        return if is_executable_file(requested) {
+            Ok(requested.to_path_buf())
+        } else {
+            Err(format!("compiler is not an executable file: {}", requested.display()).into())
+        };
+    }
+    env::split_paths(&env::var_os("PATH").unwrap_or_default())
+        .filter(|directory| directory.is_absolute())
+        .map(|directory| directory.join(requested))
+        .find(|candidate| is_executable_file(candidate))
+        .ok_or_else(|| {
+            format!(
+                "compiler not found on PATH: {}; set ORESLANG_BIN",
+                requested.display()
+            )
+            .into()
+        })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+/// Keeps a source named like `-x.ores` from being parsed as a compiler option.
+fn compiler_path_argument(path: &Path) -> PathBuf {
+    if path.as_os_str().as_encoded_bytes().first() == Some(&b'-') {
+        Path::new(".").join(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// Returns `None` after killing a compiler that outlives the timeout. Only the
+/// direct child is killed; anything it spawned is left to its own lifetime.
+fn wait_with_timeout(
+    child: &mut Child,
+    timeout: Duration,
+) -> std::io::Result<Option<ExitStatus>> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let mut files = Vec::new();
     for path in inputs {
@@ -484,7 +632,7 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     files.sort();
     files.dedup();
     if files.is_empty() {
-        return Err("no .ores files found".into());
+        return Err("no .atto or .ores files found".into());
     }
     Ok(files)
 }
@@ -528,7 +676,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         }
         if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "ores") {
+        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "atto" || ext == "ores") {
             out.push(child);
         }
     }

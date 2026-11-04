@@ -54,7 +54,9 @@ Relevant merged contracts include:
 
 Formatter policy for these merged changes:
 
-1. Canonicalize `gen*` / `generator*` declaration sugar to `generator`.
+1. Canonicalize generator declaration aliases to bare `gen*`: starred
+   `gen*` / `generator*` forms and legacy `generator fnc/routine` input
+   all format to the v1 canonical marker without a redundant callable kind.
 2. Preserve generator `yield` / `yield*`; rewrite only runtime `rt yield`
    to `rt cooperate`.
 3. Treat a multiline pipe-lambda expression body as a continuation until the

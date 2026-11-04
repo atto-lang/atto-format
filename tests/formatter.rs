@@ -157,25 +157,55 @@ yield* sync_values();
 return;
 }
 
+generator routine legacy_values(): int {
+yield 7;
+return;
+}
+
+pub gen* canonical(): Iterator<int> {
+yield 8;
+return;
+}
+
 // gen* fnc fake() should stay a comment
+fnc generator(int value) -> int {
+return value;
+}
 fnc math(int gen, int value) -> int {
 return gen * value;
 }
 "#;
-    let expected = r#"generator fnc sync_values() -> Iterator<int> {
+    let expected = r#"gen* sync_values() -> Iterator<int> {
   rt cooperate;
   yield* inner();
   return;
 }
 
 
-async generator fnc async_values() -> AsyncIterator<int> {
+async gen* async_values() -> AsyncIterator<int> {
   rt cooperate();
   yield* sync_values();
   return;
 }
 
+
+gen* legacy_values() -> int {
+  yield 7;
+  return;
+}
+
+
+pub gen* canonical() -> Iterator<int> {
+  yield 8;
+  return;
+}
+
 // gen* fnc fake() should stay a comment
+fnc generator(int value) -> int {
+  return value;
+}
+
+
 fnc math(int gen, int value) -> int {
   return gen * value;
 }
@@ -316,7 +346,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub int balance: 100;
+    pub let int balance: 100;
 
     pub read() -> int {
       return self.balance;
@@ -443,7 +473,7 @@ end
 end
 "#;
     let expected = r#"define class Child extends Parent<int>, Audited implements Named, Serializable as
-  pub val String name;
+  pub String name;
 
   pub render() -> String {
     return self.name;
@@ -1788,10 +1818,10 @@ end
 "#;
     let got = format_source(src).unwrap();
     for unchanged in [
-        "pub int balance: 100;",
-        "final mut string label: \"fixed\";",
-        "final int limit: 9;",
-        "mut Array<int> items: new Array<int>();",
+        "pub let int balance: 100;",
+        "string label: \"fixed\";",
+        "const int limit: 9;",
+        "let mut Array<int> items: new Array<int>();",
         "let int n = 2;",
         "balance = 3;",
     ] {
@@ -2182,4 +2212,24 @@ end
         once,
         oreslang_format::format_source_with_mtd(&once).unwrap()
     );
+}
+
+#[test]
+fn failure_signatures_and_recovery_preserve_semantics_and_are_idempotent() {
+    let source = "fnc fail(): void throws raises panics {\nraise 42;\n}\nfnc handle(): void {\ndefer || -> { recover(); };\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("throws raises panics"));
+    assert!(formatted.contains("raise 42;"));
+    assert!(formatted.contains("recover()"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn unchecked_call_markers_preserve_call_scope() {
+    let source = "fnc use(): void {\nval result = unchecked service.read(argument());\nval future = await unchecked fetch();\nval handled = trap unchecked read();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("unchecked service.read(argument())"));
+    assert!(formatted.contains("await unchecked fetch()"));
+    assert!(formatted.contains("trap unchecked read()"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }

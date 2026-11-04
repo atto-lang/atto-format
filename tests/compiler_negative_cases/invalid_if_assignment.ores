@@ -1,0 +1,6 @@
+fnc check(int value) -> int {
+  if value = 1 then
+    return 1;
+  fi
+  return 0;
+}

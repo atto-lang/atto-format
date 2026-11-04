@@ -67,7 +67,7 @@ the full field contract.
   - classes: `define [pub|private] [abstract] class Name ... as`;
   - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
   - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
-  - package/module callables: `[pub|private] [quantum] [static] [async] [generator] [nlex] [pure] [trap] [structural] fnc|routine name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - package/module callables use the ordinary `fnc|routine` modifier order; generator declarations canonicalize separately to `[pub|private] [static] [async|suspend] gen* name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
   - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
@@ -166,11 +166,13 @@ multiline expression body, the formatter adds one continuation indent and
 fails closed if the containing statement never reaches its required explicit
 semicolon. Block lambdas keep explicit `return` statements.
 
-Generator declaration aliases accepted by the compiler are normalized:
-`fnc gen* values()` and `fnc generator* values()` become
-`generator fnc values()`. Delegating `yield* source;` is preserved, and only
-the scheduler compatibility spelling `rt yield` is rewritten to
-`rt cooperate`.
+Generator declaration aliases accepted by the compiler are normalized to the
+canonical bare marker: `fnc gen* values()`, `fnc generator* values()`,
+`generator fnc values()`, and `generator routine values()` become
+`gen* values()`. Already-canonical `gen*` stays idempotent, while a callable
+literally named `generator` is preserved. Delegating `yield* source;` is
+preserved, and only the scheduler compatibility spelling `rt yield` is
+rewritten to `rt cooperate`.
 
 The formatter is intentionally conservative about grammar that is still
 changing. It reorders only recognized declaration-modifier prefixes; imports,
@@ -357,3 +359,41 @@ The ordinary `format_source` API keeps existing default formatting.
 Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
+
+## Experimental compiler analysis adapter
+
+`oresfmt --analyze src/` delegates each selected `.atto` (canonical) or
+legacy `.ores` file to `ORESLANG_BIN --analyze FILE` without rewriting the
+source. It is **not** an effect inference implementation and it is **not yet
+verified against a production compiler**: current Java/GraalVM and LLVM
+compiler entrypoints must implement and validate a compatible `--analyze`
+contract before this mode can be promoted. A missing/incompatible compiler
+fails rather than silently falling back to formatting or a lexical scan.
+Delegated analysis exit codes preserve the versioned compiler outcome:
+`0` means all inputs completed an explicitly supported analysis,
+`2` means at least one inconclusive input and no other failures, and
+`1` means any source/compiler/process failure. For multiple files,
+failure takes precedence over inconclusive; neither becomes success.
+This exit convention is experimental until verified against actual
+compiler binaries.
+
+For immediate advisory diagnostics on explicit `throw`, `raise`, `panic`,
+and declaration markers, use the independent
+`atto test --effects --file src/example.atto` command in
+`oreslang-test.cli`. That scanner is lexical and does not prove transitive
+effects or guest runtime behavior. Future compiler diagnostics must distinguish
+an unsupported/unknown effect from a certified safe result.
+
+The formatter preserves exception effect signatures and deferred `recover()`
+and never inserts/invents effect declarations. A caller's
+`unchecked call()` form is preserved unchanged; it is not a security
+or runtime-failure bypass.
+
+A bare `ORESLANG_BIN` searches only absolute `PATH` entries. The selected
+compiler cannot resolve to this formatter, including through a symlink.
+`ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
+The compiler receives closed stdin, and a per-file timeout of
+`ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
+Only the direct child is terminated on timeout; **descendants are not
+contained**. Do not use untrusted compiler binaries or rely on this adapter
+as a sandbox. Analysis failures produce nonzero status and no source rewrites.

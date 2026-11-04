@@ -204,7 +204,10 @@ fn typed_initialize_end_headers_are_canonical_and_idempotent() {
             "define class Connection as\n  final int connection_id;\n  {header}\n    self.connection_id = id;\n  end\nend\n"
         );
         let formatted = format_source(&source).unwrap();
-        assert!(formatted.contains("initialize(int id) -> void ::"), "{formatted}");
+        assert!(
+            formatted.contains("initialize(int id) -> void ::"),
+            "{formatted}"
+        );
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }
