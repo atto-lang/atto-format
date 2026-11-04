@@ -365,6 +365,13 @@ verified against a production compiler**: current Java/GraalVM and LLVM
 compiler entrypoints must implement and validate a compatible `--analyze`
 contract before this mode can be promoted. A missing/incompatible compiler
 fails rather than silently falling back to formatting or a lexical scan.
+Delegated analysis exit codes preserve the versioned compiler outcome:
+`0` means all inputs completed an explicitly supported analysis,
+`2` means at least one inconclusive input and no other failures, and
+`1` means any source/compiler/process failure. For multiple files,
+failure takes precedence over inconclusive; neither becomes success.
+This exit convention is experimental until verified against actual
+compiler binaries.
 
 For immediate advisory diagnostics on explicit `throw`, `raise`, `panic`,
 and declaration markers, use the independent
