@@ -188,10 +188,12 @@ async gen* async_values() -> AsyncIterator<int> {
   return;
 }
 
+
 gen* legacy_values() -> int {
   yield 7;
   return;
 }
+
 
 pub gen* canonical() -> Iterator<int> {
   yield 8;
@@ -202,6 +204,8 @@ pub gen* canonical() -> Iterator<int> {
 fnc generator(int value) -> int {
   return value;
 }
+
+
 fnc math(int gen, int value) -> int {
   return gen * value;
 }
@@ -342,7 +346,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub int balance: 100;
+    pub let int balance: 100;
 
     pub read() -> int {
       return self.balance;
@@ -469,7 +473,7 @@ end
 end
 "#;
     let expected = r#"define class Child extends Parent<int>, Audited implements Named, Serializable as
-  pub val String name;
+  pub String name;
 
   pub render() -> String {
     return self.name;
@@ -1814,10 +1818,10 @@ end
 "#;
     let got = format_source(src).unwrap();
     for unchanged in [
-        "pub int balance: 100;",
-        "final mut string label: \"fixed\";",
-        "final int limit: 9;",
-        "mut Array<int> items: new Array<int>();",
+        "pub let int balance: 100;",
+        "string label: \"fixed\";",
+        "const int limit: 9;",
+        "let mut Array<int> items: new Array<int>();",
         "let int n = 2;",
         "balance = 3;",
     ] {

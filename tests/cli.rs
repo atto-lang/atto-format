@@ -581,7 +581,7 @@ exec "$FORMATTER" "$@""#,
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert_eq!(fs::read_to_string(repo.root.join("depth")).unwrap(), "x\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }

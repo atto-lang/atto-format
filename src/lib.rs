@@ -418,7 +418,7 @@ fn visible_double_colon_span(line: &str, after: usize, initial: LexState) -> Opt
     None
 }
 
-/// Split the compiler's compact optional-`as` / `::` end-delimited callable form
+/// Split the compiler's compact `::` end-delimited callable form
 /// before the ordinary line-oriented indentation pass. This is deliberately
 /// narrow: only free/module-style `fnc`/`routine` headers with an explicit
 /// slim arrow and a final visible `end` are expanded. Unsupported actor,
@@ -456,16 +456,23 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
             output.push_str(line);
             continue;
         };
-        let as_span = words
-            .iter()
-            .copied()
-            .find(|span| span.start > close && word(*span) == "as");
         let double_colon_span = visible_double_colon_span(line, close, initial);
-        let Some(separator_span) = [as_span, double_colon_span]
-            .into_iter()
-            .flatten()
-            .min_by_key(|span| span.start)
-        else {
+        // Only 'as' before the body delimiter is a forbidden callable
+        // separator. 'as' after '::' belongs to an ordinary body expression
+        // (e.g. an if-binding) and must not be rejected by the formatter.
+        let invalid_as_separator = words.iter().copied().any(|span| {
+            span.start > close
+                && word(span) == "as"
+                && header_tail_is_complete_type(&line[close + 1..span.start])
+                && double_colon_span.is_none_or(|delimiter| span.start < delimiter.start)
+        });
+        if invalid_as_separator {
+            return Err(FormatError::new(
+                line_index + 1,
+                "callable bodies cannot use 'as'; use '::'",
+            ));
+        }
+        let Some(separator_span) = double_colon_span else {
             output.push_str(line);
             continue;
         };
@@ -514,7 +521,7 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         {
             return Err(FormatError::new(
                 line_index + 1,
-                "callable body separator must be exactly one 'as' or one contiguous '::'",
+                "callable body separator must be one contiguous '::'",
             ));
         }
         output.push_str(line[..separator_span.end].trim_end());
@@ -663,6 +670,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             instance_member,
             keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
+        if keyword_stack.is_empty()
+            && in_direct_storage_container(&define_stack, &brace_stack)
+            && pending_callable_parameter_depth == 0
+        {
+            content = canonicalize_initialize_header(&content, lex, line_no)?;
+        }
         content = canonicalize_generator_output_line(&content, lex);
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
@@ -1382,14 +1395,6 @@ fn canonical_storage_field_separator(line: &str, initial: LexState) -> Option<us
 
 fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<String> {
     let separator = canonical_storage_field_separator(line, initial)?;
-    // A legacy uninitialized val field may still be filled in its class
-    // constructor. Rewriting it to final mut would manufacture an invalid
-    // declaration before the coordinated breaking constructor migration.
-    // Preserve ALL uninitialized member spellings until both compilers
-    // enforce declaration-site initialization consistently.
-    if line.as_bytes().get(separator) == Some(&b';') {
-        return None;
-    }
     let lhs = &line[..separator];
     if lhs
         .chars()
@@ -1417,30 +1422,49 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
         return None;
     }
     let binding = match &lhs[words[cursor].start..words[cursor].end] {
-        "const" | "final" => {
-            cursor += 1;
-            Some("final")
-        }
         "val" => {
             cursor += 1;
-            Some("final mut")
+            Some("val")
         }
         "let" => {
             cursor += 1;
-            None
+            Some("let")
+        }
+        "final" => {
+            cursor += 1;
+            Some("final")
+        }
+        "const" => {
+            cursor += 1;
+            Some("const")
         }
         _ => None,
     };
-    let mut mutable = false;
-    if cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut" {
-        if binding == Some("final mut") {
-            return None; // duplicate val mut remains a compiler error
+    // Explicit 'let', 'final', and 'const' are semantic, not style choices.
+    // A bare field is already VAL; only explicit VAL is redundant.
+    let mutable = cursor < words.len() && &lhs[words[cursor].start..words[cursor].end] == "mut";
+    if mutable {
+        // Java treats plain VAL as a mutable referent already. Preserve the
+        // explicit spelling for the compiler to diagnose val mut rather than
+        // erasing a possibly-invalid modifier sequence.
+        if binding == Some("val") {
+            return None;
         }
-        mutable = true;
         cursor += 1;
     }
+    // A repeated or conflicting declaration qualifier is a compiler error.
+    // Do not accidentally remove its first modifier and turn the remainder
+    // into a different (potentially valid) declaration.
+    if cursor < words.len()
+        && matches!(
+            &lhs[words[cursor].start..words[cursor].end],
+            "pub" | "private" | "val" | "let" | "const" | "final" | "mut"
+        )
+    {
+        return None;
+    }
     if words.len() < cursor + 2 {
-        return None; // not a typed field (e.g. legacy name: Type)
+        return None;
     }
     let field = words.last()?;
     if !lhs[field.end..].trim().is_empty() {
@@ -1450,20 +1474,21 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
     if type_and_name.is_empty() || type_and_name.contains("::") {
         return None;
     }
-    // The declaration type may contain generic args, but the text before
-    // the name must not itself contain an initializer or a callable.
+    // Uninitialized fields without VAL need no rewrite. In particular,
+    // leave malformed explicit modifiers alone for the compiler diagnostics.
+    if line.as_bytes().get(separator) == Some(&b';') && binding != Some("val") {
+        return None;
+    }
     let mut prefix = String::new();
     if let Some(vis) = visibility {
         prefix.push_str(vis);
         prefix.push(' ');
     }
-    if let Some(binding) = binding {
+    if let Some(binding) = binding.filter(|b| *b != "val") {
         prefix.push_str(binding);
         prefix.push(' ');
-    } else if mutable {
-        prefix.push_str("mut ");
     }
-    if mutable && binding == Some("final") {
+    if mutable {
         prefix.push_str("mut ");
     }
     prefix.push_str(type_and_name);
@@ -2106,9 +2131,9 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         if &line[span.start..span.end] != "generator" {
             continue;
         }
-        let kind_before = prefix[..index].iter().any(|part| {
-            matches!(&line[part.start..part.end], "fnc" | "routine")
-        });
+        let kind_before = prefix[..index]
+            .iter()
+            .any(|part| matches!(&line[part.start..part.end], "fnc" | "routine"));
         if kind_before && line[span.end..].trim_start().starts_with('(') {
             return None;
         }
@@ -2250,6 +2275,19 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     let prefix = &words[..prefix_len];
     if !plain_word_prefix(line, prefix) {
         return None;
+    }
+
+    // A contextual modifier immediately followed by the parameter list is
+    // the callable name, not another declaration modifier.
+    for (index, span) in prefix.iter().enumerate() {
+        if &line[span.start..span.end] == "generator"
+            && prefix[..index]
+                .iter()
+                .any(|part| matches!(&line[part.start..part.end], "fnc" | "routine"))
+            && line[span.end..].trim_start().starts_with('(')
+        {
+            return None;
+        }
     }
 
     let mut visibility: Option<&str> = None;
@@ -2489,6 +2527,59 @@ fn end_delimited_callable_allowed(defines: &[DefineFrame], braces: &[BraceFrame]
     }
 
     newest.map(|(_, allowed)| allowed).unwrap_or(true)
+}
+
+/// Restrict initializer rewriting to direct class members and a visible
+/// typed header. No source-body or comment token is rewritten by guesswork.
+fn canonicalize_initialize_header(
+    line: &str,
+    initial: LexState,
+    line_no: usize,
+) -> Result<String, FormatError> {
+    // Constructor visibility prefixes are part of the class-member
+    // declaration and must not prevent canonicalizing its return/body marker.
+    // Never rewrite ordinary methods merely containing the word initialize.
+    let header = line.trim_start();
+    let header = header
+        .strip_prefix("pub ")
+        .or_else(|| header.strip_prefix("private "))
+        .unwrap_or(header);
+    if !starts_word(header, "initialize") {
+        return Ok(line.to_string());
+    }
+    let canonical = canonicalize_callable_arrow(line, "->", initial);
+    let line = canonical.as_str();
+    let Some(close) = callable_parameter_close(line, line.len(), initial) else {
+        return Ok(canonical);
+    };
+    let delimiter = visible_double_colon_span(line, close, initial);
+    // A visible 'as' before the body delimiter is an invalid initializer
+    // separator. 'as' inside the body may instead be a valid if-binding or
+    // checked cast, including compact single-line initializer bodies.
+    let invalid_as_separator = visible_word_spans(line, initial).into_iter().any(|span| {
+        span.start > close
+            && &line[span.start..span.end] == "as"
+            && header_tail_is_complete_type(&line[close + 1..span.start])
+            && delimiter.is_none_or(|marker| span.start < marker.start)
+    });
+    if invalid_as_separator {
+        return Err(FormatError::new(
+            line_no,
+            "initialize bodies cannot use 'as'; use '-> void ::' or a braced body",
+        ));
+    }
+    let Some(next_close) = callable_parameter_close(&canonical, canonical.len(), initial) else {
+        return Ok(canonical);
+    };
+    let suffix = &canonical[next_close + 1..];
+    // Preserve comments instead of moving a body marker through them.
+    if contains_visible_comment(suffix, LexState::default()) {
+        return Ok(canonical);
+    }
+    if suffix.trim() == "-> void" {
+        return Ok(format!("{canonical} ::"));
+    }
+    Ok(canonical)
 }
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
@@ -3400,9 +3491,9 @@ fn canonicalize_generator_output_line(line: &str, initial: LexState) -> String {
     let generator_index = prefix
         .iter()
         .position(|span| &line[span.start..span.end] == "generator");
-    let kind_index = prefix.iter().position(|span| {
-        matches!(&line[span.start..span.end], "fnc" | "routine")
-    });
+    let kind_index = prefix
+        .iter()
+        .position(|span| matches!(&line[span.start..span.end], "fnc" | "routine"));
     let (Some(generator_index), Some(kind_index)) = (generator_index, kind_index) else {
         return line.to_string();
     };
@@ -4271,8 +4362,8 @@ end
 
     #[test]
     fn expands_optional_as_compact_end_delimited_callables() {
-        let compact = "fnc identity(int x) -> int as return x; end\n";
-        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
+        let compact = "fnc identity(int x) -> int :: return x; end\n";
+        let expected = "fnc identity(int x) -> int ::\n  return x;\nend\n";
         let got = format_source(compact).unwrap();
         assert_eq!(got, expected);
         assert_eq!(format_source(&got).unwrap(), got);
@@ -4306,15 +4397,15 @@ end
         assert!(text.starts_with("fnc text() -> string ::\n"));
         assert!(text.contains("  return \"::\";\n"));
 
-        let comment = format_source("fnc value() -> int /* :: */ as return 1; end\n").unwrap();
-        assert!(comment.starts_with("fnc value() -> int /* :: */ as\n"));
+        let comment = format_source("fnc value() -> int /* :: */ :: return 1; end\n").unwrap();
+        assert!(comment.starts_with("fnc value() -> int /* :: */ ::\n"));
     }
 
     #[test]
     fn expands_optional_as_compact_keyword_control_flow() {
         let compact =
-            "fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end\n";
-        let expected = r#"fnc classify(int x) -> int as
+            "fnc classify(int x) -> int :: if x > 0 then return 1; else return 0; fi end\n";
+        let expected = r#"fnc classify(int x) -> int ::
   if x > 0 then
     return 1;
   else
@@ -4329,9 +4420,9 @@ end
 
     #[test]
     fn optional_body_separator_after_higher_order_return_type_is_preserved() {
-        let compact_as = "fnc callback() -> () => void as return factory(); end\n";
+        let compact_as = "fnc callback() -> () => void :: return factory(); end\n";
         let got_as = format_source(compact_as).unwrap();
-        assert!(got_as.starts_with("fnc callback() -> () => void as\n"));
+        assert!(got_as.starts_with("fnc callback() -> () => void ::\n"));
         assert!(got_as.contains("  return factory();\n"));
         assert_eq!(format_source(&got_as).unwrap(), got_as);
 
@@ -4344,9 +4435,9 @@ end
 
     #[test]
     fn compact_callable_expands_before_nested_match_end_ownership() {
-        let src = "fnc classify(int x) -> int as match x 1 -> { return 1; } else -> { return 0; } end end\n";
+        let src = "fnc classify(int x) -> int :: match x 1 -> { return 1; } else -> { return 0; } end end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc classify(int x) -> int as\n"));
+        assert!(got.starts_with("fnc classify(int x) -> int ::\n"));
         assert!(got.contains("  match x"));
         assert!(got.contains("return 1;"));
         assert!(got.contains("return 0;"));
@@ -4356,10 +4447,10 @@ end
 
     #[test]
     fn compact_separator_can_precede_real_do_select_body() {
-        let src = r#"fnc consume(Channel<int> incoming) -> void as do select { case readch incoming: val number { return; } } end
+        let src = r#"fnc consume(Channel<int> incoming) -> void :: do select { case readch incoming: val number { return; } } end
 "#;
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void as\n"));
+        assert!(got.starts_with("fnc consume(Channel<int> incoming) -> void ::\n"));
         assert!(got.contains("  do select {\n"));
         assert!(got.contains("    when readch incoming: val number {\n"));
         assert!(got.ends_with("end\n"));
@@ -4391,8 +4482,8 @@ end
 
     #[test]
     fn multiline_callable_as_never_opens_a_done_frame() {
-        let src = "fnc identity(int x) -> int as\nreturn x\nend\n";
-        let expected = "fnc identity(int x) -> int as\n  return x;\nend\n";
+        let src = "fnc identity(int x) -> int ::\nreturn x\nend\n";
+        let expected = "fnc identity(int x) -> int ::\n  return x;\nend\n";
         let got = format_source(src).unwrap();
         assert_eq!(got, expected);
         assert_eq!(format_source(&got).unwrap(), got);
@@ -4400,7 +4491,7 @@ end
 
     #[test]
     fn compact_callable_as_preserves_trailing_end_comment() {
-        let src = "fnc identity(int x) -> int as return x; end // callable\n";
+        let src = "fnc identity(int x) -> int :: return x; end // callable\n";
         let got = format_source(src).unwrap();
         assert!(got.contains("end // callable\n"));
         assert_eq!(format_source(&got).unwrap(), got);
@@ -4408,21 +4499,21 @@ end
 
     #[test]
     fn compact_callable_rejects_visible_syntax_after_block_comment_suffix() {
-        let src = "fnc identity(int x) -> int as return x; end /* comment */ stray\n";
+        let src = "fnc identity(int x) -> int :: return x; end /* comment */ stray\n";
         assert!(format_source(src).is_err());
     }
 
     #[test]
     fn compact_callable_as_ignores_delimiters_hidden_in_comments_and_literals() {
         let src =
-            "fnc value() -> int /* ; as do end */ as /* ; end */ return 7; end // as do end\n";
+            "fnc value() -> int /* ; as do end */ :: /* ; end */ return 7; end // as do end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc value() -> int /* ; as do end */ as\n"));
+        assert!(got.starts_with("fnc value() -> int /* ; as do end */ ::\n"));
         assert!(got.contains("  /* ; end */ return 7;\n"));
         assert!(got.ends_with("end // as do end\n"));
         assert_eq!(format_source(&got).unwrap(), got);
 
-        let string_body = "fnc text() -> string as return \"do end fi;\"; end\n";
+        let string_body = "fnc text() -> string :: return \"do end fi;\"; end\n";
         let string_got = format_source(string_body).unwrap();
         assert!(string_got.contains("  return \"do end fi;\";\n"));
         assert_eq!(format_source(&string_got).unwrap(), string_got);
@@ -4430,9 +4521,9 @@ end
 
     #[test]
     fn compact_callable_as_preserves_nested_lambda_boundaries() {
-        let src = "fnc make() -> () => string as return || -> { return \"do end\"; }; end\n";
+        let src = "fnc make() -> () => string :: return || -> { return \"do end\"; }; end\n";
         let got = format_source(src).unwrap();
-        assert!(got.starts_with("fnc make() -> () => string as\n"));
+        assert!(got.starts_with("fnc make() -> () => string ::\n"));
         assert!(got.contains("return || -> {"));
         assert!(got.contains("\"do end\""));
         assert_eq!(format_source(&got).unwrap(), got);
@@ -4466,7 +4557,7 @@ end
             "fnc j() -> \"ok value\" :: return \"ok value\"; end\n",
             "fnc k() -> {foo: int, bar: string} :: return value; end\n",
             "fnc l() -> struct {foo: int} :: return value; end\n",
-            "fnc m() -> {foo: int} as return value; end\n",
+            "fnc m() -> {foo: int} :: return value; end\n",
             "fnc n() -> record {foo: int} :: return value; end\n",
         ] {
             assert!(format_source(source).is_ok(), "{source}");
@@ -4514,24 +4605,24 @@ end
 
     #[test]
     fn shared_java_round_trip_corpus_formats_idempotently() {
-        let source = include_str!("../tests/fixtures/end-delimited-roundtrip.ores");
+        let source = include_str!("../tests/fixtures/end-delimited-roundtrip.atto");
         let once = format_source(source).unwrap();
         let twice = format_source(&once).unwrap();
         assert_eq!(twice, once);
-        assert!(once.contains("fnc identity(int x) -> int as\n"));
+        assert!(once.contains("fnc identity(int x) -> int ::\n"));
         assert!(once.contains("fnc identity_colon(int x) -> int ::\n"));
-        assert!(once.contains("fnc callback() -> () => void as\n"));
-        assert!(once.contains("fnc text() -> string /* ; as do end */ as\n"));
-        assert!(once.contains("fnc double(int x) -> int as\n"));
+        assert!(once.contains("fnc callback() -> () => void ::\n"));
+        assert!(once.contains("fnc text() -> string /* ; as do end */ ::\n"));
+        assert!(once.contains("fnc double(int x) -> int ::\n"));
     }
 
     #[test]
     fn routine_uses_the_same_end_delimited_separator_formatting() {
-        let compact_as = "routine identity(int x) -> int as return x; end\n";
+        let compact_as = "routine identity(int x) -> int :: return x; end\n";
         let got_as = format_source(compact_as).unwrap();
         assert_eq!(
             got_as,
-            "routine identity(int x) -> int as\n  return x;\nend\n"
+            "routine identity(int x) -> int ::\n  return x;\nend\n"
         );
         assert_eq!(format_source(&got_as).unwrap(), got_as);
 
@@ -4655,5 +4746,38 @@ end
         assert!(got.contains("fnc name() => String;"));
         assert!(got.contains("fnc retry() => bool;"));
         assert!(got.contains("pub name() -> String {"));
+    }
+
+    #[test]
+    fn initializer_header_canonicalizes_visibilities_and_leaves_methods_unchanged() {
+        for visibility in ["pub ", "private "] {
+            let source = format!("{visibility}initialize(int id): void");
+            let expected = format!("{visibility}initialize(int id) -> void ::");
+            let result = canonicalize_initialize_header(&source, LexState::default(), 1).unwrap();
+            assert_eq!(result, expected);
+        }
+        let ordinary_method = "pub initialize_now(int id): void";
+        assert_eq!(
+            canonicalize_initialize_header(ordinary_method, LexState::default(), 1).unwrap(),
+            ordinary_method
+        );
+    }
+
+    #[test]
+    fn initializer_header_allows_as_in_body_but_not_as_separator() {
+        let typed = "initialize(int id): void :: if maybe as const value then";
+        let canonical = canonicalize_initialize_header(typed, LexState::default(), 1).unwrap();
+        assert_eq!(
+            canonical,
+            "initialize(int id) -> void :: if maybe as const value then"
+        );
+        let braced = "initialize(int id): void { if maybe as const value then return; fi }";
+        assert_eq!(
+            canonicalize_initialize_header(braced, LexState::default(), 1).unwrap(),
+            "initialize(int id) -> void { if maybe as const value then return; fi }"
+        );
+        assert!(format_source("fnc casty() -> int { return value as int; }\n").is_ok());
+        let invalid = "initialize(int id) -> void as return;";
+        assert!(canonicalize_initialize_header(invalid, LexState::default(), 1).is_err());
     }
 }

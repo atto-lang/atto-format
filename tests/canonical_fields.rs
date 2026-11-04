@@ -1,7 +1,7 @@
 use oreslang_format::format_source;
 
 #[test]
-fn converts_legacy_class_fields_without_touching_locals() {
+fn preserves_explicit_bindings_and_elides_only_redundant_val() {
     let input = r#"define class Foo as
   pub let int foo = 5;
   const int bar = 6;
@@ -15,10 +15,10 @@ fn converts_legacy_class_fields_without_touching_locals() {
 end
 "#;
     let expected = r#"define class Foo as
-  pub int foo: 5;
-  final int bar: 6;
-  final Map m: new Map();
-  final mut Map m1: new Map();
+  pub let int foo: 5;
+  const int bar: 6;
+  const Map m: new Map();
+  Map m1: new Map();
   final mut Map already: new Map();
   constructor() {
     let int local = 2;
@@ -41,7 +41,7 @@ end
     let expected = r#"define class Foo as
   int x: 1;
   mut Map<string, int> values: new Map();
-  final mut Map<string, int> fixed: new Map();
+  const mut Map<string, int> fixed: new Map();
 end
 "#;
     assert_eq!(format_source(input).unwrap(), expected);
@@ -101,8 +101,8 @@ fn generic_named_type_arguments_do_not_become_initializers() {
 end
 "#;
     let expected = r#"define class Pipeline as
-  final Box<messages=Message> queue: new Box();
-  pub Map<string, Box<messages=Message>> routes: new Map();
+  const Box<messages=Message> queue: new Box();
+  pub let Map<string, Box<messages=Message>> routes: new Map();
   final int answer: 42;
 end
 "#;
@@ -156,9 +156,111 @@ fn uninitialized_legacy_constructor_fields_are_not_rewritten_into_invalid_final_
 end
 "#;
     let formatted = format_source(source).unwrap();
-    assert!(formatted.contains("val int value;"));
+    assert!(formatted.contains("int value;"));
     assert!(formatted.contains("let int accumulator;"));
     assert!(formatted.contains("const int obsolete;"));
     assert!(!formatted.contains("final mut int value;"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn implicit_val_only_changes_direct_class_members() {
+    let input = r#"define class Envelope as
+  pub val String method;
+  val Map<string, int> values: new Map();
+  let int changes: 0;
+  const int immutable: 3;
+  final int once;
+  initialize(int value) -> void ::
+    self.once = value;
+    val int local = value;
+  end
+end
+
+define actor Receiver as
+  val int state: 0;
+end
+"#;
+    let formatted = format_source(input).unwrap();
+    assert!(formatted.contains("pub String method;"));
+    assert!(formatted.contains("Map<string, int> values: new Map();"));
+    assert!(formatted.contains("let int changes: 0;"));
+    assert!(formatted.contains("const int immutable: 3;"));
+    assert!(formatted.contains("final int once;"));
+    assert!(formatted.contains("val int local = value;"));
+    assert!(formatted.contains("val int state: 0;"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn typed_initialize_end_headers_are_canonical_and_idempotent() {
+    for header in [
+        "initialize(int id): void",
+        "initialize(int id) -> void",
+        "initialize(int id): void ::",
+        "initialize(int id) -> void ::",
+    ] {
+        let source = format!(
+            "define class Connection as\n  final int connection_id;\n  {header}\n    self.connection_id = id;\n  end\nend\n"
+        );
+        let formatted = format_source(&source).unwrap();
+        assert!(
+            formatted.contains("initialize(int id) -> void ::"),
+            "{formatted}"
+        );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+}
+
+#[test]
+fn rejects_callable_as_without_touching_type_header_as() {
+    assert!(format_source(
+        "define class Connection as\n  initialize(int id) -> void as\n    self.id = id;\n  end\nend\n"
+    ).is_err());
+    assert!(format_source("fnc f() -> int as return 1; end\n").is_err());
+    assert!(format_source("define class Connection as\nend\n").is_ok());
+}
+
+#[test]
+fn leaves_braced_initializer_body_intact_until_ast_backed_conversion() {
+    let source = "define class C as\n  initialize(int id): void {\n    return;\n  }\nend\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("initialize(int id) -> void {"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn compact_callable_as_in_body_is_not_mistaken_for_a_header_separator() {
+    let source = "fnc handle() -> void :: if maybe as const value then return; fi end\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("as const value"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn compact_callable_header_still_rejects_as_separator() {
+    assert!(format_source("fnc handle() -> void as return; end\n").is_err());
+}
+
+#[test]
+fn malformed_class_field_modifiers_are_preserved_for_compiler_diagnostics() {
+    // A style-only tool must never erase the first modifier of an invalid
+    // declaration and thereby turn a compiler error into a valid field.
+    for declaration in [
+        "val val int duplicate = 1;",
+        "pub val val int duplicate = 1;",
+        "val let int conflict = 1;",
+        "let let int duplicate = 1;",
+        "const final int conflict = 1;",
+        "mut mut int duplicate = 1;",
+        "pub private int conflicting_visibility = 1;",
+    ] {
+        let source = format!("define class Prefixes as\n  {declaration}\nend\n");
+        let formatted = format_source(&source).unwrap();
+        assert!(
+            formatted.contains(declaration),
+            "invalid declaration was changed: {declaration:?} -> {formatted:?}"
+        );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
 }
