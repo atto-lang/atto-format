@@ -746,3 +746,28 @@ fn analyze_refuses_non_source_input_before_compiler_launch() {
         "only .atto or legacy .ores"));
     assert!(!repo.root.join("ran").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn analyze_timeout_terminates_background_wrapper_descendants() {
+    let repo = TempRepo::new("analysis-descendant-timeout");
+    repo.write("src.atto", UNFORMATTED);
+    // A naive child.kill() leaves the background writer alive after the
+    // command shell is terminated. The process-group kill must prevent it.
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        "(sleep 3; echo leaked > leaked) &\nexec /bin/sleep 30",
+    );
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .env("ORESFMT_ANALYZE_TIMEOUT_SECS", "1")
+        .args(["--analyze", "src.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("analysis timed out"));
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    assert!(!repo.root.join("leaked").exists(),
+        "a timed-out compiler wrapper left a background writer alive");
+}

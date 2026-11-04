@@ -385,9 +385,12 @@ compiler cannot resolve to this formatter, including through a symlink.
 `ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
 The compiler receives closed stdin, and a per-file timeout of
 `ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
-Only the direct child is terminated on timeout; **descendants are not
-contained**. Do not use untrusted compiler binaries or rely on this adapter
-as a sandbox. At most 512 files may be selected. Exit 0 means the explicitly selected
+On Unix the selected compiler starts in a dedicated process group, and timeout
+termination signals that group before reaping the direct child. Ordinary
+descendants in that group are covered; descendants escaping into another
+session/process group cannot be contained by this adapter. Windows currently
+terminates only the direct child. Do not run untrusted compiler binaries or
+treat this adapter as a sandbox. At most 512 files may be selected. Exit 0 means the explicitly selected
 compiler returned 0 on every file; exit 1 represents compiler-reported
 rejection, and exit 2 represents unsupported/inconclusive analysis, timeout,
 child termination, or invalid configuration. None of these exit codes is a

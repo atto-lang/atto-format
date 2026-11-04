@@ -521,11 +521,21 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
     let mut failed = false;
     let mut inconclusive = false;
     for path in files {
-        let mut child = Command::new(&compiler)
+        let mut command = Command::new(&compiler);
+        command
             .arg("--analyze")
             .arg(compiler_path_argument(&path))
             .env(ANALYZE_GUARD_ENV, "1")
-            .stdin(Stdio::null())
+            .stdin(Stdio::null());
+        // Put the selected analyzer and ordinary descendants in their own
+        // process group so a timed-out wrapper cannot leave a child running.
+        // This is timeout containment, not a sandbox against setsid() escapes.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
         match wait_with_timeout(&mut child, timeout)? {
@@ -615,8 +625,10 @@ fn compiler_path_argument(path: &Path) -> PathBuf {
     }
 }
 
-/// Returns `None` after killing a compiler that outlives the timeout. Only the
-/// direct child is killed; anything it spawned is left to its own lifetime.
+/// Returns `None` after terminating a timed-out compiler. On Unix, kill the
+/// dedicated analyzer process group first, then reap the direct child. A child
+/// that deliberately creates an independent session can still escape; this
+/// containment is not a sandbox.
 fn wait_with_timeout(
     child: &mut Child,
     timeout: Duration,
@@ -627,6 +639,18 @@ fn wait_with_timeout(
             return Ok(Some(status));
         }
         if Instant::now() >= deadline {
+            #[cfg(unix)]
+            if let Ok(group_id) = i32::try_from(child.id()) {
+                // An analyzer was started with process_group(0), making its
+                // PID the group ID. Negative PID signals that entire group.
+                // SIGKILL is 9 on the supported Unix targets.
+                unsafe extern "C" {
+                    fn kill(pid: i32, signal: i32) -> i32;
+                }
+                // SAFETY: kill() receives an OS-issued positive child ID,
+                // negated to address only the dedicated analyzer group.
+                let _ = unsafe { kill(-group_id, 9) };
+            }
             let _ = child.kill();
             let _ = child.wait();
             return Ok(None);
