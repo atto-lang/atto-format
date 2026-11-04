@@ -507,7 +507,12 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
     }
 
-    let mut failed = false;
+    // Preserve the compiler-owned analysis outcomes across multiple files:
+    // 0 = all verified in the backend's explicitly supported subset,
+    // 1 = any source/compilation/process failure,
+    // 2 = at least one inconclusive result, with no failures.
+    // Never coerce "inconclusive" to either success or a syntax failure.
+    let mut outcome: u8 = 0;
     for path in files {
         let mut child = Command::new(&compiler)
             .arg("--analyze")
@@ -517,22 +522,24 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             .spawn()
             .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
         match wait_with_timeout(&mut child, timeout)? {
-            Some(status) => failed |= !status.success(),
+            Some(status) if status.success() => {}
+            Some(status) if status.code() == Some(2) => {
+                if outcome == 0 {
+                    outcome = 2;
+                }
+            }
+            Some(_) => outcome = 1,
             None => {
                 eprintln!(
                     "oresfmt: analysis timed out after {}s: {}",
                     timeout.as_secs(),
                     path.display()
                 );
-                failed = true;
+                outcome = 1;
             }
         }
     }
-    Ok(if failed {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    })
+    Ok(ExitCode::from(outcome))
 }
 
 fn analysis_timeout() -> Result<Duration, Box<dyn std::error::Error>> {
