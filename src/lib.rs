@@ -1445,6 +1445,17 @@ fn canonicalize_storage_field_line(line: &str, initial: LexState) -> Option<Stri
         }
         cursor += 1;
     }
+    // A repeated or conflicting declaration qualifier is a compiler error.
+    // Do not accidentally remove its first modifier and turn the remainder
+    // into a different (potentially valid) declaration.
+    if cursor < words.len()
+        && matches!(
+            &lhs[words[cursor].start..words[cursor].end],
+            "pub" | "private" | "val" | "let" | "const" | "final" | "mut"
+        )
+    {
+        return None;
+    }
     if words.len() < cursor + 2 {
         return None;
     }
