@@ -557,7 +557,8 @@ fn analyze_gives_the_compiler_a_closed_stdin() {
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(b"secret\n").unwrap();
+    // The formatter never reads stdin and may already have exited.
+    let _ = stdin.write_all(b"secret\n");
     drop(stdin);
     assert_eq!(child.wait().unwrap().code(), Some(0));
 }
@@ -735,4 +736,23 @@ fn analyze_rejects_insert_mtd() {
     let output = repo.run(&["--analyze", "--insert-mtd", "sample.ores"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("--insert-mtd cannot be combined"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn analyze_retries_a_compiler_that_is_briefly_open_for_writing() {
+    let repo = TempRepo::new("analysis-text-busy");
+    repo.write("sample.ores", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", "exit 0");
+    let writer = fs::OpenOptions::new().append(true).open(&compiler).unwrap();
+    let child = analyze_command(&repo)
+        .env("ORESLANG_BIN", &compiler)
+        .args(["--analyze", "sample.ores"])
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    drop(writer);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
