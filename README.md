@@ -264,7 +264,7 @@ oresfmt --check -- -generated.ores
 ```
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
-alias. Directories are walked recursively and only `.ores` files are selected.
+alias. Directories are walked recursively and select `.atto` files plus legacy `.ores` files.
 Filesystem arguments are parsed as native OS strings rather than forced through
 UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
 
@@ -356,24 +356,42 @@ Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
 
-## Failure analysis
+## Experimental compiler analysis adapter
 
-`oreslang-format --analyze src/` runs the compiler's static analysis for each
-selected `.ores` file without rewriting or executing source. Set `ORESLANG_BIN`
-to a compiler supporting `--analyze` (default: `oreslang-core`). Diagnostics include
-suggested `throws`, `raises`, and `panics` markers and unresolved calls. Missing
-compilers and failed checks produce a nonzero exit. Warnings remain advisory.
-Formatting preserves failure signatures and explicit `throw`, `raise`, `panic`,
-and deferred `recover()` operations; formatting does not infer or insert markers.
+`oresfmt --analyze src/` is a **non-mutating, experimental compiler
+subprocess adapter**, not an effect checker. Explicitly set `ORESLANG_BIN`
+to a reviewed executable that implements `--analyze`; there is no implicit
+compiler default. It passes each selected `.atto` or legacy `.ores` file
+as `--analyze <file>`, with stdin closed. The formatter neither infers
+`throws`, `raises` or `panics` nor verifies their semantics. At the time
+of this change, no production compiler has been verified to implement that
+analysis contract. Even exit 0 proves only that the selected executable
+returned 0, **not** complete transitive effect inference.
 
-The caller opt-out `unchecked call()` is preserved verbatim in scope, including
-`await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
-effect assumptions, never runtime failure routing or ordinary compiler checks.
-`ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+For the available advisory Rust source scanner, run:
 
-Each file gets `ORESFMT_ANALYZE_TIMEOUT_SECS` seconds (default 300, maximum 86400);
-a timeout counts as a failed check and only the direct compiler process is killed.
-The compiler runs with stdin closed. A bare `ORESLANG_BIN` name searches absolute
-`PATH` entries only, so a checked-out repository cannot supply the compiler through
-an empty or `.` entry. `ORESFMT_ANALYZE_ACTIVE` is set for the compiler, and a
-formatter that sees it refuses to run, which stops wrappers that lead back here.
+```sh
+atto test --effects --file src/example.atto
+atto test --effects --effects-strict --file src/example.atto
+```
+
+That scanner is lexical, not a compiler type/effect proof. Unknown calls and
+unadmitted effect grammar are not certified effect-free. The formatter
+preserves failure signatures and explicit `throw`, `raise`, `panic`,
+`recover()` and scoped `unchecked call()` syntax; it never invents markers.
+
+The adapter maps subprocess exit 0 to 0, exit 1 to 1 (compiler-reported
+finding), and exit 2, signal termination and unknown statuses to 2
+(unsupported/incomplete/tool failure). Timeout also exits 2. A 2 takes
+precedence over a 1 when multiple files are checked. Do not use adapter
+exit 0 as a production effect-safety gate until real compiler provenance,
+diagnostic semantics, source coverage and exact-head execution are verified.
+
+Each input has a `ORESFMT_ANALYZE_TIMEOUT_SECS` limit (default 300 seconds,
+maximum 86400). Only the direct compiler process is killed on timeout;
+descendant containment remains an open hardening task. A bare
+`ORESLANG_BIN` name searches absolute PATH entries only; an empty or
+repository-relative PATH element cannot supply the executable. Recursive
+wrapper invocation is rejected via `ORESFMT_ANALYZE_ACTIVE` and an executable
+identity check. These safeguards do not make arbitrary compiler binaries
+safe to execute.
