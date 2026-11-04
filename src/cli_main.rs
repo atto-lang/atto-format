@@ -625,7 +625,7 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     files.sort();
     files.dedup();
     if files.is_empty() {
-        return Err("no .ores files found".into());
+        return Err("no .atto or .ores files found".into());
     }
     Ok(files)
 }
@@ -669,7 +669,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         }
         if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "ores") {
+        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "atto" || ext == "ores") {
             out.push(child);
         }
     }
