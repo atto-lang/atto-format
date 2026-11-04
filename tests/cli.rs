@@ -420,7 +420,7 @@ fn analyze_delegates_to_compiler_and_preserves_failure_status() {
 
 #[cfg(unix)]
 #[test]
-fn analyze_recursive_discovery_prefers_no_extension_and_preserves_sources() {
+fn analyze_recursively_discovers_atto_and_ores_without_mutation() {
     let repo = TempRepo::new("analysis-atto-discovery");
     let atto = repo.write("src/alpha.atto", UNFORMATTED);
     let ores = repo.write("src/deep/beta.ores", UNFORMATTED);
