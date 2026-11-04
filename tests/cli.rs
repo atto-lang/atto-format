@@ -504,6 +504,44 @@ exit 2"#);
 
 #[cfg(unix)]
 #[test]
+#[ignore = "requires a separately built exact-head oreslang-llvmc; run with --ignored and ORESLANG_REAL_LLVM_BIN"]
+fn analyze_real_llvm_compiler_bridge_is_inconclusive() {
+    use std::ffi::OsString;
+    let compiler: OsString = std::env::var_os("ORESLANG_REAL_LLVM_BIN")
+        .expect("set ORESLANG_REAL_LLVM_BIN to the exact-head oreslang-llvmc binary");
+    let compiler = fs::canonicalize(compiler)
+        .expect("ORESLANG_REAL_LLVM_BIN must resolve to the compiled LLVM binary");
+    let repo = TempRepo::new("real-llvm-analyze-bridge");
+    let valid = "pub routine main(): int {\n    return 0;\n}\n";
+    let invalid = "pub routine main(): int {\n    return ;\n}\n";
+    let atto = repo.write("src/valid.atto", valid);
+    let ores = repo.write("src/legacy.ores", valid);
+    let bad = repo.write("src/invalid.atto", invalid);
+    // Verify the real compiler behavior first: no green status for valid
+    // source before typed escaping-effect analysis exists.
+    let native = Command::new(&compiler)
+        .current_dir(&repo.root)
+        .args(["--analyze", "src/valid.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(native.status.code(), Some(2), "{native:?}");
+    assert!(String::from_utf8_lossy(&native.stderr).contains("effects inconclusive"));
+    assert!(native.stdout.is_empty(), "LLVM IR must not escape analysis mode");
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", &compiler)
+        .args(["--analyze", "src"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("effects inconclusive"), "{stderr}");
+    assert!(stderr.contains("compiler analysis unsupported or failed"), "{stderr}");
+    assert_eq!(fs::read_to_string(atto).unwrap(), valid);
+    assert_eq!(fs::read_to_string(ores).unwrap(), valid);
+    assert_eq!(fs::read_to_string(bad).unwrap(), invalid);
+}
+#[cfg(unix)]
+#[test]
 fn analyze_mixed_finding_and_inconclusive_stays_inconclusive() {
     let repo = TempRepo::new("analysis-mixed-status");
     let first = repo.write("a.atto", UNFORMATTED);
