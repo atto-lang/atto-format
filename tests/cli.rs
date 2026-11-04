@@ -709,16 +709,19 @@ fn analyze_propagates_inconclusive_status_without_claiming_success() {
     assert_eq!(output.status.code(), Some(2));
 }
 
+#[cfg(unix)]
 #[test]
 fn analyze_refuses_non_source_input_before_compiler_launch() {
     let repo = TempRepo::new("analyze-unsupported-extension");
     repo.write("input.txt", "not source");
-    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
-        .current_dir(&repo.root)
-        .env("ORESLANG_BIN", env!("CARGO_BIN_EXE_oresfmt"))
+    let compiler = write_script(&repo, "compiler", "echo ran > ran");
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
         .args(["--analyze", "input.txt"])
         .output()
         .unwrap();
-    // The recursion guard is also allowed to reject this configuration.
     assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "only .atto or legacy .ores"));
+    assert!(!repo.root.join("ran").exists());
 }
