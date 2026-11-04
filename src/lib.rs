@@ -663,6 +663,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             instance_member,
             keyword_stack.is_empty() && in_direct_storage_container(&define_stack, &brace_stack),
         );
+        content = canonicalize_generator_output_line(&content, lex);
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
         }
@@ -2098,6 +2099,21 @@ fn canonicalize_actor_declaration(line: &str, words: &[WordSpan]) -> Option<Stri
         return None;
     }
 
+    // "fnc generator(...)" names an ordinary callable "generator". The same
+    // contextual word is a generator modifier only when another callable name
+    // follows it (or when the starred prepass has rewritten gen*/generator*).
+    for (index, span) in prefix.iter().enumerate() {
+        if &line[span.start..span.end] != "generator" {
+            continue;
+        }
+        let kind_before = prefix[..index].iter().any(|part| {
+            matches!(&line[part.start..part.end], "fnc" | "routine")
+        });
+        if kind_before && line[span.end..].trim_start().starts_with('(') {
+            return None;
+        }
+    }
+
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
@@ -3258,7 +3274,7 @@ fn canonicalize_forever_loop_line(line: &str, initial: LexState) -> String {
 
 fn canonicalize_generator_sugar_line(line: &str, initial: LexState) -> String {
     let words = visible_word_spans(line, initial);
-    if words.len() < 2 {
+    if words.is_empty() {
         return line.to_string();
     }
 
@@ -3269,6 +3285,8 @@ fn canonicalize_generator_sugar_line(line: &str, initial: LexState) -> String {
                 | "private"
                 | "static"
                 | "async"
+                | "suspend"
+                | "suspends"
                 | "generator"
                 | "gen"
                 | "nlex"
@@ -3309,27 +3327,100 @@ fn canonicalize_generator_sugar_line(line: &str, initial: LexState) -> String {
                 break;
             }
         }
-        if !kind_before && !kind_after {
-            continue;
-        }
 
         let next_start = words.get(index + 1).map_or(line.len(), |part| part.start);
         let gap = &line[span.end..next_start];
-        let Some(star_offset) = gap.find('*') else {
-            continue;
-        };
-        if gap[..star_offset].chars().any(|c| !c.is_whitespace())
-            || gap[star_offset + 1..].chars().any(|c| !c.is_whitespace())
-        {
+        let star_offset = gap.find('*').filter(|star| {
+            gap[..*star].chars().all(char::is_whitespace)
+                && gap[*star + 1..].chars().all(char::is_whitespace)
+        });
+
+        if star_offset.is_none() {
+            // Starless "generator" is only the legacy prefix modifier form,
+            // e.g. "generator fnc values". Do not reinterpret a function
+            // literally named "generator" ("fnc generator(...)").
+            if word == "generator" && !kind_before && kind_after {
+                return line.to_string();
+            }
             continue;
         }
 
+        let star = star_offset.expect("checked above");
         let mut result = line.to_string();
-        result.replace_range(span.start..span.end + star_offset + 1, "generator");
+        let replacement = if kind_before || kind_after {
+            "generator"
+        } else {
+            // Feed canonical bare gen* through the existing declaration-order
+            // normalizer using an internal explicit fnc marker. A later pass
+            // removes that redundant kind and emits canonical gen*.
+            "generator fnc"
+        };
+        result.replace_range(span.start..span.end + star + 1, replacement);
         return result;
     }
 
     line.to_string()
+}
+
+fn canonicalize_generator_output_line(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    let is_prefix_word = |word: &str| {
+        matches!(
+            word,
+            "pub"
+                | "private"
+                | "static"
+                | "async"
+                | "suspend"
+                | "suspends"
+                | "generator"
+                | "nlex"
+                | "pure"
+                | "trap"
+                | "structural"
+                | "abstract"
+                | "quantum"
+                | "fnc"
+                | "routine"
+        )
+    };
+
+    let prefix_len = words
+        .iter()
+        .take_while(|span| is_prefix_word(&line[span.start..span.end]))
+        .count();
+    if prefix_len < 2 || prefix_len >= words.len() {
+        return line.to_string();
+    }
+    let prefix = &words[..prefix_len];
+    if !plain_word_prefix(line, prefix) {
+        return line.to_string();
+    }
+
+    let generator_index = prefix
+        .iter()
+        .position(|span| &line[span.start..span.end] == "generator");
+    let kind_index = prefix.iter().position(|span| {
+        matches!(&line[span.start..span.end], "fnc" | "routine")
+    });
+    let (Some(generator_index), Some(kind_index)) = (generator_index, kind_index) else {
+        return line.to_string();
+    };
+
+    if generator_index >= kind_index {
+        return line.to_string();
+    }
+
+    let mut canonical = Vec::with_capacity(prefix.len() - 1);
+    for span in prefix {
+        let word = &line[span.start..span.end];
+        match word {
+            "generator" => canonical.push("gen*"),
+            "fnc" | "routine" => {}
+            _ => canonical.push(word),
+        }
+    }
+    rewrite_word_prefix(line, prefix, &canonical)
 }
 
 fn starts_pipe_lambda_expression(line: &str) -> bool {
@@ -3905,6 +3996,8 @@ mod tests {
 "#;
 
         let got = format_source(src).unwrap();
+        assert!(got.contains("gen* values() -> Iterator<int>"));
+        assert!(!got.contains("generator fnc values"));
         assert!(got.contains("rt cooperate;"));
         assert!(got.contains("rt cooperate();"));
         assert!(got.contains("yield 1;"));
