@@ -547,6 +547,13 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
 /// A just-written wrapper script can hit this while any concurrently forked
 /// process still holds the writer's descriptor.
 fn spawn_retrying_busy(command: &mut Command) -> std::io::Result<Child> {
+    // Make every Unix compiler and its ordinary descendants a separate signal
+    // group, so a timeout cannot leave the compiler's direct children behind.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match command.spawn() {
@@ -623,8 +630,11 @@ fn compiler_path_argument(path: &Path) -> PathBuf {
     }
 }
 
-/// Returns `None` after killing a compiler that outlives the timeout. Only the
-/// direct child is killed; anything it spawned is left to its own lifetime.
+/// Returns `None` after terminating an analyzer that exceeds its timeout.
+/// Unix children are launched in a distinct process group, and the whole group
+/// is signaled on timeout. This is not a sandbox: a hostile subprocess can
+/// intentionally escape the group (for example, by creating a new session).
+/// On non-Unix targets, only the direct process can currently be terminated.
 fn wait_with_timeout(
     child: &mut Child,
     timeout: Duration,
@@ -635,6 +645,22 @@ fn wait_with_timeout(
             return Ok(Some(status));
         }
         if Instant::now() >= deadline {
+            // Kill background children still in our isolated Unix process
+            // group before reaping the leader. Child::kill alone misses them.
+            #[cfg(unix)]
+            {
+                unsafe extern "C" {
+                    fn kill(pid: std::ffi::c_int, sig: std::ffi::c_int) -> std::ffi::c_int;
+                }
+                if let Ok(pid) = i32::try_from(child.id()) {
+                    if pid > 1 {
+                        // SAFETY: kill is the POSIX C ABI taking (pid_t, int).
+                        // The negative PID addresses only our child's PGID,
+                        // created by process_group(0) before the initial spawn.
+                        let _ = unsafe { kill(-pid, 9) }; // SIGKILL
+                    }
+                }
+            }
             let _ = child.kill();
             let _ = child.wait();
             return Ok(None);
