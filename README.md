@@ -356,24 +356,33 @@ Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
 
-## Failure analysis
+## Experimental compiler analysis adapter
 
-`oreslang-format --analyze src/` runs the compiler's static analysis for each
-selected `.ores` file without rewriting or executing source. Set `ORESLANG_BIN`
-to a compiler supporting `--analyze` (default: `oreslang-core`). Diagnostics include
-suggested `throws`, `raises`, and `panics` markers and unresolved calls. Missing
-compilers and failed checks produce a nonzero exit. Warnings remain advisory.
-Formatting preserves failure signatures and explicit `throw`, `raise`, `panic`,
-and deferred `recover()` operations; formatting does not infer or insert markers.
+`oresfmt --analyze src/` delegates each selected `.atto` (canonical) or
+legacy `.ores` file to `ORESLANG_BIN --analyze FILE` without rewriting the
+source. It is **not** an effect inference implementation and it is **not yet
+verified against a production compiler**: current Java/GraalVM and LLVM
+compiler entrypoints must implement and validate a compatible `--analyze`
+contract before this mode can be promoted. A missing/incompatible compiler
+fails rather than silently falling back to formatting or a lexical scan.
 
-The caller opt-out `unchecked call()` is preserved verbatim in scope, including
-`await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
-effect assumptions, never runtime failure routing or ordinary compiler checks.
-`ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+For immediate advisory diagnostics on explicit `throw`, `raise`, `panic`,
+and declaration markers, use the independent
+`atto test --effects --file src/example.atto` command in
+`oreslang-test.cli`. That scanner is lexical and does not prove transitive
+effects or guest runtime behavior. Future compiler diagnostics must distinguish
+an unsupported/unknown effect from a certified safe result.
 
-Each file gets `ORESFMT_ANALYZE_TIMEOUT_SECS` seconds (default 300, maximum 86400);
-a timeout counts as a failed check and only the direct compiler process is killed.
-The compiler runs with stdin closed. A bare `ORESLANG_BIN` name searches absolute
-`PATH` entries only, so a checked-out repository cannot supply the compiler through
-an empty or `.` entry. `ORESFMT_ANALYZE_ACTIVE` is set for the compiler, and a
-formatter that sees it refuses to run, which stops wrappers that lead back here.
+The formatter preserves exception effect signatures and deferred `recover()`
+and never inserts/invents effect declarations. A caller's
+`unchecked call()` form is preserved unchanged; it is not a security
+or runtime-failure bypass.
+
+A bare `ORESLANG_BIN` searches only absolute `PATH` entries. The selected
+compiler cannot resolve to this formatter, including through a symlink.
+`ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
+The compiler receives closed stdin, and a per-file timeout of
+`ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
+Only the direct child is terminated on timeout; **descendants are not
+contained**. Do not use untrusted compiler binaries or rely on this adapter
+as a sandbox. Analysis failures produce nonzero status and no source rewrites.
