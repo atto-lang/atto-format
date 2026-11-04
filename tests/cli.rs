@@ -756,3 +756,29 @@ fn analyze_retries_a_compiler_that_is_briefly_open_for_writing() {
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn analyze_timeout_reaps_background_compiler_descendants() {
+    let repo = TempRepo::new("analysis-timeout-descendants");
+    repo.write("sample.atto", UNFORMATTED);
+    // A non-interactive sh background task inherits the compiler's PGID.
+    // Previously Child::kill only stopped the foreground sleep; the delayed
+    // child still wrote to the repository after the formatter exited.
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        "echo started > started\n(sleep 2; echo leaked > leaked) &\nexec /bin/sleep 30",
+    );
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .env("ORESFMT_ANALYZE_TIMEOUT_SECS", "1")
+        .args(["--analyze", "sample.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(repo.root.join("started").is_file(), "compiler did not execute");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("analysis timed out"));
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    assert!(!repo.root.join("leaked").exists(), "descendant survived timeout");
+}
