@@ -509,8 +509,6 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
     }
 
-    // No implicit compiler fallback: an arbitrary binary named oreslang-core
-    // must not create a misleading successful effects-check verdict.
     if files.len() > 512 {
         return Err("--analyze supports at most 512 source files".into());
     }
@@ -520,7 +518,6 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
     )) {
         return Err("--analyze accepts only .atto or legacy .ores files".into());
     }
-
     let mut failed = false;
     let mut inconclusive = false;
     for path in files {
@@ -535,8 +532,6 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             Some(status) => match status.code() {
                 Some(0) => {}
                 Some(1) => failed = true,
-                // No success on an unsupported compiler, missing backend,
-                // killed child, or an inconclusive source-effects result.
                 _ => inconclusive = true,
             },
             None => {

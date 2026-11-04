@@ -356,34 +356,39 @@ Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
 
-## Failure analysis (experimental compiler delegation)
+## Experimental compiler analysis adapter
 
-The supported advisory exceptional-effects checker is
-`atto test --effects --file src/example.atto`; use `--effects-strict` to
-make detected warnings fail. This is a **Rust source scanner**, not a proof of
-transitive compiler effects or runtime exception behavior.
+`oresfmt --analyze src/` delegates each selected `.atto` (canonical) or
+legacy `.ores` file to `ORESLANG_BIN --analyze FILE` without rewriting the
+source. Set `ORESLANG_BIN` **explicitly** to a compiler supporting this flag;
+there is no implicit `oreslang-core` fallback. It is **not** an effect inference implementation and it is **not yet
+verified against a production compiler**: current Java/GraalVM and LLVM
+compiler entrypoints must implement and validate a compatible `--analyze`
+contract before this mode can be promoted. LLVM draft PR #1373 implements a
+restricted native-subset experimental contract; Java/GraalVM parity is pending. A missing/incompatible compiler
+fails rather than silently falling back to formatting or a lexical scan.
 
-`oresfmt --analyze src/` is a separate, **explicitly opted-in** compiler
-delegation mode. It requires `ORESLANG_BIN` to name a real compiler that
-implements `--analyze FILE`; it no longer guesses that `oreslang-core`
-supports this flag. An experimental LLVM native-subset implementation is in
-`oreslang-source.llvm` PR #1373; Java/GraalVM does not yet implement the same
-protocol. Even an exit 0 is only as trustworthy as the explicitly selected
-compiler. The formatter itself cannot verify semantic completeness.
+For immediate advisory diagnostics on explicit `throw`, `raise`, `panic`,
+and declaration markers, use the independent
+`atto test --effects --file src/example.atto` command in
+`oreslang-test.cli`. That scanner is lexical and does not prove transitive
+effects or guest runtime behavior. Future compiler diagnostics must distinguish
+an unsupported/unknown effect from a certified safe result.
 
-The formatter discovers canonical `.atto` and legacy `.ores` files, limits
-each invocation to 512 files, and never rewrites or executes their guest code.
-An exit 0 means selected compiler processes returned 0; exit 1 means a
-compiler-reported rejection; exit 2 means a compiler returned an inconclusive
-or unsupported status, timed out or failed to launch, or the formatter rejected
-invalid input/configuration. Failure signatures, explicit `throw`, `raise`,
-`panic`, deferred `recover()` and call-site `unchecked` syntax are
-preserved by ordinary formatting; no annotations are inferred or inserted.
+The formatter preserves exception effect signatures and deferred `recover()`
+and never inserts/invents effect declarations. A caller's
+`unchecked call()` form is preserved unchanged; it is not a security
+or runtime-failure bypass.
 
-A delegated compiler receives closed stdin, a recursion guard and a
-per-file `ORESFMT_ANALYZE_TIMEOUT_SECS` deadline (default 300, max 86400).
-For bare `ORESLANG_BIN` names only absolute `PATH` entries are searched.
-Timeout termination currently kills **only the direct child**, not its spawned
-process group: avoid untrusted compiler wrappers until descendant containment
-is implemented. The current tests exercise stub process handling; compiler
-semantics must be validated on real LLVM/Java binary builds independently.
+A bare `ORESLANG_BIN` searches only absolute `PATH` entries. The selected
+compiler cannot resolve to this formatter, including through a symlink.
+`ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
+The compiler receives closed stdin, and a per-file timeout of
+`ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
+Only the direct child is terminated on timeout; **descendants are not
+contained**. Do not use untrusted compiler binaries or rely on this adapter
+as a sandbox. At most 512 files may be selected. Exit 0 means the explicitly selected
+compiler returned 0 on every file; exit 1 represents compiler-reported
+rejection, and exit 2 represents unsupported/inconclusive analysis, timeout,
+child termination, or invalid configuration. None of these exit codes is a
+full-language purity or runtime-effect proof. Analysis never rewrites source.

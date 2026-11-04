@@ -418,6 +418,45 @@ fn analyze_delegates_to_compiler_and_preserves_failure_status() {
     assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
 }
 
+#[cfg(unix)]
+#[test]
+fn analyze_recursively_discovers_atto_and_ores_without_mutation() {
+    let repo = TempRepo::new("analysis-atto-discovery");
+    let atto = repo.write("src/alpha.atto", UNFORMATTED);
+    let ores = repo.write("src/deep/beta.ores", UNFORMATTED);
+    repo.write("src/ignored.txt", UNFORMATTED);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"test "$1" = --analyze || exit 9
+case "$2" in
+  src/alpha.atto|src/deep/beta.ores) printf '%s\n' "$2" ;;
+  *) exit 9 ;;
+esac"#,
+    );
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "src"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output);
+    let names = String::from_utf8_lossy(&output.stdout);
+    assert!(names.contains("src/alpha.atto"), "{names}");
+    assert!(names.contains("src/deep/beta.ores"), "{names}");
+    assert!(!names.contains("ignored.txt"), "{names}");
+    assert_eq!(fs::read_to_string(atto).unwrap(), UNFORMATTED);
+    assert_eq!(fs::read_to_string(ores).unwrap(), UNFORMATTED);
+}
+
+#[test]
+fn empty_source_directory_does_not_pass_analysis() {
+    let repo = TempRepo::new("analysis-empty-directory");
+    fs::create_dir_all(repo.root.join("src")).unwrap();
+    let result = repo.run(&["--analyze", "src"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("no .atto or .ores"));
+}
+
 #[test]
 fn analyze_refuses_recursive_compiler_configuration() {
     let repo = TempRepo::new("analysis-recursion");
@@ -673,24 +712,6 @@ fn analyze_requires_explicit_compiler_instead_of_guessing_backend_support() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("requires explicit ORESLANG_BIN"));
-}
-
-#[cfg(unix)]
-#[test]
-fn analyze_discovers_canonical_atto_and_legacy_ores_without_other_files() {
-    let repo = TempRepo::new("analyze-atto-discovery");
-    repo.write("src/new.atto", UNFORMATTED);
-    repo.write("src/old.ores", UNFORMATTED);
-    repo.write("src/unrelated.txt", "data");
-    let compiler = write_script(&repo, "compiler", r#"echo "$2" >> seen"#);
-    let output = analyze_command(&repo)
-        .env("ORESLANG_BIN", compiler)
-        .args(["--analyze", "src"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(fs::read_to_string(repo.root.join("seen")).unwrap(),
-        "src/new.atto\nsrc/old.ores\n");
 }
 
 #[cfg(unix)]
