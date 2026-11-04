@@ -18,8 +18,8 @@ MODES:
     --write     Rewrite files in place after Git safety checks
     --check     Do not write files; exit 1 if any input is not canonical
     --stdout    Print one formatted file to stdout instead of writing it
-    --analyze   Run compiler static diagnostics without executing or modifying source
-                Uses ORESLANG_BIN (default: oreslang-core) with --analyze
+    --analyze   EXPERIMENTAL: delegate to ORESLANG_BIN --analyze (explicit executable required)
+                Compiler effect-inference support is not established
                 Limits each file to ORESFMT_ANALYZE_TIMEOUT_SECS (default: 300)
 
 MIGRATION:
@@ -41,7 +41,7 @@ OTHER:
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
-    only *.ores files are selected. '-' reads stdin and writes stdout.
+    only *.atto and legacy *.ores files are selected. '-' reads stdin and writes stdout.
 
 There are intentionally no general style flags or configuration files.
 "#;
@@ -145,7 +145,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
     if paths.is_empty() {
         return Err(
-            "no input paths; pass one or more .ores files/directories, or '-' for stdin".into(),
+            "no input paths; pass one or more .atto/.ores files/directories, or '-' for stdin".into(),
         );
     }
 
@@ -501,13 +501,17 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         return Err("compiler re-entered the formatter; recursive analysis refused".into());
     }
     let timeout = analysis_timeout()?;
-    let requested = env::var_os("ORESLANG_BIN").unwrap_or_else(|| "oreslang-core".into());
+    // No production compiler has been shown to implement the effect-analysis
+    // contract yet. Never silently select an arbitrary executable from PATH.
+    let requested = env::var_os("ORESLANG_BIN")
+        .ok_or("--analyze is experimental; set ORESLANG_BIN to a verified compiler")?;
     let compiler = resolve_compiler(Path::new(&requested))?;
     if fs::canonicalize(&compiler)? == fs::canonicalize(env::current_exe()?)? {
         return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
     }
 
     let mut failed = false;
+    let mut incomplete = false;
     for path in files {
         let mut child = Command::new(&compiler)
             .arg("--analyze")
@@ -517,18 +521,32 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             .spawn()
             .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
         match wait_with_timeout(&mut child, timeout)? {
-            Some(status) => failed |= !status.success(),
+            Some(status) => match status.code() {
+                Some(0) => {}
+                Some(1) => failed = true,
+                _ => {
+                    // Exit 2 is reserved for unsupported/incomplete analysis;
+                    // crashes and unknown statuses are also tool failures.
+                    eprintln!(
+                        "oresfmt: compiler analysis unsupported or failed (status {status}): {}",
+                        path.display()
+                    );
+                    incomplete = true;
+                }
+            },
             None => {
                 eprintln!(
                     "oresfmt: analysis timed out after {}s: {}",
                     timeout.as_secs(),
                     path.display()
                 );
-                failed = true;
+                incomplete = true;
             }
         }
     }
-    Ok(if failed {
+    Ok(if incomplete {
+        ExitCode::from(2)
+    } else if failed {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
@@ -625,7 +643,7 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     files.sort();
     files.dedup();
     if files.is_empty() {
-        return Err("no .ores files found".into());
+        return Err("no .atto or .ores files found".into());
     }
     Ok(files)
 }
@@ -669,7 +687,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         }
         if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "ores") {
+        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "atto" || ext == "ores") {
             out.push(child);
         }
     }
