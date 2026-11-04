@@ -571,6 +571,7 @@ fn analyze_path_search_skips_non_executable_shadows() {
     let path = format!("{0}/first:{0}/second", repo.root.display());
     let output = analyze_command(&repo)
         .env("PATH", path)
+        .env("ORESLANG_BIN", "oreslang-core")
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
@@ -592,6 +593,7 @@ fn analyze_refuses_the_formatter_found_on_path_through_a_symlink() {
     .unwrap();
     let output = analyze_command(&repo)
         .env("PATH", repo.root.join("tools"))
+        .env("ORESLANG_BIN", "oreslang-core")
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
@@ -615,6 +617,7 @@ fn analyze_non_executable_shadow_cannot_hide_the_formatter_from_the_self_check()
     let path = format!("{0}/first:{0}/second", repo.root.display());
     let output = analyze_command(&repo)
         .env("PATH", path)
+        .env("ORESLANG_BIN", "oreslang-core")
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
@@ -631,6 +634,7 @@ fn analyze_ignores_relative_and_empty_path_entries() {
     for path in [".", ""] {
         let output = analyze_command(&repo)
             .env("PATH", path)
+            .env("ORESLANG_BIN", "oreslang-core")
             .args(["--analyze", "sample.ores"])
             .output()
             .unwrap();
