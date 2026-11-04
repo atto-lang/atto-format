@@ -356,24 +356,34 @@ Library callers that explicitly want the marker can use
 `format_source_with_mtd`. Migration is idempotent and preserves existing
 explicit `mtd` and `method` declarations.
 
-## Failure analysis
+## Failure analysis (experimental compiler delegation)
 
-`oreslang-format --analyze src/` runs the compiler's static analysis for each
-selected `.ores` file without rewriting or executing source. Set `ORESLANG_BIN`
-to a compiler supporting `--analyze` (default: `oreslang-core`). Diagnostics include
-suggested `throws`, `raises`, and `panics` markers and unresolved calls. Missing
-compilers and failed checks produce a nonzero exit. Warnings remain advisory.
-Formatting preserves failure signatures and explicit `throw`, `raise`, `panic`,
-and deferred `recover()` operations; formatting does not infer or insert markers.
+The supported advisory exceptional-effects checker is
+`atto test --effects --file src/example.atto`; use `--effects-strict` to
+make detected warnings fail. This is a **Rust source scanner**, not a proof of
+transitive compiler effects or runtime exception behavior.
 
-The caller opt-out `unchecked call()` is preserved verbatim in scope, including
-`await unchecked call()` and `trap unchecked call()`. It suppresses signature-only
-effect assumptions, never runtime failure routing or ordinary compiler checks.
-`ORESLANG_BIN` cannot resolve to the formatter itself; recursive analysis is rejected.
+`oresfmt --analyze src/` is a separate, **explicitly opted-in** compiler
+delegation mode. It requires `ORESLANG_BIN` to name a real compiler that
+implements `--analyze FILE`; it no longer guesses that `oreslang-core`
+supports this flag. An experimental LLVM native-subset implementation is in
+`oreslang-source.llvm` PR #1373; Java/GraalVM does not yet implement the same
+protocol. Even an exit 0 is only as trustworthy as the explicitly selected
+compiler. The formatter itself cannot verify semantic completeness.
 
-Each file gets `ORESFMT_ANALYZE_TIMEOUT_SECS` seconds (default 300, maximum 86400);
-a timeout counts as a failed check and only the direct compiler process is killed.
-The compiler runs with stdin closed. A bare `ORESLANG_BIN` name searches absolute
-`PATH` entries only, so a checked-out repository cannot supply the compiler through
-an empty or `.` entry. `ORESFMT_ANALYZE_ACTIVE` is set for the compiler, and a
-formatter that sees it refuses to run, which stops wrappers that lead back here.
+The formatter discovers canonical `.atto` and legacy `.ores` files, limits
+each invocation to 512 files, and never rewrites or executes their guest code.
+An exit 0 means selected compiler processes returned 0; exit 1 means a
+compiler-reported rejection; exit 2 means a compiler returned an inconclusive
+or unsupported status, timed out or failed to launch, or the formatter rejected
+invalid input/configuration. Failure signatures, explicit `throw`, `raise`,
+`panic`, deferred `recover()` and call-site `unchecked` syntax are
+preserved by ordinary formatting; no annotations are inferred or inserted.
+
+A delegated compiler receives closed stdin, a recursion guard and a
+per-file `ORESFMT_ANALYZE_TIMEOUT_SECS` deadline (default 300, max 86400).
+For bare `ORESLANG_BIN` names only absolute `PATH` entries are searched.
+Timeout termination currently kills **only the direct child**, not its spawned
+process group: avoid untrusted compiler wrappers until descendant containment
+is implemented. The current tests exercise stub process handling; compiler
+semantics must be validated on real LLVM/Java binary builds independently.

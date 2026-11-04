@@ -438,7 +438,8 @@ fn analyze_command(repo: &TempRepo) -> Command {
     command
         .current_dir(&repo.root)
         .env_remove("ORESFMT_ANALYZE_ACTIVE")
-        .env_remove("ORESFMT_ANALYZE_TIMEOUT_SECS");
+        .env_remove("ORESFMT_ANALYZE_TIMEOUT_SECS")
+        .env("ORESLANG_BIN", "oreslang-core");
     command
 }
 
@@ -504,7 +505,7 @@ exec "$FORMATTER" "$@""#,
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert_eq!(fs::read_to_string(repo.root.join("depth")).unwrap(), "x\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
@@ -608,7 +609,7 @@ echo "$2" >> seen"#,
         .output()
         .unwrap();
     assert!(started.elapsed().as_secs() < 20);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("analysis timed out after 3s: a.ores")
     );
@@ -658,4 +659,66 @@ fn analyze_rejects_insert_mtd() {
     let output = repo.run(&["--analyze", "--insert-mtd", "sample.ores"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("--insert-mtd cannot be combined"));
+}
+
+#[test]
+fn analyze_requires_explicit_compiler_instead_of_guessing_backend_support() {
+    let repo = TempRepo::new("analyze-explicit-compiler");
+    repo.write("sample.atto", UNFORMATTED);
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env_remove("ORESLANG_BIN")
+        .args(["--analyze", "sample.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires explicit ORESLANG_BIN"));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_discovers_canonical_atto_and_legacy_ores_without_other_files() {
+    let repo = TempRepo::new("analyze-atto-discovery");
+    repo.write("src/new.atto", UNFORMATTED);
+    repo.write("src/old.ores", UNFORMATTED);
+    repo.write("src/unrelated.txt", "data");
+    let compiler = write_script(&repo, "compiler", r#"echo "$2" >> seen"#);
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "src"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(repo.root.join("seen")).unwrap(),
+        "src/new.atto\nsrc/old.ores\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_propagates_inconclusive_status_without_claiming_success() {
+    let repo = TempRepo::new("analyze-exit-2");
+    repo.write("a.atto", UNFORMATTED);
+    repo.write("b.atto", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler",
+        r#"case "$2" in a.atto) exit 1 ;; b.atto) exit 2 ;; esac"#);
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "a.atto", "b.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn analyze_refuses_non_source_input_before_compiler_launch() {
+    let repo = TempRepo::new("analyze-unsupported-extension");
+    repo.write("input.txt", "not source");
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env("ORESLANG_BIN", env!("CARGO_BIN_EXE_oresfmt"))
+        .args(["--analyze", "input.txt"])
+        .output()
+        .unwrap();
+    // The recursion guard is also allowed to reject this configuration.
+    assert_eq!(output.status.code(), Some(2));
 }

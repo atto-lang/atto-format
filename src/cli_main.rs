@@ -19,7 +19,7 @@ MODES:
     --check     Do not write files; exit 1 if any input is not canonical
     --stdout    Print one formatted file to stdout instead of writing it
     --analyze   Run compiler static diagnostics without executing or modifying source
-                Uses ORESLANG_BIN (default: oreslang-core) with --analyze
+                Requires explicit ORESLANG_BIN pointing to a compiler with --analyze
                 Limits each file to ORESFMT_ANALYZE_TIMEOUT_SECS (default: 300)
 
 MIGRATION:
@@ -501,13 +501,28 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         return Err("compiler re-entered the formatter; recursive analysis refused".into());
     }
     let timeout = analysis_timeout()?;
-    let requested = env::var_os("ORESLANG_BIN").unwrap_or_else(|| "oreslang-core".into());
+    let requested = env::var_os("ORESLANG_BIN").ok_or(
+        "--analyze requires explicit ORESLANG_BIN; for advisory hints use atto test --effects"
+    )?;
     let compiler = resolve_compiler(Path::new(&requested))?;
     if fs::canonicalize(&compiler)? == fs::canonicalize(env::current_exe()?)? {
         return Err("ORESLANG_BIN resolves to the formatter; recursive analysis refused".into());
     }
 
+    // No implicit compiler fallback: an arbitrary binary named oreslang-core
+    // must not create a misleading successful effects-check verdict.
+    if files.len() > 512 {
+        return Err("--analyze supports at most 512 source files".into());
+    }
+    if files.iter().any(|path| !matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("atto" | "ores")
+    )) {
+        return Err("--analyze accepts only .atto or legacy .ores files".into());
+    }
+
     let mut failed = false;
+    let mut inconclusive = false;
     for path in files {
         let mut child = Command::new(&compiler)
             .arg("--analyze")
@@ -517,18 +532,26 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             .spawn()
             .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
         match wait_with_timeout(&mut child, timeout)? {
-            Some(status) => failed |= !status.success(),
+            Some(status) => match status.code() {
+                Some(0) => {}
+                Some(1) => failed = true,
+                // No success on an unsupported compiler, missing backend,
+                // killed child, or an inconclusive source-effects result.
+                _ => inconclusive = true,
+            },
             None => {
                 eprintln!(
                     "oresfmt: analysis timed out after {}s: {}",
                     timeout.as_secs(),
                     path.display()
                 );
-                failed = true;
+                inconclusive = true;
             }
         }
     }
-    Ok(if failed {
+    Ok(if inconclusive {
+        ExitCode::from(2)
+    } else if failed {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
@@ -625,7 +648,7 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     files.sort();
     files.dedup();
     if files.is_empty() {
-        return Err("no .ores files found".into());
+        return Err("no .atto or .ores files found".into());
     }
     Ok(files)
 }
@@ -669,7 +692,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         }
         if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "ores") {
+        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "atto" || ext == "ores") {
             out.push(child);
         }
     }
