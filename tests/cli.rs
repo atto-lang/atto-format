@@ -457,6 +457,44 @@ fn empty_source_directory_does_not_pass_analysis() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("no .atto or .ores"));
 }
 
+#[cfg(unix)]
+#[test]
+fn analyze_preserves_inconclusive_and_failure_precedence_for_multi_file() {
+    let repo = TempRepo::new("analysis-tristate");
+    let alpha = repo.write("a.atto", UNFORMATTED);
+    let beta = repo.write("b.ores", UNFORMATTED);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"test "$1" = --analyze || exit 9
+case "$2" in
+  a.atto) exit "${ANALYSIS_A_STATUS:-2}" ;;
+  b.ores) exit "${ANALYSIS_B_STATUS:-0}" ;;
+  *) exit 9 ;;
+esac"#,
+    );
+    for (a, b, expected) in [
+        ("0", "0", 0),
+        ("2", "0", 2),
+        ("0", "2", 2),
+        ("2", "2", 2),
+        ("2", "1", 1),
+        ("1", "2", 1),
+        ("42", "0", 1),
+    ] {
+        let output = analyze_command(&repo)
+            .env("ORESLANG_BIN", &compiler)
+            .env("ANALYSIS_A_STATUS", a)
+            .env("ANALYSIS_B_STATUS", b)
+            .args(["--analyze", "a.atto", "b.ores"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(expected), "a={a} b={b}");
+        assert_eq!(fs::read_to_string(&alpha).unwrap(), UNFORMATTED);
+        assert_eq!(fs::read_to_string(&beta).unwrap(), UNFORMATTED);
+    }
+}
+
 #[test]
 fn analyze_refuses_recursive_compiler_configuration() {
     let repo = TempRepo::new("analysis-recursion");
