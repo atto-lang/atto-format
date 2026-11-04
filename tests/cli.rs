@@ -507,6 +507,7 @@ exit 2"#);
 #[ignore = "requires a separately built exact-head oreslang-llvmc; run with --ignored and ORESLANG_REAL_LLVM_BIN"]
 fn analyze_real_llvm_compiler_bridge_is_inconclusive() {
     use std::ffi::OsString;
+
     let compiler: OsString = std::env::var_os("ORESLANG_REAL_LLVM_BIN")
         .expect("set ORESLANG_REAL_LLVM_BIN to the exact-head oreslang-llvmc binary");
     let compiler = fs::canonicalize(PathBuf::from(compiler))
@@ -540,6 +541,7 @@ fn analyze_real_llvm_compiler_bridge_is_inconclusive() {
     assert_eq!(fs::read_to_string(ores).unwrap(), valid);
     assert_eq!(fs::read_to_string(bad).unwrap(), invalid);
 }
+
 #[cfg(unix)]
 #[test]
 fn analyze_mixed_finding_and_inconclusive_stays_inconclusive() {
