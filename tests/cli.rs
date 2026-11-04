@@ -450,6 +450,58 @@ fn write_script(repo: &TempRepo, name: &str, body: &str) -> PathBuf {
     path
 }
 
+#[test]
+fn recursive_discovery_includes_atto_and_legacy_ores_but_not_other_extensions() {
+    let repo = TempRepo::new("atto-discovery");
+    let atto = repo.write("src/a.atto", UNFORMATTED);
+    let ores = repo.write("src/b.ores", UNFORMATTED);
+    repo.write("src/c.txt", UNFORMATTED);
+
+    let directory = repo.run(&["src"]);
+    assert!(directory.status.success());
+    let output = String::from_utf8_lossy(&directory.stdout);
+    assert!(output.contains("a.atto"), "expected .atto: {output}");
+    assert!(output.contains("b.ores"), "expected legacy .ores: {output}");
+    assert!(!output.contains("c.txt"), "other extension selected: {output}");
+    assert!(repo.run(&["src/a.atto"]).status.success());
+    assert_eq!(fs::read_to_string(atto).unwrap(), UNFORMATTED);
+    assert_eq!(fs::read_to_string(ores).unwrap(), UNFORMATTED);
+}
+
+#[test]
+fn analyze_requires_explicit_compiler_selection() {
+    let repo = TempRepo::new("analyze-explicit-compiler");
+    let source = repo.write("input.atto", UNFORMATTED);
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&repo.root)
+        .env_remove("ORESLANG_BIN")
+        .args(["--analyze", "input.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("set ORESLANG_BIN"));
+    assert_eq!(fs::read_to_string(source).unwrap(), UNFORMATTED);
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_incomplete_compiler_is_exit_two_not_a_finding_or_pass() {
+    let repo = TempRepo::new("analyze-unsupported");
+    let source = repo.write("sample.atto", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", r#"echo "effect inference unsupported" >&2
+exit 2"#);
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "sample.atto"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("effect inference unsupported"));
+    assert!(stderr.contains("compiler analysis unsupported or failed"));
+    assert_eq!(fs::read_to_string(source).unwrap(), UNFORMATTED);
+}
+
 #[cfg(unix)]
 #[test]
 fn analyze_dash_prefixed_source_cannot_become_a_compiler_option() {
@@ -608,7 +660,7 @@ echo "$2" >> seen"#,
         .output()
         .unwrap();
     assert!(started.elapsed().as_secs() < 20);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("analysis timed out after 3s: a.ores")
     );
