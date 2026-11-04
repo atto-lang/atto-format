@@ -394,6 +394,10 @@ compiler cannot resolve to this formatter, including through a symlink.
 `ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
 The compiler receives closed stdin, and a per-file timeout of
 `ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
-Only the direct child is terminated on timeout; **descendants are not
-contained**. Do not use untrusted compiler binaries or rely on this adapter
-as a sandbox. Analysis failures produce nonzero status and no source rewrites.
+On Unix, each analyzer runs in its own process group, and a timeout sends
+`SIGKILL` to **that process group** before reaping the direct child. Ordinary
+background shell children in that group are terminated; children that detach
+into another group/session can escape and are **not guaranteed contained**.
+On Windows, the direct child alone is terminated; a job-object implementation
+is still required for descendant cleanup. Do not use untrusted compiler
+binaries or rely on this adapter as an OS sandbox. Analysis failures produce nonzero status and no source rewrites.
