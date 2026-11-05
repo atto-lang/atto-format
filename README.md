@@ -374,6 +374,10 @@ Delegated analysis exit codes preserve the versioned compiler outcome:
 `2` means at least one inconclusive input and no other failures, and
 `1` means any source/compiler/process failure. For multiple files,
 failure takes precedence over inconclusive; neither becomes success.
+Each inconclusive input is named on stderr. A missing or unrunnable compiler,
+an invalid analysis setting, or a path that selects no source also exits `1`, so
+`2` can never mean nothing was analyzed. Invalid command-line arguments still
+exit `2` as usage errors before analysis starts, and print no inconclusive line.
 This exit convention is experimental until verified against actual
 compiler binaries.
 

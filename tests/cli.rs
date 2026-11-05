@@ -348,7 +348,7 @@ fn analyze_missing_compiler_fails_without_changing_source() {
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(fs::read_to_string(path).unwrap(), UNFORMATTED);
 }
 
@@ -505,7 +505,7 @@ fn analyze_refuses_recursive_compiler_configuration() {
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
 
@@ -582,7 +582,7 @@ exec "$FORMATTER" "$@""#,
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(fs::read_to_string(repo.root.join("depth")).unwrap(), "x\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
@@ -621,7 +621,7 @@ fn analyze_refuses_the_formatter_found_on_path_through_a_symlink() {
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("recursive analysis refused"));
 }
 
@@ -644,7 +644,7 @@ fn analyze_non_executable_shadow_cannot_hide_the_formatter_from_the_self_check()
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("resolves to the formatter"));
 }
 
@@ -660,7 +660,7 @@ fn analyze_ignores_relative_and_empty_path_entries() {
             .args(["--analyze", "sample.ores"])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&output.stderr).contains("not found on PATH"));
         assert!(!repo.root.join("ran").exists());
     }
@@ -709,7 +709,7 @@ fn analyze_rejects_invalid_timeouts_before_running_anything() {
             .args(["--analyze", "sample.ores"])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(2), "timeout {value:?}");
+        assert_eq!(output.status.code(), Some(1), "timeout {value:?}");
         assert!(!repo.root.join("ran").exists());
     }
 }
@@ -725,7 +725,7 @@ fn analyze_refuses_a_non_executable_compiler_path() {
         .args(["--analyze", "sample.ores"])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("not an executable file"));
 }
 
@@ -777,8 +777,58 @@ fn analyze_timeout_reaps_background_compiler_descendants() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(repo.root.join("started").is_file(), "compiler did not execute");
+    assert!(
+        repo.root.join("started").is_file(),
+        "compiler did not execute"
+    );
     assert!(String::from_utf8_lossy(&output.stderr).contains("analysis timed out"));
     std::thread::sleep(std::time::Duration::from_secs(3));
-    assert!(!repo.root.join("leaked").exists(), "descendant survived timeout");
+    assert!(
+        !repo.root.join("leaked").exists(),
+        "descendant survived timeout"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_spawn_failure_after_a_real_failure_is_never_reported_as_inconclusive() {
+    let repo = TempRepo::new("analysis-vanishing-compiler");
+    repo.write("a.ores", UNFORMATTED);
+    repo.write("b.ores", UNFORMATTED);
+    let compiler = write_script(&repo, "compiler", r#"/bin/rm -f "$0"; exit 2"#);
+    let output = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "a.ores", "b.ores"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("analysis inconclusive: a.ores"), "{stderr}");
+    assert!(stderr.contains("cannot run compiler"), "{stderr}");
+    assert!(stderr.contains("for b.ores"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_that_selects_nothing_fails_instead_of_looking_inconclusive() {
+    let repo = TempRepo::new("analysis-no-input");
+    fs::create_dir_all(repo.root.join("empty")).unwrap();
+    let compiler = write_script(&repo, "compiler", "exit 0");
+    for input in ["missing.ores", "empty"] {
+        let output = analyze_command(&repo)
+            .env("ORESLANG_BIN", &compiler)
+            .args(["--analyze", input])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{input}: {output:?}");
+    }
+}
+
+#[test]
+fn analyze_argument_errors_remain_usage_errors() {
+    let repo = TempRepo::new("analysis-usage");
+    repo.write("sample.ores", UNFORMATTED);
+    let output = repo.run(&["--analyze", "--nonsense", "sample.ores"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown option"));
 }

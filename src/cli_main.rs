@@ -205,10 +205,16 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let files = collect_files(&paths)?;
+    // Exit 2 means "inconclusive" in analyze mode, so a run that analyzed nothing
+    // must not be able to report it. Argument errors above remain usage errors.
+    let files = match collect_files(&paths) {
+        Ok(files) => files,
+        Err(error) if mode == Mode::Analyze => return Ok(analysis_setup_failure(error)),
+        Err(error) => return Err(error),
+    };
 
     match mode {
-        Mode::Analyze => run_analysis(files),
+        Mode::Analyze => Ok(run_analysis(files).unwrap_or_else(analysis_setup_failure)),
         Mode::DryRun => {
             for path in files {
                 let input = fs::read_to_string(&path)?;
@@ -496,6 +502,11 @@ const ANALYZE_TIMEOUT_ENV: &str = "ORESFMT_ANALYZE_TIMEOUT_SECS";
 const DEFAULT_ANALYZE_TIMEOUT_SECS: u64 = 300;
 const MAX_ANALYZE_TIMEOUT_SECS: u64 = 86_400;
 
+fn analysis_setup_failure(error: Box<dyn std::error::Error>) -> ExitCode {
+    eprintln!("oresfmt: {error}");
+    ExitCode::from(1)
+}
+
 fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Error>> {
     if env::var_os(ANALYZE_GUARD_ENV).is_some() {
         return Err("compiler re-entered the formatter; recursive analysis refused".into());
@@ -520,11 +531,22 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             .arg(compiler_path_argument(&path))
             .env(ANALYZE_GUARD_ENV, "1")
             .stdin(Stdio::null());
-        let mut child = spawn_retrying_busy(&mut command)
-            .map_err(|error| format!("cannot run compiler {}: {error}", compiler.display()))?;
+        let mut child = match spawn_retrying_busy(&mut command) {
+            Ok(child) => child,
+            Err(error) => {
+                eprintln!(
+                    "oresfmt: cannot run compiler {} for {}: {error}",
+                    compiler.display(),
+                    path.display()
+                );
+                outcome = 1;
+                continue;
+            }
+        };
         match wait_with_timeout(&mut child, timeout)? {
             Some(status) if status.success() => {}
             Some(status) if status.code() == Some(2) => {
+                eprintln!("oresfmt: analysis inconclusive: {}", path.display());
                 if outcome == 0 {
                     outcome = 2;
                 }
