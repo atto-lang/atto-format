@@ -4,7 +4,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Child, Command, ExitCode, ExitStatus, Stdio};
+use std::process::{Child, ChildStdout, Command, ExitCode, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 const HELP: &str = r#"oresfmt - the canonical Oreslang formatter
@@ -530,7 +532,8 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
             .arg("--analyze")
             .arg(compiler_path_argument(&path))
             .env(ANALYZE_GUARD_ENV, "1")
-            .stdin(Stdio::null());
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped());
         let mut child = match spawn_retrying_busy(&mut command) {
             Ok(child) => child,
             Err(error) => {
@@ -543,7 +546,22 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
                 continue;
             }
         };
+        let result = child.stdout.take().map(forward_and_scan_stdout);
         match wait_with_timeout(&mut child, timeout)? {
+            // Only a versioned record proves the compiler ran an analysis. An
+            // incompatible compiler usually exits 2 for an unknown flag, and
+            // anything can exit 0, so neither status means anything alone.
+            Some(status)
+                if (status.success() || status.code() == Some(2))
+                    && !result.is_some_and(|result| result.reported()) =>
+            {
+                eprintln!(
+                    "oresfmt: compiler reported no {} result for {}; it may not support --analyze",
+                    ANALYZE_RESULT_NAME,
+                    path.display()
+                );
+                outcome = 1;
+            }
             Some(status) if status.success() => {}
             Some(status) if status.code() == Some(2) => {
                 eprintln!("oresfmt: analysis inconclusive: {}", path.display());
@@ -563,6 +581,65 @@ fn run_analysis(files: Vec<PathBuf>) -> Result<ExitCode, Box<dyn std::error::Err
         }
     }
     Ok(ExitCode::from(outcome))
+}
+
+const ANALYZE_RESULT_NAME: &str = "ORES-ANALYZE-V0";
+const ANALYZE_RESULT_PREFIX: &[u8] = b"ORES-ANALYZE-V0\t";
+/// How long to wait for buffered output after the compiler exits. A descendant
+/// that keeps the pipe open must not stall the run, and missing the record in
+/// that window fails closed.
+const ANALYZE_OUTPUT_DRAIN: Duration = Duration::from_secs(5);
+
+struct AnalysisResultScan {
+    seen: Arc<AtomicBool>,
+    drained: mpsc::Receiver<()>,
+}
+
+impl AnalysisResultScan {
+    fn reported(&self) -> bool {
+        let _ = self.drained.recv_timeout(ANALYZE_OUTPUT_DRAIN);
+        self.seen.load(Ordering::Acquire)
+    }
+}
+
+/// Streams compiler stdout to our stdout while looking for a line that starts
+/// with the versioned result prefix. Uses no line buffer, so output size is not
+/// limited and a record split across reads still matches.
+fn forward_and_scan_stdout(mut source: ChildStdout) -> AnalysisResultScan {
+    let seen = Arc::new(AtomicBool::new(false));
+    let (done, drained) = mpsc::channel();
+    let flag = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        let mut matched = Some(0_usize);
+        let mut stdout = io::stdout();
+        while let Ok(count) = source.read(&mut buffer) {
+            if count == 0 {
+                break;
+            }
+            for &byte in &buffer[..count] {
+                matched = match matched {
+                    _ if byte == b'\n' => Some(0),
+                    Some(index)
+                        if index < ANALYZE_RESULT_PREFIX.len()
+                            && byte == ANALYZE_RESULT_PREFIX[index] =>
+                    {
+                        Some(index + 1)
+                    }
+                    Some(index) if index == ANALYZE_RESULT_PREFIX.len() => Some(index),
+                    _ => None,
+                };
+                if matched == Some(ANALYZE_RESULT_PREFIX.len()) {
+                    flag.store(true, Ordering::Release);
+                }
+            }
+            // A closed stdout must not stop the scan or block the compiler.
+            let _ = stdout.write_all(&buffer[..count]);
+            let _ = stdout.flush();
+        }
+        let _ = done.send(());
+    });
+    AnalysisResultScan { seen, drained }
 }
 
 /// Retries briefly when the kernel reports the executable as open for writing.

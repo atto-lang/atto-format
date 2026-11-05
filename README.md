@@ -378,6 +378,9 @@ Each inconclusive input is named on stderr. A missing or unrunnable compiler,
 an invalid analysis setting, or a path that selects no source also exits `1`, so
 `2` can never mean nothing was analyzed. Invalid command-line arguments still
 exit `2` as usage errors before analysis starts, and print no inconclusive line.
+Exit `0` and `2` only count when the compiler's stdout has a line starting with
+`ORES-ANALYZE-V0` and a tab. Without that record the file fails, because a compiler
+that rejects `--analyze` usually exits `2` and any program can exit `0`.
 This exit convention is experimental until verified against actual
 compiler binaries.
 

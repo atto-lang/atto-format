@@ -430,7 +430,7 @@ fn analyze_recursively_discovers_atto_and_ores_without_mutation() {
         "compiler",
         r#"test "$1" = --analyze || exit 9
 case "$2" in
-  src/alpha.atto|src/deep/beta.ores) printf '%s\n' "$2" ;;
+  src/alpha.atto|src/deep/beta.ores) printf '%s\n' "$2"; printf 'ORES-ANALYZE-V0\tstatus=known\n' ;;
   *) exit 9 ;;
 esac"#,
     );
@@ -467,6 +467,7 @@ fn analyze_preserves_inconclusive_and_failure_precedence_for_multi_file() {
         &repo,
         "compiler",
         r#"test "$1" = --analyze || exit 9
+printf 'ORES-ANALYZE-V0\tstatus=known\n'
 case "$2" in
   a.atto) exit "${ANALYSIS_A_STATUS:-2}" ;;
   b.ores) exit "${ANALYSIS_B_STATUS:-0}" ;;
@@ -532,7 +533,11 @@ fn write_script(repo: &TempRepo, name: &str, body: &str) -> PathBuf {
 fn analyze_dash_prefixed_source_cannot_become_a_compiler_option() {
     let repo = TempRepo::new("analysis-dash-path");
     repo.write("-x.ores", UNFORMATTED);
-    let compiler = write_script(&repo, "compiler", r#"[ "$2" = ./-x.ores ] || exit 9"#);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"[ "$2" = ./-x.ores ] || exit 9; printf 'ORES-ANALYZE-V0\tstatus=known\n'"#,
+    );
     let output = analyze_command(&repo)
         .env("ORESLANG_BIN", compiler)
         .args(["--analyze", "--", "-x.ores"])
@@ -548,7 +553,11 @@ fn analyze_gives_the_compiler_a_closed_stdin() {
     use std::process::Stdio;
     let repo = TempRepo::new("analysis-stdin");
     repo.write("sample.ores", UNFORMATTED);
-    let compiler = write_script(&repo, "compiler", r#"[ -z "$(/bin/cat)" ] || exit 9"#);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"[ -z "$(/bin/cat)" ] || exit 9; printf 'ORES-ANALYZE-V0\tstatus=known\n'"#,
+    );
     let mut child = analyze_command(&repo)
         .env("ORESLANG_BIN", compiler)
         .args(["--analyze", "sample.ores"])
@@ -593,7 +602,11 @@ fn analyze_path_search_skips_non_executable_shadows() {
     let repo = TempRepo::new("analysis-path-shadow");
     repo.write("sample.ores", UNFORMATTED);
     repo.write("first/oreslang-core", "not executable");
-    write_script(&repo, "second/oreslang-core", "echo ran > ran");
+    write_script(
+        &repo,
+        "second/oreslang-core",
+        r#"echo ran > ran; printf 'ORES-ANALYZE-V0\tstatus=known\n'"#,
+    );
     let path = format!("{0}/first:{0}/second", repo.root.display());
     let output = analyze_command(&repo)
         .env("PATH", path)
@@ -743,7 +756,11 @@ fn analyze_rejects_insert_mtd() {
 fn analyze_retries_a_compiler_that_is_briefly_open_for_writing() {
     let repo = TempRepo::new("analysis-text-busy");
     repo.write("sample.ores", UNFORMATTED);
-    let compiler = write_script(&repo, "compiler", "exit 0");
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"printf 'ORES-ANALYZE-V0\tstatus=known\n'"#,
+    );
     let writer = fs::OpenOptions::new().append(true).open(&compiler).unwrap();
     let child = analyze_command(&repo)
         .env("ORESLANG_BIN", &compiler)
@@ -795,7 +812,11 @@ fn analyze_spawn_failure_after_a_real_failure_is_never_reported_as_inconclusive(
     let repo = TempRepo::new("analysis-vanishing-compiler");
     repo.write("a.ores", UNFORMATTED);
     repo.write("b.ores", UNFORMATTED);
-    let compiler = write_script(&repo, "compiler", r#"/bin/rm -f "$0"; exit 2"#);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"printf 'ORES-ANALYZE-V0\tstatus=known\n'; /bin/rm -f "$0"; exit 2"#,
+    );
     let output = analyze_command(&repo)
         .env("ORESLANG_BIN", compiler)
         .args(["--analyze", "a.ores", "b.ores"])
@@ -831,4 +852,96 @@ fn analyze_argument_errors_remain_usage_errors() {
     let output = repo.run(&["--analyze", "--nonsense", "sample.ores"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown option"));
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_status_without_a_versioned_result_fails() {
+    for (name, body) in [
+        (
+            "rejected-flag",
+            "echo 'unknown option: --analyze' >&2; exit 2",
+        ),
+        ("accepts-anything", "exit 0"),
+        ("prose", "echo 'looks fine'; exit 0"),
+        (
+            "not-line-start",
+            r#"printf 'see ORES-ANALYZE-V0\tstatus=known\n'; exit 0"#,
+        ),
+        ("no-separator", "echo 'ORES-ANALYZE-V0'; exit 0"),
+        (
+            "stderr-only",
+            r#"printf 'ORES-ANALYZE-V0\tstatus=known\n' >&2; exit 0"#,
+        ),
+    ] {
+        let repo = TempRepo::new(&format!("analysis-no-result-{name}"));
+        repo.write("sample.ores", UNFORMATTED);
+        let compiler = write_script(&repo, "compiler", body);
+        let output = analyze_command(&repo)
+            .env("ORESLANG_BIN", compiler)
+            .args(["--analyze", "sample.ores"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{name}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("no ORES-ANALYZE-V0 result"),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("analysis inconclusive"),
+            "{name}: {stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_finds_results_split_across_writes_or_after_large_output() {
+    for (name, body) in [
+        (
+            "split",
+            r#"printf 'ORES-ANA'; /bin/sleep 0.2; printf 'LYZE-V0\tstatus=known\n'"#,
+        ),
+        (
+            "after-large-output",
+            r#"/usr/bin/head -c 300000 /dev/zero | /usr/bin/tr '\0' 'x'; printf '\nORES-ANALYZE-V0\tstatus=known\n'"#,
+        ),
+    ] {
+        let repo = TempRepo::new(&format!("analysis-result-{name}"));
+        repo.write("sample.ores", UNFORMATTED);
+        let compiler = write_script(&repo, "compiler", body);
+        let output = analyze_command(&repo)
+            .env("ORESLANG_BIN", compiler)
+            .args(["--analyze", "sample.ores"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{name}: {:?}", output.stderr);
+        assert!(
+            String::from_utf8_lossy(&output.stdout).ends_with("ORES-ANALYZE-V0\tstatus=known\n"),
+            "{name}: compiler stdout was not forwarded"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_is_not_held_open_by_a_descendant_keeping_stdout() {
+    use std::process::Stdio;
+    let repo = TempRepo::new("analysis-held-stdout");
+    repo.write("sample.ores", UNFORMATTED);
+    let compiler = write_script(
+        &repo,
+        "compiler",
+        r#"printf 'ORES-ANALYZE-V0\tstatus=known\n'; /bin/sleep 30 &"#,
+    );
+    let started = std::time::Instant::now();
+    let status = analyze_command(&repo)
+        .env("ORESLANG_BIN", compiler)
+        .args(["--analyze", "sample.ores"])
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(0));
+    assert!(started.elapsed().as_secs() < 20);
 }
