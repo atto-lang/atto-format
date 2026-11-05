@@ -360,6 +360,50 @@ class ParityHarnessTests(unittest.TestCase):
         self.assertFalse(result["ok"], result)
         self.assertFalse(result["idempotent"])
 
+    def test_source_placeholder_preserves_quoted_path_with_spaces(self):
+        path = self.path / "folder name" / "program file.ores"
+        argv = command_argv('compiler --check "{source}"', path)
+        self.assertEqual(argv, ["compiler", "--check", str(path)])
+        with self.assertRaisesRegex(ValueError, "source"):
+            command_argv('compiler --check input.ores', path)
+
+    def test_missing_fixture_never_promotes_compiler_status(self):
+        missing = self.path / "not-present.ores"
+        result = audit_case(
+            missing, [sys.executable, str(self.formatter)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["fixture"], "invalid")
+
+    def test_second_formatter_pass_failure_is_not_idempotence(self):
+        case = self.path / "case.ores"
+        case.write_text("allowed", encoding="utf-8")
+        second = self.path / "non_idempotent.py"
+        second.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "if 'formatted' in sys.argv[-1]: sys.exit(7)\n"
+            "sys.stdout.write(Path(sys.argv[-1]).read_text())\n",
+            encoding="utf-8",
+        )
+        result = audit_case(
+            case, [sys.executable, str(second)],
+            self.command, self.command, 5,
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertFalse(result["idempotent"], result)
+        self.assertEqual(result["backends"]["java"]["original"], "accept")
+        self.assertEqual(result["backends"]["llvm"]["formatted"], "accept")
+
+    def test_bounded_stdout_never_succeeds_after_limit(self):
+        status, code, output, diagnostics = run_process(
+            [sys.executable, "-c", "print('x' * 2048)"],
+            5, stdout_limit=64,
+        )
+        self.assertEqual(status, "output_limit")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(output, b"")
+
 
 if __name__ == "__main__":
     unittest.main()
