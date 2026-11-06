@@ -19,6 +19,12 @@ jobs:
         with:
           ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
+      - name: Verify exact original commit and physical checked-out source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Test adversarial Git source-identity controls
+        run: python3 -m unittest discover -s tests -p test_ci_checkout_head_20261106.py -v
       - run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
@@ -43,6 +49,12 @@ jobs:
         with:
           ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
+      - name: Verify exact original commit and physical checked-out source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Test adversarial Git source-identity controls
+        run: python3 -m unittest discover -s tests -p test_ci_checkout_head_20261106.py -v
       - run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
