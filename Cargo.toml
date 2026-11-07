@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 [lib]
 name = "oreslang_format"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "oresfmt"
