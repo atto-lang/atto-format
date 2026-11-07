@@ -4,7 +4,10 @@ fn format_twice(source: &str) -> String {
     let once = format_source(source).expect("typed return syntax must format");
     let twice = format_source(&once).expect("formatted source must reformat");
     assert_eq!(once, twice, "formatter must be idempotent");
-    assert!(is_formatted(&once).unwrap(), "formatted output must be stable");
+    assert!(
+        is_formatted(&once).unwrap(),
+        "formatted output must be stable"
+    );
     once
 }
 
@@ -36,8 +39,13 @@ return compute() + 1;
 }
 "#;
     let output = format_twice(source);
-    for exact in ["|| -> int {", "return match<int> ready over",
-                  "on true -> 41;", "on false -> 1;", "return compute() + 1;"] {
+    for exact in [
+        "|| -> int {",
+        "return match<int> ready over",
+        "on true -> 41;",
+        "on false -> 1;",
+        "return compute() + 1;",
+    ] {
         assert!(output.contains(exact), "lost {exact}:\n{output}");
     }
 }
@@ -150,7 +158,13 @@ fn visible_binding_modifiers_never_turn_type_arrows_into_executable_arrows() {
             "fnc main(): void {{\n{qualifier} cb<(int, int) => int> = fnc(a: int, b: int) -> int {{ return a + b; }};\nreturn;\n}}\n"
         );
         let output = format_twice(&source);
-        assert!(output.contains("cb<(int, int) => int>"), "lost type-level '=>' in {qualifier}:\n{output}");
-        assert!(output.contains("fnc(a: int, b: int) -> int"), "lost executable '->' in {qualifier}:\n{output}");
+        assert!(
+            output.contains("cb<(int, int) => int>"),
+            "lost type-level '=>' in {qualifier}:\n{output}"
+        );
+        assert!(
+            output.contains("fnc(a: int, b: int) -> int"),
+            "lost executable '->' in {qualifier}:\n{output}"
+        );
     }
 }
