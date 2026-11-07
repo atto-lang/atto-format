@@ -144,7 +144,7 @@ return;
 }
 
 #[test]
-fn canonicalizes_current_generator_sugar_and_preserves_yield_delegation() {
+fn preserves_generator_headers_and_yield_delegation() {
     let src = r#"fnc gen* sync_values(): Iterator<int> {
 rt yield;
 yield* inner();
@@ -175,27 +175,30 @@ fnc math(int gen, int value) -> int {
 return gen * value;
 }
 "#;
-    let expected = r#"gen* sync_values() -> Iterator<int> {
+    // Generator headers are preserved verbatim: Java rejects a top-level
+    // bare `gen*` while LLVM rejects `fnc gen*`/`generator fnc`, so no
+    // rewrite between spellings is accepted by both production compilers.
+    let expected = r#"fnc gen* sync_values(): Iterator<int> {
   rt cooperate;
   yield* inner();
   return;
 }
 
 
-async gen* async_values() -> AsyncIterator<int> {
+async fnc generator* async_values(): AsyncIterator<int> {
   rt cooperate();
   yield* sync_values();
   return;
 }
 
 
-gen* legacy_values() -> int {
+generator routine legacy_values(): int {
   yield 7;
   return;
 }
 
 
-pub gen* canonical() -> Iterator<int> {
+pub gen* canonical(): Iterator<int> {
   yield 8;
   return;
 }
@@ -346,7 +349,7 @@ end
 
     let expected = r#"define module Accounts as
   define class Account as
-    pub let int balance: 100;
+    pub let int balance = 100;
 
     pub read() -> int {
       return self.balance;
@@ -473,7 +476,7 @@ end
 end
 "#;
     let expected = r#"define class Child extends Parent<int>, Audited implements Named, Serializable as
-  pub String name;
+  pub val String name;
 
   pub render() -> String {
     return self.name;
@@ -528,7 +531,7 @@ fi
 }
 "#;
     let expected = r#"shared actor Cleaner {
-  pub compact() -> void {
+  pub compact(): void {
     if ready; then
       actor.gc();
     else
@@ -1312,7 +1315,7 @@ static fnc direct(): int { return 42; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("call() -> String {"));
+    assert!(out.contains("call(): String {"));
     assert!(out.contains("// fnc marker() is a comment"));
     assert!(out.contains("\"fnc name()\""));
     assert!(out.contains("static fnc direct()"));
@@ -1370,9 +1373,9 @@ static fnc helper(): int { return 3; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("  handle() -> int {"), "{out}");
-    assert!(out.contains("  method explicit() -> int {"), "{out}");
-    assert!(out.contains("  static fnc helper() -> int {"), "{out}");
+    assert!(out.contains("  handle(): int {"), "{out}");
+    assert!(out.contains("  method explicit(): int {"), "{out}");
+    assert!(out.contains("  static fnc helper(): int {"), "{out}");
     assert_eq!(out, format_source(&out).unwrap());
 }
 
@@ -1419,11 +1422,8 @@ static fnc utility(): int { return 9; }
 end
 "#;
     let result = format_source(source).unwrap();
-    assert!(result.contains("  handle() -> int {"), "{result}");
-    assert!(
-        result.contains("  static fnc utility() -> int {"),
-        "{result}"
-    );
+    assert!(result.contains("  handle(): int {"), "{result}");
+    assert!(result.contains("  static fnc utility(): int {"), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
 #[test]
@@ -1817,11 +1817,13 @@ fn colon_normalization_preserves_legacy_binding_kind_fields_and_nested_code() {
 end
 "#;
     let got = format_source(src).unwrap();
+    // Explicit binding keywords are semantic and Java's parseField only
+    // accepts `=` after them, so these lines are left exactly as written.
     for unchanged in [
-        "pub let int balance: 100;",
-        "string label: \"fixed\";",
-        "const int limit: 9;",
-        "let mut Array<int> items: new Array<int>();",
+        "pub let int balance = 100;",
+        "val string label = \"fixed\";",
+        "const int limit = 9;",
+        "let mut Array<int> items = new Array<int>();",
         "let int n = 2;",
         "balance = 3;",
     ] {
@@ -2059,7 +2061,7 @@ fnc standalone(): void {}
     assert!(once.contains("mtd bar() -> void ::"), "{once}");
     assert!(once.contains("static fnc helper() -> void {"), "{once}");
     assert!(once.contains("mtd mtd() -> void {"), "{once}");
-    assert!(once.contains("suspend mtd work() -> void {"), "{once}");
+    assert!(once.contains("suspend mtd work(): void {"), "{once}");
     assert!(once.contains("fnc standalone() -> void {"), "{once}");
     assert!(!once.contains("mtd mtd bar"), "{once}");
     assert_eq!(
@@ -2157,12 +2159,12 @@ end
     let once = format_source(source).unwrap();
     assert!(once.contains(") -> int ::\n"), "{once}");
     assert!(once.contains("  end\n  next() -> int {"), "{once}");
-    assert!(once.contains("  end\n  later() -> int {"), "{once}");
+    assert!(once.contains("  end\n  later(): int {"), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
     let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
     assert!(migrated.contains("mtd sum("), "{migrated}");
     assert!(migrated.contains("mtd process("), "{migrated}");
-    assert!(migrated.contains("mtd later() -> int {"), "{migrated}");
+    assert!(migrated.contains("mtd later(): int {"), "{migrated}");
     assert_eq!(
         migrated,
         oreslang_format::format_source_with_mtd(&migrated).unwrap()

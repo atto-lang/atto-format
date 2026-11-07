@@ -26,14 +26,20 @@ fn lex_line<'a>(line: &'a str, state: &mut LexState) -> Lexed<'a> {
     let mut tokens = Vec::new();
     let mut chars = line.char_indices().peekable();
     let mut line_comment = None;
-    let mut block_comment_seen = state.block_comment;
+    let mut block_comment_seen = state.block_comment > 0;
 
     while let Some((start, ch)) = chars.next() {
         let next = chars.peek().map(|&(_, ch)| ch);
-        if state.block_comment {
+        if state.block_comment > 0 {
+            // AttoLang block comments nest (Java Lexer and LLVM agree).
+            if ch == '/' && next == Some('*') {
+                state.block_comment += 1;
+                chars.next();
+                continue;
+            }
             if ch == '*' && next == Some('/') {
                 chars.next();
-                state.block_comment = false;
+                state.block_comment -= 1;
             }
             continue;
         }
@@ -43,7 +49,7 @@ fn lex_line<'a>(line: &'a str, state: &mut LexState) -> Lexed<'a> {
         }
         if ch == '/' && next == Some('*') {
             chars.next();
-            state.block_comment = true;
+            state.block_comment = 1;
             block_comment_seen = true;
             continue;
         }
@@ -461,7 +467,7 @@ fn terminate_simple_returns(source: &str) -> String {
         // this line. Bare returns are always complete. Expression returns
         // fail closed around multiline/block syntax so formatting cannot
         // silently terminate a future match/select/continuation early.
-        let is_return = !initial.block_comment
+        let is_return = initial.block_comment == 0
             && !scanned.block_comment_seen
             && tokens.first().is_some_and(|token| token.text == "return")
             && !code.ends_with(';');
