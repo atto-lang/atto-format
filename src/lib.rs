@@ -2639,6 +2639,20 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         return false;
     }
     let lower = structural.trim_start();
+    // A typed *binding* may contain both a function-type arrow inside
+    // <(Args...) => Return> and an anonymous fnc(...) -> Return initializer.
+    // Its first parenthesis belongs to the type ascription, NOT to a callable
+    // declaration header. Never rewrite that type-level '=>' into '->'.
+    let binding_head = lower
+        .strip_prefix("pub ")
+        .or_else(|| lower.strip_prefix("private "))
+        .unwrap_or(lower);
+    if ["const", "let", "val", "final"]
+        .iter()
+        .any(|keyword| starts_word(binding_head, keyword))
+    {
+        return false;
+    }
     for kw in [
         "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
         "default",
