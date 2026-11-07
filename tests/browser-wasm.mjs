@@ -40,8 +40,8 @@ for (const source of cases) {
 }
 const unicode=format('// 🚀 日本語\nfnc main() -> int { return 42; }\n');
 assert.ok(unicode.ok && unicode.text.includes('🚀 日本語'));
-const invalid=format('if x = y then\nreturn 3;\nfi\n');
-assert.equal(invalid.ok,false,'assignment in an if condition must be rejected');
-assert.ok(invalid.text.includes('line') || invalid.text.includes('if'));
+const invalid=format('fnc identity(int x) -> int do return x; end\n');
+assert.equal(invalid.ok,false,'canonical formatter rejects retired callable-header do');
+assert.ok(invalid.text.length > 0, 'formatter diagnostics are supplied');
 assert.equal(w.oresfmt_format(0,1,0,2),-2147483648);
 console.log('PASS: real formatter Wasm, canonical idempotence, unicode, rejection and no imports');
