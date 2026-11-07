@@ -147,10 +147,10 @@ return;
 fn visible_binding_modifiers_never_turn_type_arrows_into_executable_arrows() {
     for qualifier in ["const", "pub const", "private const", "let", "val"] {
         let source = format!(
-            "fnc main(): void {{\\n{qualifier} cb<(int, int) => int> = fnc(a: int, b: int) -> int {{ return a + b; }};\\nreturn;\\n}}\\n"
+            "fnc main(): void {{\n{qualifier} cb<(int, int) => int> = fnc(a: int, b: int) -> int {{ return a + b; }};\nreturn;\n}}\n"
         );
         let output = format_twice(&source);
-        assert!(output.contains("cb<(int, int) => int>"), "lost type-level '=>' in {qualifier}:\\n{output}");
-        assert!(output.contains("fnc(a: int, b: int) -> int"), "lost executable '->' in {qualifier}:\\n{output}");
+        assert!(output.contains("cb<(int, int) => int>"), "lost type-level '=>' in {qualifier}:\n{output}");
+        assert!(output.contains("fnc(a: int, b: int) -> int"), "lost executable '->' in {qualifier}:\n{output}");
     }
 }
