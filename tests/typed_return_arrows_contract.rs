@@ -103,3 +103,42 @@ return;
         "{output}"
     );
 }
+
+#[test]
+fn named_callable_signature_and_implicit_void_defer_survive_roundtrip() {
+    let source = r#"fnc calculate(): int {
+const add = |a: int, b: int| -> int { return a + b; };
+const add2<(int, int) => int> = fnc(a: int, b: int) -> int {
+return add(a, b);
+};
+defer || -> {
+stdio.println("defer done");
+};
+return add2(19, 23);
+}
+"#;
+    let output = format_twice(source);
+    for fragment in [
+        "const add2<(int, int) => int> =",
+        "fnc(a: int, b: int) -> int {",
+        "defer || -> {",
+    ] {
+        assert!(output.contains(fragment), "lost {fragment}:\\n{output}");
+    }
+}
+
+#[test]
+fn formatter_must_not_silently_fix_an_incompatible_void_signature() {
+    // Grammar permits this as a typed declaration, but the compiler should
+    // reject the return mismatch. A formatter must never convert void to int.
+    let source = r#"fnc f(): void {
+const bad<(int, int) => void> = fnc(a: int, b: int) -> int {
+return a + b;
+};
+return;
+}
+"#;
+    let output = format_twice(source);
+    assert!(output.contains("=> void>"), "{output}");
+    assert!(output.contains("-> int {"), "{output}");
+}
