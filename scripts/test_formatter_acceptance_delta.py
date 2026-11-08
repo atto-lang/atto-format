@@ -97,8 +97,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
             "import sys\nfrom pathlib import Path\n"
             "p=Path(sys.argv[-1])\n"
             "root=p.parent.parent\n"
+            "t=p.read_text()\n"
             "sys.exit(0 if (root/'.ores.pkg.toml').is_file() and "
-            "(root/'config.json').is_file() else 1)\n",
+            "(root/'config.json').is_file() and '!!!' not in t else 1)\n",
             encoding="utf-8",
         )
         result, report = self.run_main()
@@ -273,6 +274,28 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertIn('"files": 1', report)
         self.assertNotIn("invalid-control.atto", report)
         self.assertFalse((self.corpus / "invalid-control.atto").exists())
+
+
+    def test_manifest_only_compiler_cannot_fake_invalid_syntax_rejection(self):
+        (self.corpus / "src").mkdir()
+        (self.corpus / "src" / "main.atto").write_text(
+            "fnc main() {}\n", encoding="utf-8")
+        (self.corpus / ".ores.pkg.toml").write_text(
+            "[package]\nname = 'demo'\n", encoding="utf-8")
+        # This stub accepts every source in a valid package without parsing.
+        # A control outside that package would be rejected and miss the flaw.
+        self.compiler.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "root=p.parent.parent\n"
+            "sys.exit(0 if (root/'.ores.pkg.toml').is_file() else 1)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main()
+        self.assertEqual(status, 2, report)
+        self.assertIn("invalid syntax control was accept", report)
+        self.assertEqual((self.corpus / "src" / "main.atto").read_text(),
+                         "fnc main() {}\n")
 
 
 if __name__ == "__main__":
