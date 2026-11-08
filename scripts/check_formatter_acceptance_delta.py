@@ -114,8 +114,20 @@ def discover(roots):
 
 
 def format_file(formatter, path, timeout):
+    # --stdout must never mutate the source. Otherwise a formatter that
+    # rewrites the *original* before admission can conceal a regression:
+    # both sides of the differential would be compared after mutation.
+    try:
+        before_bytes = path.read_bytes()
+    except OSError as error:
+        return "read-failure", None, str(error).encode()
     status, returncode, output, diagnostics = run_process(
         formatter + ["--stdout", str(path)], timeout, stdout_limit=MAX_FORMATTED_BYTES)
+    try:
+        if path.read_bytes() != before_bytes:
+            return "mutated-input", None, b"formatter modified source under --stdout"
+    except OSError as error:
+        return "read-failure", None, str(error).encode()
     if status != "exited":
         return status, None, diagnostics
     if returncode != 0:
@@ -127,6 +139,8 @@ def admit(template, path, timeout):
     status, returncode, _, diagnostics = run_process(command_argv(template, path), timeout)
     if status != "exited":
         return status, diagnostics
+    if returncode is None or returncode < 0:
+        return "crashed", diagnostics
     return ("accept" if returncode == 0 else "reject"), diagnostics
 
 
