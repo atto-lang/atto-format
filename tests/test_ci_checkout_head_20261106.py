@@ -215,7 +215,7 @@ class ExactSourceCheckoutGate(unittest.TestCase):
         nested = self.root / "pkg"
         nested.mkdir()
         source = nested / "module.atto"
-        source.write_text("fnc pkg(): int { return 1; }\\n", encoding="utf-8")
+        source.write_text("fnc pkg(): int { return 1; }\n", encoding="utf-8")
         self.git("add", "pkg/module.atto")
         self.git("commit", "-qm", "nested tracked source")
         self.head = self.git("rev-parse", "HEAD").stdout.strip()
