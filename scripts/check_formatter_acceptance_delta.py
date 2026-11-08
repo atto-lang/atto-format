@@ -202,6 +202,9 @@ def main(argv=None):
         parser.error("empty formatter command")
     if not args.compiler:
         parser.error("at least one --compiler is required to claim a differential audit")
+    compiler_names = [name for name, _ in args.compiler]
+    if len(set(compiler_names)) != len(compiler_names):
+        parser.error("compiler labels must be unique; duplicate names overwrite evidence")
     for root in args.corpus:
         if not root.is_dir():
             parser.error(f"corpus is not a directory: {root}")
