@@ -139,6 +139,8 @@ def format_file(formatter, path, timeout):
         return "read-failure", None, str(error).encode()
     if status != "exited":
         return status, None, diagnostics
+    if returncode is None or returncode < 0:
+        return "crashed", None, diagnostics
     if returncode != 0:
         return "rejected", None, diagnostics
     return "ok", output, diagnostics
