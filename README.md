@@ -351,6 +351,43 @@ rejected, go in a `--triaged` file (`tests/acceptance_delta_triage.tsv` lists
 those from the wide audit); a triaged entry that no longer occurs is reported
 as stale.
 
+The harness snapshots all bounded, regular corpus inputs into both comparison
+trees, including `.ores.pkg.toml`, non-source import dependencies and supporting
+configuration; Git and generated build/cache directories are excluded. Symlinks,
+special files, unstable inputs and snapshot-budget overruns fail closed. This
+preserves package-root resolution instead of treating a broken original
+checkout and equally broken formatted checkout as equivalent.
+
+A successful differential audit requires at least one configured compiler and
+at least one baseline-accepted original source **for each** compiler. The report
+records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
+reject/reject case may be a valid negative fixture, but it is **not** proof of
+semantic or compiler-admission equivalence; every such case is counted.
+A corpus containing only rejects fails as a harness error. Compiler
+labels must be unique, and each configured compiler must reject a syntactically
+invalid `.atto` control **in a package whose original source it accepted**.
+This rejects always-successful stubs and avoids misinterpreting missing-package
+errors as proof of syntax checking. The control is isolated from the original
+corpus and removed before final reporting.
+
+Compiler crashes, source mutation despite `--stdout`, or changes to **any**
+file in the original snapshot (including manifests or other auxiliary inputs)
+are harness errors. The formatter pass runs sequentially, **completes across
+the whole corpus before compiler admission begins**, and then compiler
+admissions may run in parallel (`--jobs`). This phase barrier prevents
+mixed pre/post-format imports from producing schedule-dependent results.
+
+Snapshot inventories and streamed SHA-256 digests reject source or auxiliary
+file additions, replacements, deletions, and persistent content changes in
+either comparison tree. Formatted source content is fixed before compiler
+admission and must remain unchanged afterward; compiler side effects cannot
+quietly become acceptance evidence. `--jobs` and `--timeout` must be
+positive. Run compiler commands only in an isolated, trusted environment:
+the harness is evidence collection, not a general untrusted-code sandbox.
+This is still parse/typecheck admission evidence only, not exact-head compiler
+execution certification, semantic AST equivalence, or cross-backend guest
+parity.
+
 ```bash
 scripts/check_formatter_acceptance_delta.py \
   --formatter target/release/oresfmt \
