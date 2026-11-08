@@ -24,7 +24,12 @@ fn only_collapses_horizontal_whitespace_after_visible_return_keyword() {
 
 #[test]
 fn return_spacing_does_not_touch_expression_literals_or_comments() {
-    let source = "fnc demo() -> string {\nval s = \"return   inside  string\";\n// return   inside comment\nreturn   s; // leave   comment   payload\n}\n";
+    let source = r#"fnc demo() -> string {
+val s = "return   inside  string";
+// return   inside comment
+return   s; // leave   comment   payload
+}
+"#;
     let formatted = format_source(source).unwrap();
 
     assert!(formatted.contains("\"return   inside  string\""), "{formatted}");
@@ -38,7 +43,13 @@ fn return_spacing_does_not_touch_expression_literals_or_comments() {
 
 #[test]
 fn return_word_inside_multiline_comment_is_opaque() {
-    let source = "fnc demo() -> int {\n/*\nreturn   do_not_change_this_comment\n*/\nreturn   1;\n}\n";
+    let source = r#"fnc demo() -> int {
+/*
+return   do_not_change_this_comment
+*/
+return   1;
+}
+"#;
     let formatted = format_source(source).unwrap();
 
     assert!(formatted.contains("return   do_not_change_this_comment"), "{formatted}");
