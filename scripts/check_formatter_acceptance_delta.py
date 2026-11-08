@@ -260,7 +260,13 @@ def main(argv=None):
         for path, digest in integrity.items():
             try:
                 with path.open("rb") as source:
-                    if hashlib.file_digest(source, "sha256").digest() != digest:
+                    observed = hashlib.sha256()
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        observed.update(chunk)
+                    if observed.digest() != digest:
                         integrity_errors.append(
                             ("<snapshot>", f"original input modified during audit: {path}")
                         )
