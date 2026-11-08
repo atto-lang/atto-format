@@ -42,6 +42,14 @@ const paddedReturn = format('pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n
 assert.equal(paddedReturn.ok, true, 'Wasm formatter must accept a padded return');
 assert.equal(paddedReturn.text, 'pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return x;\n}\n');
 assert.deepEqual(format(paddedReturn.text), paddedReturn, 'Wasm padded return must be idempotent');
+const bareReturn = format('fnc demo() -> void {\nreturn\t   ;\n}\n');
+assert.equal(bareReturn.ok, true, 'Wasm formatter rejects padded bare return');
+assert.equal(bareReturn.text, 'fnc demo() -> void {\n  return;\n}\n');
+assert.deepEqual(format(bareReturn.text), bareReturn, 'Wasm bare return is not idempotent');
+const opaqueText = format('fnc demo() -> string {\nreturn   "return   text; //";\n}\n');
+assert.equal(opaqueText.ok, true, 'Wasm formatter rejects quoted return');
+assert.equal(opaqueText.text, 'fnc demo() -> string {\n  return "return   text; //";\n}\n');
+assert.deepEqual(format(opaqueText.text), opaqueText, 'Wasm quoted return is not idempotent');
 const unicode=format('// 🚀 日本語\nfnc main() -> int { return 42; }\n');
 assert.ok(unicode.ok && unicode.text.includes('🚀 日本語'));
 const invalid=format('fnc identity(int x) -> int do return x; end\n');
