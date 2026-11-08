@@ -36,6 +36,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import stat
 import sys
 import tempfile
 
@@ -43,8 +44,61 @@ from check_compiler_parity import command_argv, run_process
 
 SOURCE_SUFFIXES = (".atto", ".ores")
 SKIP_DIRS = {".git", "target", "build", "node_modules"}
-MAX_SOURCE_BYTES = 1024 * 1024
+MAX_SOURCE_BYTES = 16 * 1024 * 1024
+MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
+MAX_SNAPSHOT_FILES = 30000
 MAX_FORMATTED_BYTES = 4 * 1024 * 1024
+
+def snapshot_corpus(root, destination):
+    """Copy all bounded regular repository inputs, not just source extensions.
+
+    A source-only copy drops .ores.pkg.toml and auxiliary import resources,
+    making both compiler admissions fail and falsely reporting no regression.
+    Refuse links/special files and unstable inputs instead of silently
+    following paths outside the source tree. Git/build caches are excluded.
+    """
+    if root.is_symlink():
+        raise ValueError(f"corpus root is a symlink: {root}")
+    total_bytes = 0
+    total_files = 0
+    for current, dirs, files in os.walk(root, followlinks=False):
+        here = Path(current)
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        for dirname in dirs:
+            child = here / dirname
+            if child.is_symlink():
+                raise ValueError(f"symlinked corpus directory: {child}")
+        out_dir = destination / here.relative_to(root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name in sorted(files):
+            if name in SKIP_DIRS:
+                continue
+            source = here / name
+            before = source.lstat()
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError(f"nonregular corpus input: {source}")
+            if before.st_size > MAX_SOURCE_BYTES:
+                raise ValueError(f"oversized corpus input: {source}")
+            total_files += 1
+            total_bytes += before.st_size
+            if total_files > MAX_SNAPSHOT_FILES or total_bytes > MAX_SNAPSHOT_BYTES:
+                raise ValueError(f"corpus snapshot exceeds bounded input budget: {root}")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(source, flags), "rb") as inp:
+                opened = os.fstat(inp.fileno())
+                identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_size,
+                                      s.st_mtime_ns, s.st_ctime_ns)
+                if identity(opened) != identity(before):
+                    raise ValueError(f"unstable corpus input: {source}")
+                dest = out_dir / name
+                with dest.open("wb") as output:
+                    shutil.copyfileobj(inp, output)
+                if identity(os.fstat(inp.fileno())) != identity(opened) or (
+                    identity(source.lstat()) != identity(opened)
+                ):
+                    raise ValueError(f"corpus input changed during snapshot: {source}")
+                dest.chmod(stat.S_IMODE(before.st_mode) | stat.S_IWUSR)
+    return total_files
 
 
 def discover(roots):
@@ -56,8 +110,7 @@ def discover(roots):
             for name in sorted(filenames):
                 path = Path(dirpath) / name
                 if path.suffix in SOURCE_SUFFIXES and path.is_file() and not path.is_symlink():
-                    if path.stat().st_size <= MAX_SOURCE_BYTES:
-                        yield root, path.relative_to(root)
+                    yield root, path.relative_to(root)
 
 
 def format_file(formatter, path, timeout):
@@ -96,12 +149,14 @@ def audit_one(case, formatter, compilers, work, timeout):
             result["findings"].append("not-idempotent")
 
     result["compilers"] = {}
+    baseline_admitted = False
     for name, template in compilers:
         before, diag = admit(template, original, timeout)
         if before not in ("accept", "reject"):
             result["harness_errors"].append(f"{name} {before} on original: {diag[:300]!r}")
             continue
         entry = {"original": before}
+        baseline_admitted |= before == "accept"
         if first is None:
             if before == "accept":
                 result["findings"].append(f"rejects-valid:{name}")
@@ -117,6 +172,7 @@ def audit_one(case, formatter, compilers, work, timeout):
             elif before == "reject" and after == "accept":
                 result["findings"].append(f"newly-accepted:{name}")
         result["compilers"][name] = entry
+    result["baseline_admitted"] = baseline_admitted
     return result
 
 
@@ -144,6 +200,8 @@ def main(argv=None):
     formatter = shlex.split(args.formatter)
     if not formatter:
         parser.error("empty formatter command")
+    if not args.compiler:
+        parser.error("at least one --compiler is required to claim a differential audit")
     for root in args.corpus:
         if not root.is_dir():
             parser.error(f"corpus is not a directory: {root}")
@@ -151,12 +209,19 @@ def main(argv=None):
         parser.error("corpus directory names must be distinct")
 
     cases = list(discover(args.corpus))
+    if not cases:
+        print("HARNESS-ERROR no source cases discovered", file=sys.stderr)
+        return 2
     with tempfile.TemporaryDirectory(prefix="oresfmt-delta-") as tmp:
         work = Path(tmp)
-        for root, rel in cases:
-            for tree in ("orig", "fmt"):
-                (work / tree / root.name / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / rel, work / "orig" / root.name / rel)
+        try:
+            for root in args.corpus:
+                original = work / "orig" / root.name
+                snapshot_corpus(root, original)
+                shutil.copytree(original, work / "fmt" / root.name)
+        except (OSError, ValueError) as error:
+            print(f"HARNESS-ERROR snapshot rejected: {error}", file=sys.stderr)
+            return 2
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             results = list(pool.map(
                 lambda case: audit_one(case, formatter, args.compiler, work, args.timeout),
@@ -164,11 +229,18 @@ def main(argv=None):
 
     findings = [(r["case"], f) for r in results for f in r["findings"]]
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
+    admitted = {name: sum(r.get("compilers", {}).get(name, {}).get("original") == "accept"
+                          for r in results) for name, _ in args.compiler}
+    for name, count in admitted.items():
+        if count == 0:
+            errors.append(("<corpus>", f"{name}: no original sources accepted; all reject/reject is not parity evidence"))
     summary = {
         "schema": "oreslang-format-acceptance-delta-v1",
         "files": len(results),
         "formatter_rejected": sum(r.get("format") == "rejected" for r in results),
         "compilers": [name for name, _ in args.compiler],
+        "baseline_accepted_by_compiler": admitted,
+        "baseline_unadmitted": sum(not r.get("baseline_admitted", False) for r in results),
         "findings": len(findings),
         "harness_errors": len(errors),
     }
