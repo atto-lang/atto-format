@@ -4105,6 +4105,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn return_separator_unit_matrix_preserves_suffix_bytes() {
+        let cases = [
+            ("return   x;", "return x;"),
+            ("return\t \tx;", "return x;"),
+            ("return  -x + (y * 2);", "return -x + (y * 2);"),
+            ("return  ;", "return;"),
+            ("return\t ; //  stay   here", "return; //  stay   here"),
+            ("return   \"a  b\"; //  c", "return \"a  b\"; //  c"),
+            ("return x;", "return x;"),
+            ("return;", "return;"),
+            ("returning   x;", "returning   x;"),
+            ("return_value\t x;", "return_value\t x;"),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(
+                canonicalize_return_expression_spacing(source, LexState::default()),
+                expected,
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn return_separator_unit_skips_active_block_comment_or_quote() {
+        let source = "return    comment payload";
+        for lexical_state in [
+            LexState {
+                block_comment: true,
+                ..LexState::default()
+            },
+            LexState {
+                quote: Some('"'),
+                ..LexState::default()
+            },
+            LexState {
+                quote: Some('\u{60}'),
+                ..LexState::default()
+            },
+        ] {
+            assert_eq!(
+                canonicalize_return_expression_spacing(source, lexical_state),
+                source,
+                "lexical state {lexical_state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn return_separator_unit_does_not_normalize_non_ascii_trivia() {
+        // Preserve unknown trivia instead of silently reinterpreting it as
+        // language whitespace. The supported normalization is ASCII SP/TAB.
+        let source = "return\u{00a0}x;";
+        assert_eq!(
+            canonicalize_return_expression_spacing(source, LexState::default()),
+            source
+        );
+    }
+
+    #[test]
     fn canonicalizes_rt_yield_without_touching_generator_yield_or_literals() {
         let src = r#"fnc generator* values(): Iterator<int> {
   rt yield;
