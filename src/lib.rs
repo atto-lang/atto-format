@@ -1221,10 +1221,16 @@ fn canonicalize_return_expression_spacing(line: &str, initial: LexState) -> Stri
     // A bare return with stray whitespace before its semicolon should be
     // `return;`, not `return ;`. Keep other expression bytes unchanged.
     if expression.starts_with(';') {
-        format!("return{expression}")
-    } else {
-        format!("return {expression}")
+        return format!("return{expression}");
     }
+
+    // Canonical single-space returns are the common case. Preserve them
+    // without rebuilding the line; repeated formatter passes are a fixed point.
+    if remainder.strip_prefix(' ') == Some(expression) {
+        return line.to_owned();
+    }
+
+    format!("return {expression}")
 }
 
 fn starts_word(line: &str, word: &str) -> bool {
