@@ -234,3 +234,164 @@ fn already_canonical_return_is_a_fixed_point() {
     let source = "fnc demo() -> int {\n  return foo(1, 2);\n}\n";
     assert_stable_format(source, source);
 }
+
+#[test]
+fn deterministic_horizontal_gap_stress_matrix() {
+    // No external fuzz dependency: this exercises 384 reproducible cases.
+    let expressions = ["x", "-x", "x + 1", "f(x)", "items[3]", "\"return   payload\""];
+    let mut state = 0x9e3779b97f4a7c15_u64;
+    for width in 1..=64 {
+        let mut gap = String::with_capacity(width);
+        for _ in 0..width {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            gap.push(if state & 1 == 0 { ' ' } else { '\t' });
+        }
+        for expression in expressions {
+            let source = format!("fnc demo() -> int {{\nreturn{gap}{expression};\n}}\n");
+            let expected = format!("fnc demo() -> int {{\n  return {expression};\n}}\n");
+            assert_stable_format(&source, &expected);
+        }
+    }
+}
+
+#[test]
+fn deterministic_bare_return_gap_stress_matrix() {
+    // A padded empty return cannot become the different token sequence "return ;".
+    for width in 1..=96 {
+        let gap: String = (0..width)
+            .map(|index| if index % 3 == 0 { '\t' } else { ' ' })
+            .collect();
+        let source = format!("fnc demo() -> void {{\nreturn{gap};\n}}\n");
+        assert_stable_format(&source, "fnc demo() -> void {\n  return;\n}\n");
+    }
+}
+
+#[test]
+fn return_spacing_is_consistent_with_optional_mtd_pass() {
+    use oreslang_format::format_source_with_mtd;
+
+    let source = "pub fnc demo() -> int {\nreturn\t   11;\n}\n";
+    let expected = "pub fnc demo() -> int {\n  return 11;\n}\n";
+    assert_eq!(format_source_with_mtd(source).unwrap(), expected);
+    assert_eq!(format_source_with_mtd(expected).unwrap(), expected);
+}
+
+#[test]
+fn negative_and_boolean_return_expressions_keep_their_operators() {
+    let source = r#"fnc demo() -> int {
+return    -7;
+return	!ready;
+return   x == y;
+return   value + (offset * 2);
+}
+"#;
+    let expected = r#"fnc demo() -> int {
+  return -7;
+  return !ready;
+  return x == y;
+  return value + (offset * 2);
+}
+"#;
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn empty_returns_preserve_following_comment_payload() {
+    let source = "fnc demo() -> void {\nreturn   ; //  reason   kept  \n}\n";
+    let expected = "fnc demo() -> void {\n  return; //  reason   kept  \n}\n";
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn return_expression_can_start_with_block_comment() {
+    let source = "fnc demo() -> int {\nreturn   /* explain   */ x;\n}\n";
+    let expected = "fnc demo() -> int {\n  return /* explain   */ x;\n}\n";
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn return_expression_preserves_inner_block_comment_spacing() {
+    let source = "fnc demo() -> int {\nreturn \t x /*  keep   text */ + 2;\n}\n";
+    let expected = "fnc demo() -> int {\n  return x /*  keep   text */ + 2;\n}\n";
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn return_expression_preserves_escaped_backslashes_and_unicode() {
+    let source = r#"fnc demo() -> string {
+return    "path \\srv\\share return   🦀 東京";
+}
+"#;
+    let expected = r#"fnc demo() -> string {
+  return "path \\srv\\share return   🦀 東京";
+}
+"#;
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn non_return_names_do_not_match_keyword_prefix() {
+    let identifiers = ["return_value", "returned", "returning", "returns", "return2"];
+    for identifier in identifiers {
+        let source = format!("fnc demo() -> int {{\n{identifier}   = 42;\n}}\n");
+        let expected = format!("fnc demo() -> int {{\n  {identifier}   = 42;\n}}\n");
+        assert_stable_format(&source, &expected);
+    }
+}
+
+#[test]
+fn return_without_whitespace_separator_stays_unmodified() {
+    for expression in ["(x)", "[0]", ".value"] {
+        let source = format!("fnc demo() -> int {{\nreturn{expression};\n}}\n");
+        let expected = format!("fnc demo() -> int {{\n  return{expression};\n}}\n");
+        assert_stable_format(&source, &expected);
+    }
+}
+
+#[test]
+fn leading_indentation_does_not_change_statement_payload() {
+    let source = "fnc demo() -> int {\n\t   return \t  foo( 1,  2 );\n}\n";
+    let expected = "fnc demo() -> int {\n  return foo( 1,  2 );\n}\n";
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn return_keywords_inside_comments_remain_opaque() {
+    let source = r#"fnc demo() -> int {
+// return    111;
+/* return     222; */
+return   333;
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("// return    111;"), "{formatted}");
+    assert!(formatted.contains("/* return     222; */"), "{formatted}");
+    assert!(formatted.contains("  return 333;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn broken_brace_input_is_not_mistaken_for_valid_return_source() {
+    let invalid = "fnc demo() -> int {\nreturn   7;\n";
+    assert!(format_source(invalid).is_err());
+}
+
+#[test]
+fn unterminated_return_string_is_not_silently_rewritten() {
+    let invalid = "fnc demo() -> string {\nreturn   \"unfinished\n}\n";
+    assert!(format_source(invalid).is_err());
+}
+
+#[test]
+fn repeated_idempotence_after_return_normalization() {
+    let source = "fnc demo() -> int {\nreturn    f( x );\n}\n";
+    let mut formatted = format_source(source).unwrap();
+    for _ in 0..10 {
+        let next = format_source(&formatted).unwrap();
+        assert_eq!(next, formatted);
+        formatted = next;
+    }
+    assert!(is_formatted(&formatted).unwrap());
+}
