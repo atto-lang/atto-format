@@ -494,5 +494,28 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual((self.corpus / "main.atto").read_text(), original)
 
 
+    def test_invalid_syntax_control_cannot_tamper_with_package_after_integrity(self):
+        # Control runs must be included in the final integrity scan. A
+        # malicious or buggy compiler can reject the negative control while
+        # changing the package manifest, so rejection alone is not evidence.
+        initial = "[package]\nname = 'fixture'\n"
+        (self.corpus / ".ores.pkg.toml").write_text(initial, encoding="utf-8")
+        self.compiler.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if p.name == '__oresfmt_invalid_syntax_control.atto':\n"
+            " (p.parent/'.ores.pkg.toml').write_text('modified by control\\n')\n"
+            " sys.exit(1)\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        errors = json.loads(report)["errors"]
+        self.assertTrue(any("original input modified during audit" in row["message"]
+                            for row in errors), errors)
+        self.assertEqual((self.corpus / ".ores.pkg.toml").read_text(), initial)
+
+
 if __name__ == "__main__":
     unittest.main()
