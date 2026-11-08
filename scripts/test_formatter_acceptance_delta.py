@@ -298,5 +298,37 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
                          "fnc main() {}\n")
 
 
+    def test_cross_file_manifest_mutation_is_detected_and_cannot_pass(self):
+        initial = "fnc main() {}\n"
+        manifest = "[package]\nname = 'demo'\n"
+        (self.corpus / ".ores.pkg.toml").write_text(manifest, encoding="utf-8")
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "t=p.read_text()\n"
+            "(p.parent/'.ores.pkg.toml').write_text('tampered by formatter\\n')\n"
+            "sys.stdout.write(t)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", initial))
+        self.assertEqual(status, 2, report)
+        self.assertIn("original input modified during audit", report)
+        self.assertEqual((self.corpus / "main.atto").read_text(), initial)
+        self.assertEqual((self.corpus / ".ores.pkg.toml").read_text(), manifest)
+
+    def test_snapshot_hash_manifest_detects_auxiliary_payload_changes(self):
+        (self.corpus / "main.atto").write_text("fnc main() {}\n")
+        binary = self.corpus / "payload.bin"
+        binary.write_bytes(b"\x00\xff\xaa")
+        dest = self.path / "original_snapshot"
+        hashes = {}
+        self.assertEqual(snapshot_corpus(self.corpus, dest, hashes), 2)
+        self.assertEqual(len(hashes), 2)
+        binary_snapshot = dest / "payload.bin"
+        self.assertIn(binary_snapshot, hashes)
+        self.assertNotEqual(hashes[binary_snapshot],
+                            __import__("hashlib").sha256(b"\x00\xff\xab").digest())
+
+
 if __name__ == "__main__":
     unittest.main()
