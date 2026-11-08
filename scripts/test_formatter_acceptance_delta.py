@@ -61,7 +61,10 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(json.loads(report)["findings"], [])
 
     def test_meaning_change_is_reported_as_newly_accepted(self):
-        status, report = self.run_main(\n            ("m.atto", "val x; write-to-val\n"),\n            ("baseline.atto", "fnc main() {}\n"),\n        )
+        status, report = self.run_main(
+            ("m.atto", "val x; write-to-val\n"),
+            ("baseline.atto", "fnc main() {}\n"),
+        )
         self.assertEqual(status, 1)
         self.assertIn("newly-accepted:cc", report)
 
@@ -230,7 +233,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
 
     def test_formatter_only_mutates_isolated_copy(self):
         text = "val x; write-to-val\n"
-        status, report = self.run_main(\n            ("m.atto", text), ("baseline.atto", "fnc main() {}\n"),\n        )
+        status, report = self.run_main(
+            ("m.atto", text), ("baseline.atto", "fnc main() {}\n"),
+        )
         self.assertEqual(status, 1, report)
         self.assertEqual((self.corpus / "m.atto").read_text(encoding="utf-8"), text)
         self.assertIn("newly-accepted:cc", report)
