@@ -193,5 +193,29 @@ class ExactSourceCheckoutGate(unittest.TestCase):
         self.assert_dirty_denied()
 
 
+    def test_tracked_symlink_to_external_source_is_denied(self):
+        outside = Path(self.temporary.name) / "external.atto"
+        outside.write_text("fnc outside(): int { return 99; }\n", encoding="utf-8")
+        (self.root / "foreign-source.atto").symlink_to(outside)
+        self.git("add", "foreign-source.atto")
+        self.git("commit", "-qm", "tracked source symlink escapes checkout")
+        self.head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assert_dirty_denied("tracked symlink escapes checkout")
+
+    def test_tracked_symlink_to_git_metadata_is_denied(self):
+        (self.root / "exposed-config.atto").symlink_to(".git/config")
+        self.git("add", "exposed-config.atto")
+        self.git("commit", "-qm", "tracked source symlink into Git metadata")
+        self.head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assert_dirty_denied("tracked symlink enters Git metadata")
+
+    def test_tracked_dangling_symlink_is_denied(self):
+        (self.root / "missing-source.atto").symlink_to("not-here.atto")
+        self.git("add", "missing-source.atto")
+        self.git("commit", "-qm", "tracked dangling source symlink")
+        self.head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assert_dirty_denied("tracked symlink target missing or inaccessible")
+
+
 if __name__ == "__main__":
     unittest.main()
