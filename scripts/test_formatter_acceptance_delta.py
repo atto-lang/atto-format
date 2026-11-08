@@ -1,4 +1,5 @@
 """Offline harness self-tests; these are NOT Java/LLVM compiler evidence."""
+import hashlib
 import json
 import os
 import sys
@@ -326,8 +327,11 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(len(hashes), 2)
         binary_snapshot = dest / "payload.bin"
         self.assertIn(binary_snapshot, hashes)
+        self.assertEqual(hashes[binary_snapshot],
+                         hashlib.sha256(binary.read_bytes()).digest())
+        binary_snapshot.write_bytes(b"\x00\xff\xab")
         self.assertNotEqual(hashes[binary_snapshot],
-                            __import__("hashlib").sha256(b"\x00\xff\xab").digest())
+                            hashlib.sha256(binary_snapshot.read_bytes()).digest())
 
 
 if __name__ == "__main__":
