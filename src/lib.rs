@@ -580,7 +580,18 @@ pub fn format_source_with_mtd(source: &str) -> Result<String, FormatError> {
 fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatError> {
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
-    let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = source.replace("\r\n", "\n");
+    // A bare CR is not normalized: the conformance spec (import-v1) ends a
+    // `//` comment at CR, while the Java and LLVM lexers keep scanning to LF.
+    // Rewriting CR to LF would expose (or hide) code such as an import that
+    // the compilers currently treat as comment text. Fail closed instead.
+    if let Some(at) = normalized.find('\r') {
+        let line = normalized[..at].matches('\n').count() + 1;
+        return Err(FormatError::new(
+            line,
+            "bare CR line terminator is ambiguous (comment boundaries differ between the compilers and the spec); convert the file to LF or CRLF first",
+        ));
+    }
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
     // Legacy/hand-formatted explicit callable headers may already split their
     // parameter list across physical lines. Reassemble only that narrow header
@@ -856,6 +867,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             // See the generator note above: the return separator is part of
             // the backend-specific header spelling.
         } else if callable_body
+            && !end_delimited_callable
             && (actor_member
                 || (define_stack.is_empty()
                     && brace_stack.is_empty()
@@ -2608,9 +2620,13 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
         '+' | '-' | '*' | '/' | '%' | '?' | '=' => before.is_some_and(char::is_whitespace),
         '.' => before.is_some_and(|c| is_ident_char(c) || c == ')' || c == ']'),
         _ => {
+            // Advance past the boundary character by its UTF-8 width; a
+            // non-ASCII boundary (e.g. `eq中`) must not split a code point.
             let word_start = line
-                .rfind(|c: char| !is_ident_char(c))
-                .map_or(0, |at| at + 1);
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !is_ident_char(c))
+                .map_or(0, |(at, c)| at + c.len_utf8());
             matches!(&line[word_start..], "and" | "or")
         }
     }
@@ -2676,6 +2692,24 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             }
         }
     }
+    // Java also admits a bare actor header without the trailing `as`
+    // (`pub actor Echo`), closed by `end`. Require exactly modifiers, the
+    // actor keyword and one name so expressions like `actor.gc()` never match.
+    if let Some(actor_index) = header
+        .iter()
+        .position(|word| matches!(*word, "actor" | "isoactor"))
+    {
+        if actor_index + 2 == header.len()
+            && header[..actor_index]
+                .iter()
+                .all(|word| matches!(*word, "pub" | "private" | "shared" | "untrusted"))
+            && header[actor_index + 1]
+                .chars()
+                .all(|c| is_ident_char(c) || matches!(c, '<' | '>' | ','))
+        {
+            return Some(DefineKind::Actor);
+        }
+    }
     // Type-only 'declare' creates no executable value, but an interface or
     // trait with an end-delimited body still needs a formatting block frame.
     // A transparent alias (`declare type ... = ...;`) has no closing 'end'.
@@ -2694,7 +2728,16 @@ fn define_kind(line: &str) -> Option<DefineKind> {
         };
     }
 
-    let mut words = line.split_whitespace();
+    let mut words = line.split_whitespace().peekable();
+    // Compatibility order `pub define trait ...` is accepted by Java; only
+    // some kinds are reordered to `define pub ...`, so tolerate either.
+    if words
+        .next_if(|word| matches!(*word, "pub" | "private"))
+        .is_some()
+        && words.peek() != Some(&"define")
+    {
+        return None;
+    }
     if words.next()? != "define" {
         return None;
     }

@@ -16,6 +16,11 @@ Findings (each makes the run fail):
   rejects-valid  the formatter rejects a file at least one compiler accepts
   not-idempotent formatting the formatted copy changes it again
 
+Reviewed findings (for example a documented migration that repairs source a
+compiler rejected) can be listed in a --triaged file, one per line:
+`CASE<TAB>FINDING<TAB>reason`. Triaged findings are reported but do not fail
+the run; a triaged entry that no longer occurs is reported as stale.
+
 Acceptance means exit status 0. A compiler timeout or a missing tool is a
 harness failure (exit 2), never silently counted as a rejection. This is
 parse/typecheck admission evidence only: it is NOT guest execution parity and
@@ -139,6 +144,8 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--report", type=Path, help="write the full JSON report here")
+    parser.add_argument("--triaged", type=Path,
+                        help="CASE<TAB>FINDING<TAB>reason lines for reviewed findings")
     args = parser.parse_args(argv)
 
     formatter = shlex.split(args.formatter)
@@ -154,15 +161,30 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="oresfmt-delta-") as tmp:
         work = Path(tmp)
         for root, rel in cases:
+            # Seed both trees with every original so imports of files the
+            # formatter rejects (or leaves alone) still resolve; formatted
+            # output then overwrites its own copy in the "fmt" tree.
             for tree in ("orig", "fmt"):
                 (work / tree / root.name / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / rel, work / "orig" / root.name / rel)
+                shutil.copyfile(root / rel, work / tree / root.name / rel)
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             results = list(pool.map(
                 lambda case: audit_one(case, formatter, args.compiler, work, args.timeout),
                 cases))
 
-    findings = [(r["case"], f) for r in results for f in r["findings"]]
+    triaged = {}
+    if args.triaged:
+        for number, line in enumerate(args.triaged.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3 or not parts[2].strip():
+                parser.error(f"{args.triaged}:{number}: expected CASE<TAB>FINDING<TAB>reason")
+            triaged[(parts[0], parts[1])] = parts[2].strip()
+    all_findings = [(r["case"], f) for r in results for f in r["findings"]]
+    findings = [item for item in all_findings if item not in triaged]
+    accepted = [item for item in all_findings if item in triaged]
+    stale = sorted(set(triaged) - set(all_findings))
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
     summary = {
         "schema": "oreslang-format-acceptance-delta-v1",
@@ -170,6 +192,8 @@ def main(argv=None):
         "formatter_rejected": sum(r.get("format") == "rejected" for r in results),
         "compilers": [name for name, _ in args.compiler],
         "findings": len(findings),
+        "triaged": len(accepted),
+        "stale_triage": len(stale),
         "harness_errors": len(errors),
     }
     if args.report:
@@ -177,6 +201,10 @@ def main(argv=None):
                                encoding="utf-8")
     for case, finding in findings:
         print(f"FINDING {finding}: {case}")
+    for case, finding in accepted:
+        print(f"TRIAGED {finding}: {case} ({triaged[(case, finding)]})")
+    for case, finding in stale:
+        print(f"STALE-TRIAGE {finding}: {case}")
     for case, error in errors:
         print(f"HARNESS-ERROR {case}: {error}", file=sys.stderr)
     print(json.dumps(summary))

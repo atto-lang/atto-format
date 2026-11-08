@@ -159,3 +159,32 @@ fn trailing_string_is_not_a_continuation_operator() {
     let out = fmt(src);
     assert!(out.contains("\n  update() -> void {"), "{out}");
 }
+
+// Java accepts these; the formatter used to reject them (wide-corpus audit).
+#[test]
+fn compact_do_loop_headers_trait_compat_order_and_bare_actor_headers() {
+    let out = fmt(
+        "fnc f(): int {\nfor let i=0;i<3;i++ do if a(i) then return 0;fi\nb();\ndone\nreturn 1;\n}\n",
+    );
+    assert!(out.contains("  for let i=0;i<3;i++ do\n    if a(i) then\n      return 0;\n    fi\n    b();\n  done\n"), "{out}");
+    let out = fmt("fnc f(): int {\nwhile x do y(); done\nreturn 1;\n}\n");
+    assert!(out.contains("  while x do y(); done\n"), "{out}");
+    let out = fmt("pub define trait Scored as\nfnc score() => int;\nend\n");
+    assert!(out.contains("\n  fnc score() => int;\nend"), "{out}");
+    let out = fmt("pub actor Echo\nreceive(int m): void {\nself.end();\nreturn;\n}\nend\n");
+    assert!(
+        out.contains("  receive(int m): void {\n    self.end();"),
+        "{out}"
+    );
+}
+
+// End-delimited actor callables keep `->`: the formatter only recognizes
+// `-> T ::` headers, so `: T ::` failed on the second pass.
+#[test]
+fn end_delimited_actor_callables_keep_the_slim_arrow() {
+    let out = fmt("define actor Counter as\n  start() -> void ::\n    go();\n  end\nend\n");
+    assert!(
+        out.contains("  start() -> void ::\n    go();\n  end"),
+        "{out}"
+    );
+}

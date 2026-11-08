@@ -536,9 +536,66 @@ fn terminate_simple_returns(source: &str) -> String {
 }
 
 /// Break compact conditional arms and safely terminate full-line returns.
+/// `for ... do body` / `while ... do body` with the body continuing on later
+/// lines (closed by a `done` on another line) is valid source. Move the body
+/// onto its own line so the `do` header opens a block like any other loop.
+/// A complete one-line `... do body; done` loop is left as written.
+fn split_compact_loop_headers(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+    for (line_number, line) in source.split('\n').enumerate() {
+        if line_number != 0 {
+            output.push('\n');
+        }
+        let tokens = lex_line(line, &mut lex).tokens;
+        let starts_loop = tokens
+            .first()
+            .is_some_and(|token| matches!(token.text, "for" | "while"));
+        let mut cut = None;
+        if starts_loop {
+            let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
+            for (index, token) in tokens.iter().enumerate() {
+                match token.text {
+                    "(" => parens += 1,
+                    ")" => parens = parens.saturating_sub(1),
+                    "[" => brackets += 1,
+                    "]" => brackets = brackets.saturating_sub(1),
+                    "{" => braces += 1,
+                    "}" => braces = braces.saturating_sub(1),
+                    _ => {}
+                }
+                if parens != 0 || brackets != 0 || braces != 0 {
+                    continue;
+                }
+                if token.text == "{" {
+                    break; // a braced loop body, not a `do` loop
+                }
+                if token.text == "do" && index > 0 && is_keyword_delimiter(&tokens, index) {
+                    let has_body = index + 1 < tokens.len();
+                    let closes_here = tokens[index + 1..].iter().any(|t| t.text == "done");
+                    if has_body && !closes_here {
+                        cut = Some(token.end);
+                    }
+                    break;
+                }
+            }
+        }
+        match cut {
+            Some(at) => {
+                output.push_str(line[..at].trim_end());
+                output.push('\n');
+                output.push_str(line[at..].trim_start());
+            }
+            None => output.push_str(line),
+        }
+    }
+    output
+}
+
 pub(crate) fn normalize(source: &str) -> String {
     let collapsed = collapse_multiline_keyword_headers(source);
-    terminate_simple_returns(&split_keyword_blocks(&collapsed))
+    let loops = split_compact_loop_headers(&collapsed);
+    terminate_simple_returns(&split_keyword_blocks(&loops))
 }
 
 #[cfg(test)]
