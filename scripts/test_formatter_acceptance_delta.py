@@ -343,5 +343,18 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
                             hashlib.sha256(binary_snapshot.read_bytes()).digest())
 
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX process signals")
+    def test_crashing_formatter_is_harness_error_not_valid_rejection(self):
+        self.formatter.write_text(
+            "import os\nimport signal\nos.kill(os.getpid(), signal.SIGTERM)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        results = json.loads(report)["results"]
+        self.assertEqual(results[0]["format"], "crashed")
+        self.assertGreater(json.loads(report)["summary"]["harness_errors"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
