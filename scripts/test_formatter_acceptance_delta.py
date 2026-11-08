@@ -224,6 +224,26 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             snapshot_corpus(alias, self.path / "snapshot")
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks")
+    def test_snapshot_refuses_symlinked_ancestor(self):
+        alias = self.path / "linked_parent"
+        alias.symlink_to(self.path, target_is_directory=True)
+        nested_root = alias / "corpus"
+        # The final directory is ordinary; only an ancestor is linked.
+        self.assertFalse(nested_root.is_symlink())
+        with self.assertRaisesRegex(ValueError, "symlinked corpus root/ancestor"):
+            snapshot_corpus(nested_root, self.path / "snapshot")
+        (self.corpus / "main.atto").write_text("fnc main() {}\\n", encoding="utf-8")
+        report = self.path / "alias_report.json"
+        status = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+            "--corpus", str(nested_root),
+            "--report", str(report),
+        ])
+        self.assertEqual(status, 2)
+        self.assertFalse(report.exists())
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFO")
     def test_snapshot_refuses_special_files_without_opening_them(self):
         os.mkfifo(self.corpus / "named_pipe")
