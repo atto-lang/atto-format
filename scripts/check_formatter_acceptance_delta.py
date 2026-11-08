@@ -294,6 +294,41 @@ def main(argv=None):
             results = list(pool.map(
                 lambda pair: compare_one(pair[0], pair[1], args.compiler, work, args.timeout),
                 zip(cases, prepared)))
+        # Run the negative syntax controls before the final integrity scan.
+        # The control compiler is untrusted to leave the corpus untouched;
+        # any resulting manifest/source mutation must be visible in evidence.
+        # Run the negative control inside a package that THIS compiler already
+        # admitted. A control outside the package could be rejected simply
+        # for a missing .ores.pkg.toml, falsely certifying a syntax-blind stub.
+        invalid_controls = []
+        for name, template in args.compiler:
+            first = next(
+                (work / "orig" / root.name / rel
+                 for (root, rel), row in zip(cases, results)
+                 if row.get("compilers", {}).get(name, {}).get("original") == "accept"),
+                None,
+            )
+            if first is None:
+                continue  # the no-admitted-baseline guard handles this case
+            probe = first.parent / "__oresfmt_invalid_syntax_control.atto"
+            try:
+                with probe.open("xb") as output:
+                    output.write(b"fnc broken( !!!\\n")
+                try:
+                    control_status, diagnostics = admit(template, probe, args.timeout)
+                finally:
+                    probe.unlink()
+            except OSError as error:
+                invalid_controls.append(
+                    ("<control>", f"{name}: unable to create/remove syntax control: {error}")
+                )
+                continue
+            if control_status != "reject":
+                invalid_controls.append((
+                    "<control>", f"{name}: invalid syntax control was {control_status} "
+                    f"(expected rejection within an admitted package): {diagnostics[:300]!r}"
+                ))
+
         # Formatting must not modify ANY file in the original snapshot, not
         # just the input path. Cross-file source or package-manifest edits
         # could otherwise make both compiler admissions compare altered data.
@@ -373,37 +408,6 @@ def main(argv=None):
                         integrity_errors.append(
                             ("<snapshot>", f"{tree_name} input removed/replaced during audit: {item}")
                         )
-        # Run the negative control inside a package that THIS compiler already
-        # admitted. A control outside the package could be rejected simply
-        # for a missing .ores.pkg.toml, falsely certifying a syntax-blind stub.
-        invalid_controls = []
-        for name, template in args.compiler:
-            first = next(
-                (work / "orig" / root.name / rel
-                 for (root, rel), row in zip(cases, results)
-                 if row.get("compilers", {}).get(name, {}).get("original") == "accept"),
-                None,
-            )
-            if first is None:
-                continue  # the no-admitted-baseline guard handles this case
-            probe = first.parent / "__oresfmt_invalid_syntax_control.atto"
-            try:
-                with probe.open("xb") as output:
-                    output.write(b"fnc broken( !!!\\n")
-                try:
-                    control_status, diagnostics = admit(template, probe, args.timeout)
-                finally:
-                    probe.unlink()
-            except OSError as error:
-                invalid_controls.append(
-                    ("<control>", f"{name}: unable to create/remove syntax control: {error}")
-                )
-                continue
-            if control_status != "reject":
-                invalid_controls.append((
-                    "<control>", f"{name}: invalid syntax control was {control_status} "
-                    f"(expected rejection within an admitted package): {diagnostics[:300]!r}"
-                ))
 
     findings = [(r["case"], f) for r in results for f in r["findings"]]
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
