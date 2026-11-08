@@ -395,3 +395,56 @@ fn repeated_idempotence_after_return_normalization() {
     }
     assert!(is_formatted(&formatted).unwrap());
 }
+
+#[test]
+fn comment_only_bare_return_preserves_comment_payload() {
+    let source = "fnc demo() -> void {\nreturn    //  reason   kept\n}\n";
+    let expected = "fnc demo() -> void {\n  return;    //  reason   kept\n}\n";
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn multiline_return_continuation_is_not_terminated_early() {
+    let source = "fnc demo() -> int {\nreturn     value\n  .transform();\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("return value\n"), "{formatted}");
+    assert!(!formatted.contains("return value;\n"), "{formatted}");
+    assert!(formatted.contains(".transform();"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn inline_keyword_return_preserves_control_flow_and_idempotence() {
+    let source = "fnc demo() -> int {\nif ready then return     3; fi\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("return 3;"), "{formatted}");
+    assert!(formatted.contains("fi"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn return_string_literals_with_fake_delimiters_remain_opaque() {
+    let source = r#"fnc demo() -> string {
+return     "} ; /* a // b */ { return  inner";
+}
+"#;
+    let expected = r#"fnc demo() -> string {
+  return "} ; /* a // b */ { return  inner";
+}
+"#;
+    assert_stable_format(source, expected);
+}
+
+#[test]
+fn long_horizontal_gap_is_bounded_by_input_size_and_idempotent() {
+    let gap = " \t".repeat(4096);
+    let source = format!("fnc demo() -> int {{\nreturn{gap}1;\n}}\n");
+    assert_stable_format(&source, "fnc demo() -> int {\n  return 1;\n}\n");
+}
+
+#[test]
+fn return_spacing_keeps_trailing_comment_with_unicode_and_tabs() {
+    let source = "fnc demo() -> int {\nreturn \t  8; //  東京 \t 🦀 \t \n}\n";
+    let expected = "fnc demo() -> int {\n  return 8; //  東京 \t 🦀 \t \n}\n";
+    assert_stable_format(source, expected);
+}
