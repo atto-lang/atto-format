@@ -346,6 +346,22 @@ after (`newly-accepted`: formatting changed meaning), on compiler-valid source
 the formatter rejects (`rejects-valid`), and on non-idempotent output. A
 missing compiler or a timeout is a harness error, never a rejection.
 
+The harness snapshots all bounded, regular corpus inputs into both comparison
+trees, including `.ores.pkg.toml`, non-source import dependencies and supporting
+configuration; Git and generated build/cache directories are excluded. Symlinks,
+special files, unstable inputs and snapshot-budget overruns fail closed. This
+preserves package-root resolution instead of treating a broken original
+checkout and equally broken formatted checkout as equivalent.
+
+A successful differential audit requires at least one configured compiler and
+at least one baseline-accepted original source **for each** compiler. The report
+records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
+reject/reject case may be a valid negative fixture, but it is **not** proof of
+semantic or compiler-admission equivalence; every such case is counted.
+A corpus containing only rejects fails as a harness error. This does not
+supersede exact-head compiler execution, semantic AST comparisons, or
+compiler-specific conformance tests.
+
 ```bash
 scripts/check_formatter_acceptance_delta.py \
   --formatter target/release/oresfmt \
