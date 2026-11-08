@@ -51,3 +51,29 @@ jobs:
         with:
           toolchain: 1.85.0
       - run: cargo test --all-targets
+
+  wasm-conformance:
+    # PR validation only. No credentials persist and no binary is published.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          persist-credentials: false
+      - name: Verify exact source head and clean Git tree
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "Wasm test source head: $(git rev-parse HEAD)"
+          echo "Wasm test source tree: $(git rev-parse HEAD^{tree})"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Build standalone formatter Wasm
+        run: cargo build --release --lib --target wasm32-unknown-unknown --offline
+      - name: Execute formatter Wasm API regressions
+        run: node tests/browser-wasm.mjs
