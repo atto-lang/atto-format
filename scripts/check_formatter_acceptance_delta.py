@@ -155,7 +155,7 @@ def admit(template, path, timeout):
     return ("accept" if returncode == 0 else "reject"), diagnostics
 
 
-def audit_one(case, formatter, compilers, work, timeout):
+def prepare_one(case, formatter, work, timeout):
     root, rel = case
     label = f"{root.name}/{rel}"
     original = work / "orig" / root.name / rel
@@ -173,6 +173,16 @@ def audit_one(case, formatter, compilers, work, timeout):
         if second_status != "ok" or second != first:
             result["findings"].append("not-idempotent")
 
+    return result
+
+
+def compare_one(case, result, compilers, work, timeout):
+    """Audit compiler admission only after every source has been formatted."""
+    if result.get("format") not in ("ok", "rejected"):
+        return result
+    root, rel = case
+    original = work / "orig" / root.name / rel
+    formatted = work / "fmt" / root.name / rel
     result["compilers"] = {}
     baseline_admitted = False
     for name, template in compilers:
@@ -182,7 +192,7 @@ def audit_one(case, formatter, compilers, work, timeout):
             continue
         entry = {"original": before}
         baseline_admitted |= before == "accept"
-        if first is None:
+        if result["format"] == "rejected":
             if before == "accept":
                 result["findings"].append(f"rejects-valid:{name}")
         else:
@@ -260,10 +270,17 @@ def main(argv=None):
         except (OSError, ValueError) as error:
             print(f"HARNESS-ERROR snapshot rejected: {error}", file=sys.stderr)
             return 2
-        with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-            results = list(pool.map(
-                lambda case: audit_one(case, formatter, args.compiler, work, args.timeout),
+        # Phase barrier: comparing a file while another thread is still
+        # formatting its imported sibling observes a mixed project tree and
+        # can create spurious acceptance differences. Finish all formatted
+        # outputs before executing any compiler admission command.
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            prepared = list(pool.map(
+                lambda case: prepare_one(case, formatter, work, args.timeout),
                 cases))
+            results = list(pool.map(
+                lambda pair: compare_one(pair[0], pair[1], args.compiler, work, args.timeout),
+                zip(cases, prepared)))
         # Formatting must not modify ANY file in the original snapshot, not
         # just the input path. Cross-file source or package-manifest edits
         # could otherwise make both compiler admissions compare altered data.
@@ -298,23 +315,40 @@ def main(argv=None):
                 integrity_errors.append(
                     ("<snapshot>", f"formatted auxiliary input modified during audit: {path}: {error}")
                 )
-        # Unexpected new auxiliary files also alter import resolution and
-        # must not become invisible to differential evidence.
+        # A compiler/formatter must not add, remove or symlink ANY source
+        # or auxiliary input in either tree. An added .atto file was
+        # previously invisible because only auxiliary extensions were
+        # scanned; a new import could silently change admission results.
         for root in args.corpus:
+            original_root = work / "orig" / root.name
             formatted_root = work / "fmt" / root.name
-            for current, dirs, files in os.walk(formatted_root, followlinks=False):
-                here = Path(current)
-                for name in files:
-                    item = here / name
-                    if item.suffix not in SOURCE_SUFFIXES and item not in formatted_auxiliary:
+            original_paths = {source for source in integrity
+                              if source.is_relative_to(original_root)}
+            for tree_name, tree_root, expected_paths in (
+                ("original", original_root, original_paths),
+                ("formatted", formatted_root, {
+                    formatted_root / source.relative_to(original_root)
+                    for source in original_paths
+                }),
+            ):
+                for current, dirs, files in os.walk(tree_root, followlinks=False):
+                    here = Path(current)
+                    for name in dirs:
+                        item = here / name
+                        if item.is_symlink():
+                            integrity_errors.append(
+                                ("<snapshot>", f"{tree_name} symlink directory created during audit: {item}")
+                            )
+                    for name in files:
+                        item = here / name
+                        if item not in expected_paths or item.is_symlink():
+                            integrity_errors.append(
+                                ("<snapshot>", f"{tree_name} unexpected/replaced file during audit: {item}")
+                            )
+                for item in expected_paths:
+                    if item.is_symlink() or not item.is_file():
                         integrity_errors.append(
-                            ("<snapshot>", f"formatted auxiliary input created during audit: {item}")
-                        )
-                for name in dirs:
-                    item = here / name
-                    if item.is_symlink():
-                        integrity_errors.append(
-                            ("<snapshot>", f"formatted symlink directory created during audit: {item}")
+                            ("<snapshot>", f"{tree_name} input removed/replaced during audit: {item}")
                         )
         # Run the negative control inside a package that THIS compiler already
         # admitted. A control outside the package could be rejected simply
