@@ -88,6 +88,19 @@ while IFS= read -r -d '' item; do
       ;;
     120000)
       [[ -L "$root/$path" ]] || fail "tracked symlink type differs from HEAD"
+      # A symlink blob can match HEAD while resolving to mutable content
+      # outside the authenticated checkout (including Git metadata). Only
+      # references resolving to existing paths within the source tree qualify.
+      resolved="$(/usr/bin/realpath -e -- "$root/$path" 2>/dev/null)" ||
+        fail "tracked symlink target missing or inaccessible"
+      case "$resolved" in
+        "$root"/*) ;;
+        *) fail "tracked symlink escapes checkout" ;;
+      esac
+      relative="${resolved#"$root"/}"
+      case "$relative" in
+        .git|.git/*) fail "tracked symlink enters Git metadata" ;;
+      esac
       digest="$(readlink -n -- "$root/$path" |
         /usr/bin/git -C "$root" hash-object --no-filters --stdin)" ||
         fail "cannot hash tracked symlink"
