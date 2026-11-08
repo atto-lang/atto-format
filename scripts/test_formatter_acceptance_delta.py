@@ -233,7 +233,7 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertFalse(nested_root.is_symlink())
         with self.assertRaisesRegex(ValueError, "symlinked corpus root/ancestor"):
             snapshot_corpus(nested_root, self.path / "snapshot")
-        (self.corpus / "main.atto").write_text("fnc main() {}\\n", encoding="utf-8")
+        (self.corpus / "main.atto").write_text("fnc main() {}\n", encoding="utf-8")
         report = self.path / "alias_report.json"
         status = main([
             "--formatter", f"{sys.executable} {self.formatter}",
