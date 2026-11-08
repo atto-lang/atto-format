@@ -74,6 +74,15 @@ while IFS= read -r -d '' item; do
   blob="${type_and_oid##* }"
   [[ "$type" == blob && "$blob" =~ ^[0-9a-f]{40}$ && -n "$path" ]] ||
     fail "invalid tracked Git blob"
+  # Verify every physical ancestor, not just the tracked leaf. Replacing
+  # an indexed directory with a symlink can preserve both HEAD and the raw
+  # file hash while redirecting reads through a different filesystem tree.
+  parent="$path"
+  while [[ "$parent" == */* ]]; do
+    parent="${parent%/*}"
+    [[ -d "$root/$parent" && ! -L "$root/$parent" ]] ||
+      fail "tracked source traverses symlinked or missing parent directory"
+  done
   case "$mode" in
     100644|100755)
       [[ -f "$root/$path" && ! -L "$root/$path" ]] ||
