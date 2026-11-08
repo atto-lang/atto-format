@@ -358,9 +358,14 @@ at least one baseline-accepted original source **for each** compiler. The report
 records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
 reject/reject case may be a valid negative fixture, but it is **not** proof of
 semantic or compiler-admission equivalence; every such case is counted.
-A corpus containing only rejects fails as a harness error. This does not
-supersede exact-head compiler execution, semantic AST comparisons, or
-compiler-specific conformance tests.
+A corpus containing only rejects fails as a harness error. Compiler
+labels must be unique, and each configured compiler must reject a separate
+syntactically invalid `.atto` control so an always-successful stub cannot
+attest to a clean differential result. A compiler crash or a formatter that
+changes its own input despite `--stdout` is a harness error, not acceptance
+or evidence of successful formatting. This does not supersede exact-head
+compiler execution, semantic AST comparisons, or compiler-specific
+conformance tests.
 
 ```bash
 scripts/check_formatter_acceptance_delta.py \
