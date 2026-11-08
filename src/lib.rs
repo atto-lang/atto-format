@@ -4138,10 +4138,16 @@ mod tests {
 
     #[test]
     fn return_separator_unit_skips_active_block_comment_or_quote() {
+        // A generic constructor works with both the current bool comment
+        // state and the nested u32 depth without a same-type Into conversion.
+        fn active_comment<T: From<bool>>() -> T {
+            T::from(true)
+        }
+
         let source = "return    comment payload";
         for lexical_state in [
             LexState {
-                block_comment: true.into(),
+                block_comment: active_comment(),
                 ..LexState::default()
             },
             LexState {
