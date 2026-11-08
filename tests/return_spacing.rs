@@ -138,8 +138,20 @@ fn line_comment_containing_return_is_not_executable_code() {
 
 #[test]
 fn return_prefixed_identifiers_are_not_return_statements() {
-    let source = "fnc demo() -> int {\nreturn_value   = 1;\nreturning   = 2;\nreturned   = 3;\nreturn   returning;\n}\n";
-    let expected = "fnc demo() -> int {\n  return_value   = 1;\n  returning   = 2;\n  returned   = 3;\n  return returning;\n}\n";
+    let source = r#"fnc demo() -> int {
+return_value   = 1;
+returning   = 2;
+returned   = 3;
+return   returning;
+}
+"#;
+    let expected = r#"fnc demo() -> int {
+  return_value   = 1;
+  returning   = 2;
+  returned   = 3;
+  return returning;
+}
+"#;
     assert_stable_format(source, expected);
 }
 
