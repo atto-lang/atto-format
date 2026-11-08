@@ -408,5 +408,69 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, 2)
 
 
+    def test_compiler_admission_waits_for_all_formatted_imports(self):
+        # A former single-pass worker pool could compile fast.atto against
+        # a not-yet-formatted slow.atto and report false rejection.
+        (self.corpus / "fast.atto").write_text("unformatted fast\n", encoding="utf-8")
+        (self.corpus / "slow.atto").write_text("unformatted slow\n", encoding="utf-8")
+        self.formatter.write_text(
+            "import sys\nimport time\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if p.name == 'slow.atto': time.sleep(0.2)\n"
+            "sys.stdout.write(p.read_text().replace('unformatted', 'formatted'))\n",
+            encoding="utf-8",
+        )
+        self.compiler.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if p.name.startswith('__oresfmt_invalid_syntax_control'): sys.exit(1)\n"
+            "if '/fmt/' in str(p):\n"
+            " peer=p.parent/('slow.atto' if p.name=='fast.atto' else 'fast.atto')\n"
+            " if 'unformatted' in peer.read_text(): sys.exit(1)\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main()
+        self.assertEqual(status, 0, report)
+        self.assertEqual(json.loads(report)["summary"]["files"], 2)
+        self.assertEqual(json.loads(report)["findings"], [])
+
+    def test_added_formatted_source_cannot_change_project_unnoticed(self):
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "t=p.read_text()\n"
+            "if '/fmt/' in str(p):\n"
+            " (p.parent/'unexpected_import.atto').write_text('fnc injected() {}\\n')\n"
+            "sys.stdout.write(t)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertTrue(any(
+            "formatted unexpected/replaced file during audit" in error["message"]
+            for error in json.loads(report)["errors"]
+        ))
+        self.assertFalse((self.corpus / "unexpected_import.atto").exists())
+
+    def test_compiler_added_source_to_original_tree_is_harness_error(self):
+        self.compiler.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if p.name.startswith('__oresfmt_invalid_syntax_control'): sys.exit(1)\n"
+            "if '/orig/' in str(p):\n"
+            " (p.parent/'unexpected_side_effect.atto').write_text('fnc unexpected() {}\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertTrue(any(
+            "original unexpected/replaced file during audit" in error["message"]
+            for error in json.loads(report)["errors"]
+        ))
+        self.assertFalse((self.corpus / "unexpected_side_effect.atto").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
