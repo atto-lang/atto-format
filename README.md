@@ -367,10 +367,21 @@ corpus and removed before final reporting.
 
 Compiler crashes, source mutation despite `--stdout`, or changes to **any**
 file in the original snapshot (including manifests or other auxiliary inputs)
-are harness errors. Snapshot integrity is checked with streamed SHA-256 digests
-before accepting the comparison. This is still parse/typecheck admission
-evidence only, not exact-head compiler execution certification, semantic AST
-equivalence, or cross-backend guest parity.
+are harness errors. The formatter pass runs sequentially, **completes across
+the whole corpus before compiler admission begins**, and then compiler
+admissions may run in parallel (`--jobs`). This phase barrier prevents
+mixed pre/post-format imports from producing schedule-dependent results.
+
+Snapshot inventories and streamed SHA-256 digests reject source or auxiliary
+file additions, replacements, deletions, and persistent content changes in
+either comparison tree. Formatted source content is fixed before compiler
+admission and must remain unchanged afterward; compiler side effects cannot
+quietly become acceptance evidence. `--jobs` and `--timeout` must be
+positive. Run compiler commands only in an isolated, trusted environment:
+the harness is evidence collection, not a general untrusted-code sandbox.
+This is still parse/typecheck admission evidence only, not exact-head compiler
+execution certification, semantic AST equivalence, or cross-backend guest
+parity.
 
 ```bash
 scripts/check_formatter_acceptance_delta.py \
