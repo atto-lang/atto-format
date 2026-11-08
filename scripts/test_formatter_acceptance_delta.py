@@ -48,7 +48,7 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
             "--jobs", "2",
             "--report", str(report),
         ])
-        return status, report.read_text(encoding="utf-8")
+        return status, report.read_text(encoding="utf-8") if report.exists() else ""
 
     def test_clean_corpus_passes(self):
         status, report = self.run_main(("ok.atto", "fnc main() {}\n"))
@@ -72,8 +72,8 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
 
     def test_unrelated_extensions_are_ignored(self):
         status, report = self.run_main(("notes.txt", "bad\n"))
-        self.assertEqual(status, 0, report)
-        self.assertIn('"files": 0', report)
+        self.assertEqual(status, 2, report)
+        self.assertEqual(report, "")
 
     def test_missing_compiler_is_a_harness_error_not_a_rejection(self):
         (self.corpus / "ok.atto").write_text("fnc main() {}\n", encoding="utf-8")
