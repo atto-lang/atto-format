@@ -472,5 +472,27 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertFalse((self.corpus / "unexpected_side_effect.atto").exists())
 
 
+    def test_compiler_mutating_formatted_source_fails_closed(self):
+        # The formatted source is supposed to be immutable between the
+        # formatter phase and the final report. The old audit checked only
+        # original-tree hashes and non-source files on the formatted side.
+        self.compiler.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if p.name.startswith('__oresfmt_invalid_syntax_control'): sys.exit(1)\n"
+            "if '/fmt/' in str(p): p.write_text(p.read_text()+'// tampered\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        original = "fnc main() {}\n"
+        status, report = self.run_main(("main.atto", original))
+        self.assertEqual(status, 2, report)
+        self.assertTrue(any(
+            "formatted source modified by compiler" in error["message"]
+            for error in json.loads(report)["errors"]
+        ))
+        self.assertEqual((self.corpus / "main.atto").read_text(), original)
+
+
 if __name__ == "__main__":
     unittest.main()
