@@ -239,28 +239,45 @@ def main(argv=None):
         except (OSError, ValueError) as error:
             print(f"HARNESS-ERROR snapshot rejected: {error}", file=sys.stderr)
             return 2
-        # Fail closed on compilers that return 0 for every source, including
-        # /usr/bin/true and wrappers that silently ignore parser failures.
-        # Keep the invalid control outside corpus roots so it cannot affect
-        # project imports or the ordinary acceptance comparison.
-        probe = work / "invalid-control.atto"
-        probe.write_bytes(b"fnc broken(\\x00 !!!\\n")
-        for name, template in args.compiler:
-            control_status, diagnostics = admit(template, probe, args.timeout)
-            if control_status != "reject":
-                print(
-                    f"HARNESS-ERROR {name}: invalid syntax control was "
-                    f"{control_status} (expected rejection): {diagnostics[:300]!r}",
-                    file=sys.stderr,
-                )
-                return 2
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             results = list(pool.map(
                 lambda case: audit_one(case, formatter, args.compiler, work, args.timeout),
                 cases))
+        # Run the negative control inside a package that THIS compiler already
+        # admitted. A control outside the package could be rejected simply
+        # for a missing .ores.pkg.toml, falsely certifying a syntax-blind stub.
+        invalid_controls = []
+        for name, template in args.compiler:
+            first = next(
+                (work / "orig" / root.name / rel
+                 for (root, rel), row in zip(cases, results)
+                 if row.get("compilers", {}).get(name, {}).get("original") == "accept"),
+                None,
+            )
+            if first is None:
+                continue  # the no-admitted-baseline guard handles this case
+            probe = first.parent / "__oresfmt_invalid_syntax_control.atto"
+            try:
+                with probe.open("xb") as output:
+                    output.write(b"fnc broken( !!!\\n")
+                try:
+                    control_status, diagnostics = admit(template, probe, args.timeout)
+                finally:
+                    probe.unlink()
+            except OSError as error:
+                invalid_controls.append(
+                    ("<control>", f"{name}: unable to create/remove syntax control: {error}")
+                )
+                continue
+            if control_status != "reject":
+                invalid_controls.append((
+                    "<control>", f"{name}: invalid syntax control was {control_status} "
+                    f"(expected rejection within an admitted package): {diagnostics[:300]!r}"
+                ))
 
     findings = [(r["case"], f) for r in results for f in r["findings"]]
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
+    errors.extend(invalid_controls)
     admitted = {name: sum(r.get("compilers", {}).get(name, {}).get("original") == "accept"
                           for r in results) for name, _ in args.compiler}
     for name, count in admitted.items():
