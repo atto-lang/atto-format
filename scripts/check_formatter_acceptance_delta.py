@@ -326,7 +326,16 @@ def main(argv=None):
         "harness_errors": len(errors),
     }
     if args.report:
-        args.report.write_text(json.dumps({"summary": summary, "results": results}, indent=2) + "\n",
+        # Summary counts alone obscure why the audit failed (e.g. an
+        # accepted invalid-syntax control or a tampered package manifest).
+        # Preserve structured negative evidence for independent CI checking.
+        report = {
+            "summary": summary,
+            "results": results,
+            "errors": [{"case": case, "message": message} for case, message in errors],
+            "findings": [{"case": case, "reason": reason} for case, reason in findings],
+        }
+        args.report.write_text(json.dumps(report, indent=2) + "\n",
                                encoding="utf-8")
     for case, finding in findings:
         print(f"FINDING {finding}: {case}")
