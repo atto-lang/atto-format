@@ -230,6 +230,8 @@ def main(argv=None):
     compiler_names = [name for name, _ in args.compiler]
     if len(set(compiler_names)) != len(compiler_names):
         parser.error("compiler labels must be unique; duplicate names overwrite evidence")
+    if args.jobs < 1 or args.timeout < 1:
+        parser.error("--jobs and --timeout must be positive integers")
     for root in args.corpus:
         if not root.is_dir():
             parser.error(f"corpus is not a directory: {root}")
@@ -243,11 +245,18 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="oresfmt-delta-") as tmp:
         work = Path(tmp)
         integrity = {}
+        formatted_auxiliary = {}
         try:
             for root in args.corpus:
                 original = work / "orig" / root.name
+                formatted_root = work / "fmt" / root.name
                 snapshot_corpus(root, original, integrity)
-                shutil.copytree(original, work / "fmt" / root.name)
+                shutil.copytree(original, formatted_root)
+                for source, digest in integrity.items():
+                    if source.is_relative_to(original):
+                        rel = source.relative_to(original)
+                        if rel.suffix not in SOURCE_SUFFIXES:
+                            formatted_auxiliary[formatted_root / rel] = digest
         except (OSError, ValueError) as error:
             print(f"HARNESS-ERROR snapshot rejected: {error}", file=sys.stderr)
             return 2
@@ -276,6 +285,37 @@ def main(argv=None):
                 integrity_errors.append(
                     ("<snapshot>", f"original input disappeared during audit: {path}: {error}")
                 )
+        # Source files in the formatted copy are intentionally rewritten.
+        # Manifests/resources are NOT: changing them can turn broken source
+        # into a misleading compiler admission, even when original is intact.
+        for path, digest in formatted_auxiliary.items():
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise OSError("auxiliary input replaced with nonregular file")
+                if hashlib.sha256(path.read_bytes()).digest() != digest:
+                    raise ValueError("auxiliary content changed")
+            except (OSError, ValueError) as error:
+                integrity_errors.append(
+                    ("<snapshot>", f"formatted auxiliary input modified during audit: {path}: {error}")
+                )
+        # Unexpected new auxiliary files also alter import resolution and
+        # must not become invisible to differential evidence.
+        for root in args.corpus:
+            formatted_root = work / "fmt" / root.name
+            for current, dirs, files in os.walk(formatted_root, followlinks=False):
+                here = Path(current)
+                for name in files:
+                    item = here / name
+                    if item.suffix not in SOURCE_SUFFIXES and item not in formatted_auxiliary:
+                        integrity_errors.append(
+                            ("<snapshot>", f"formatted auxiliary input created during audit: {item}")
+                        )
+                for name in dirs:
+                    item = here / name
+                    if item.is_symlink():
+                        integrity_errors.append(
+                            ("<snapshot>", f"formatted symlink directory created during audit: {item}")
+                        )
         # Run the negative control inside a package that THIS compiler already
         # admitted. A control outside the package could be rejected simply
         # for a missing .ores.pkg.toml, falsely certifying a syntax-blind stub.
