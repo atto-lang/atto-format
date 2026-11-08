@@ -448,3 +448,19 @@ fn return_spacing_keeps_trailing_comment_with_unicode_and_tabs() {
     let expected = "fnc demo() -> int {\n  return 8; //  東京 \t 🦀 \t \n}\n";
     assert_stable_format(source, expected);
 }
+
+#[test]
+fn large_mixed_body_only_rewrites_return_separator() {
+    // The formatting pass must not accidentally rewrite unrelated statements.
+    // This also exercises a body dominated by non-return lines.
+    let mut source = String::from("fnc demo() -> int {\n");
+    let mut expected = source.clone();
+    for index in 0..256 {
+        let line = format!("  val v{index} = {index};\n");
+        source.push_str(&line);
+        expected.push_str(&line);
+    }
+    source.push_str("  // return    in   comment\n  return  \t  7;\n}\n");
+    expected.push_str("  // return    in   comment\n  return 7;\n}\n");
+    assert_stable_format(&source, &expected);
+}
