@@ -209,6 +209,26 @@ class ExactSourceCheckoutGate(unittest.TestCase):
         self.head = self.git("rev-parse", "HEAD").stdout.strip()
         self.assert_dirty_denied("tracked symlink enters Git metadata")
 
+    def test_tracked_nested_source_rejects_symlinked_parent(self):
+        # File contents and Git blob identity can still match HEAD even
+        # after a parent directory is replaced by a symlink.
+        nested = self.root / "pkg"
+        nested.mkdir()
+        source = nested / "module.atto"
+        source.write_text("fnc pkg(): int { return 1; }\\n", encoding="utf-8")
+        self.git("add", "pkg/module.atto")
+        self.git("commit", "-qm", "nested tracked source")
+        self.head = self.git("rev-parse", "HEAD").stdout.strip()
+
+        external = Path(self.temporary.name) / "outside-pkg"
+        nested.rename(external)
+        nested.symlink_to(external, target_is_directory=True)
+        self.assertEqual((nested / "module.atto").read_bytes(),
+                         (external / "module.atto").read_bytes())
+        result = self.check(self.head)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertNotIn("EXACT_SOURCE_HEAD=", result.stdout)
+
     def test_tracked_dangling_symlink_is_denied(self):
         (self.root / "missing-source.atto").symlink_to("not-here.atto")
         self.git("add", "missing-source.atto")
