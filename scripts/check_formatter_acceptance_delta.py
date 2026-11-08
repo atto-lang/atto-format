@@ -31,6 +31,7 @@ Example:
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,7 +50,7 @@ MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 MAX_SNAPSHOT_FILES = 30000
 MAX_FORMATTED_BYTES = 4 * 1024 * 1024
 
-def snapshot_corpus(root, destination):
+def snapshot_corpus(root, destination, integrity=None):
     """Copy all bounded regular repository inputs, not just source extensions.
 
     A source-only copy drops .ores.pkg.toml and auxiliary import resources,
@@ -91,8 +92,16 @@ def snapshot_corpus(root, destination):
                 if identity(opened) != identity(before):
                     raise ValueError(f"unstable corpus input: {source}")
                 dest = out_dir / name
+                digest = hashlib.sha256()
                 with dest.open("wb") as output:
-                    shutil.copyfileobj(inp, output)
+                    while True:
+                        chunk = inp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        digest.update(chunk)
+                if integrity is not None:
+                    integrity[dest] = digest.digest()
                 if identity(os.fstat(inp.fileno())) != identity(opened) or (
                     identity(source.lstat()) != identity(opened)
                 ):
@@ -231,10 +240,11 @@ def main(argv=None):
         return 2
     with tempfile.TemporaryDirectory(prefix="oresfmt-delta-") as tmp:
         work = Path(tmp)
+        integrity = {}
         try:
             for root in args.corpus:
                 original = work / "orig" / root.name
-                snapshot_corpus(root, original)
+                snapshot_corpus(root, original, integrity)
                 shutil.copytree(original, work / "fmt" / root.name)
         except (OSError, ValueError) as error:
             print(f"HARNESS-ERROR snapshot rejected: {error}", file=sys.stderr)
@@ -243,6 +253,21 @@ def main(argv=None):
             results = list(pool.map(
                 lambda case: audit_one(case, formatter, args.compiler, work, args.timeout),
                 cases))
+        # Formatting must not modify ANY file in the original snapshot, not
+        # just the input path. Cross-file source or package-manifest edits
+        # could otherwise make both compiler admissions compare altered data.
+        integrity_errors = []
+        for path, digest in integrity.items():
+            try:
+                with path.open("rb") as source:
+                    if hashlib.file_digest(source, "sha256").digest() != digest:
+                        integrity_errors.append(
+                            ("<snapshot>", f"original input modified during audit: {path}")
+                        )
+            except OSError as error:
+                integrity_errors.append(
+                    ("<snapshot>", f"original input disappeared during audit: {path}: {error}")
+                )
         # Run the negative control inside a package that THIS compiler already
         # admitted. A control outside the package could be rejected simply
         # for a missing .ores.pkg.toml, falsely certifying a syntax-blind stub.
@@ -278,6 +303,7 @@ def main(argv=None):
     findings = [(r["case"], f) for r in results for f in r["findings"]]
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
     errors.extend(invalid_controls)
+    errors.extend(integrity_errors)
     admitted = {name: sum(r.get("compilers", {}).get(name, {}).get("original") == "accept"
                           for r in results) for name, _ in args.compiler}
     for name, count in admitted.items():
