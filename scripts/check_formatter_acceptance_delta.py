@@ -58,8 +58,12 @@ def snapshot_corpus(root, destination, integrity=None):
     Refuse links/special files and unstable inputs instead of silently
     following paths outside the source tree. Git/build caches are excluded.
     """
-    if root.is_symlink():
-        raise ValueError(f"corpus root is a symlink: {root}")
+    # Refuse an existing symlink in any ancestor, not only at the final
+    # corpus component. A directory under a linked parent is otherwise
+    # traversed by os.walk even though root.is_symlink() itself is false.
+    for component in (root, *root.parents):
+        if component.is_symlink():
+            raise ValueError(f"symlinked corpus root/ancestor: {component}")
     total_bytes = 0
     total_files = 0
     for current, dirs, files in os.walk(root, followlinks=False):
