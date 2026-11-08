@@ -234,5 +234,46 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(report, "")
 
 
+    def test_always_successful_compiler_fails_invalid_syntax_control(self):
+        self.compiler.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2)
+        self.assertEqual(report, "")
+        self.assertFalse((self.corpus / "invalid-control.atto").exists())
+
+    def test_formatter_that_mutates_source_during_stdout_is_rejected(self):
+        initial = "fnc main() {}\n"
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "original=p.read_text()\n"
+            "p.write_text(original+'// silent mutation\\n')\n"
+            "sys.stdout.write(original)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", initial))
+        self.assertEqual(status, 2, report)
+        self.assertIn("mutated-input", report)
+        # Audit must never modify the original source checkout.
+        self.assertEqual((self.corpus / "main.atto").read_text(), initial)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX process signals")
+    def test_compiler_terminated_by_signal_is_not_a_syntax_rejection(self):
+        self.compiler.write_text(
+            "import os\nimport signal\nos.kill(os.getpid(), signal.SIGTERM)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2)
+        self.assertEqual(report, "")
+
+    def test_canary_is_absent_from_baseline_inventory_and_diff_trees(self):
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 0, report)
+        self.assertIn('"files": 1', report)
+        self.assertNotIn("invalid-control.atto", report)
+        self.assertFalse((self.corpus / "invalid-control.atto").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
