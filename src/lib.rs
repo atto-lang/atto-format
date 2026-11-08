@@ -701,6 +701,10 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         {
             content = canonicalize_initialize_header(&content, lex, line_no)?;
         }
+        // Normalize only visible return separators, preserving all expression bytes.
+        if starts_word(&content, "return") {
+            content = canonicalize_return_expression_spacing(&content, lex);
+        }
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
         }
@@ -1333,6 +1337,39 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
         }
         _ => None,
     }
+}
+
+// Only the separator after a visible return keyword is layout whitespace.
+// Leave the expression, string literals, and comment payloads byte-for-byte intact.
+fn canonicalize_return_expression_spacing(line: &str, initial: LexState) -> String {
+    // Keep this gate valid whether block comments are stored as a boolean
+    // (legacy) or a nesting depth (nested-comment integration).
+    if initial.block_comment != Default::default()
+        || initial.quote.is_some()
+        || !starts_word(line, "return")
+    {
+        return line.to_owned();
+    }
+
+    let remainder = &line["return".len()..];
+    let expression = remainder.trim_start_matches([' ', '\t']);
+    if expression.len() == remainder.len() || expression.is_empty() {
+        return line.to_owned();
+    }
+
+    // A bare return with stray whitespace before its semicolon should be
+    // `return;`, not `return ;`. Keep other expression bytes unchanged.
+    if expression.starts_with(';') {
+        return format!("return{expression}");
+    }
+
+    // Canonical single-space returns are the common case. Preserve them
+    // without rebuilding the line; repeated formatter passes are a fixed point.
+    if remainder.strip_prefix(' ') == Some(expression) {
+        return line.to_owned();
+    }
+
+    format!("return {expression}")
 }
 
 fn starts_word(line: &str, word: &str) -> bool {
@@ -4275,6 +4312,71 @@ fn scan_visible(line: &str, state: &mut LexState) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn return_separator_unit_matrix_preserves_suffix_bytes() {
+        let cases = [
+            ("return   x;", "return x;"),
+            ("return\t \tx;", "return x;"),
+            ("return  -x + (y * 2);", "return -x + (y * 2);"),
+            ("return  ;", "return;"),
+            ("return\t ; //  stay   here", "return; //  stay   here"),
+            ("return   \"a  b\"; //  c", "return \"a  b\"; //  c"),
+            ("return x;", "return x;"),
+            ("return;", "return;"),
+            ("returning   x;", "returning   x;"),
+            ("return_value\t x;", "return_value\t x;"),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(
+                canonicalize_return_expression_spacing(source, LexState::default()),
+                expected,
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn return_separator_unit_skips_active_block_comment_or_quote() {
+        // A generic constructor works with both the current bool comment
+        // state and the nested u32 depth without a same-type Into conversion.
+        fn active_comment<T: From<bool>>() -> T {
+            T::from(true)
+        }
+
+        let source = "return    comment payload";
+        for lexical_state in [
+            LexState {
+                block_comment: active_comment(),
+                ..LexState::default()
+            },
+            LexState {
+                quote: Some('"'),
+                ..LexState::default()
+            },
+            LexState {
+                quote: Some('\u{60}'),
+                ..LexState::default()
+            },
+        ] {
+            assert_eq!(
+                canonicalize_return_expression_spacing(source, lexical_state),
+                source,
+                "lexical state {lexical_state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn return_separator_unit_does_not_normalize_non_ascii_trivia() {
+        // Preserve unknown trivia instead of silently reinterpreting it as
+        // language whitespace. The supported normalization is ASCII SP/TAB.
+        let source = "return\u{00a0}x;";
+        assert_eq!(
+            canonicalize_return_expression_spacing(source, LexState::default()),
+            source
+        );
+    }
 
     #[test]
     fn canonicalizes_rt_yield_without_touching_generator_yield_or_literals() {
