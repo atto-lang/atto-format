@@ -19,6 +19,12 @@ jobs:
         with:
           ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
+      - name: Verify original PR head and physical checkout bytes
+        env:
+          EXPECTED_HEAD: ${{ env.EXPECTED_SHA }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Test adversarial checkout-identity controls
+        run: python3 -m unittest discover -s tests -p 'test_ci_checkout_head_20261106.py' -v
       - run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
@@ -47,6 +53,12 @@ jobs:
         with:
           ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
+      - name: Verify original PR head and physical checkout bytes
+        env:
+          EXPECTED_HEAD: ${{ env.EXPECTED_SHA }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Test adversarial checkout-identity controls
+        run: python3 -m unittest discover -s tests -p 'test_ci_checkout_head_20261106.py' -v
       - run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
@@ -70,6 +82,12 @@ jobs:
         with:
           ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
+      - name: Verify original PR head and physical checkout bytes
+        env:
+          EXPECTED_HEAD: ${{ env.EXPECTED_SHA }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Test adversarial checkout-identity controls
+        run: python3 -m unittest discover -s tests -p 'test_ci_checkout_head_20261106.py' -v
       - name: Verify exact source head and clean Git tree
         run: |
           set -eu
