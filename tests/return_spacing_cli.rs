@@ -4,10 +4,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const INPUT: &str =
-    "pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return   x;\n}\n";
-const EXPECTED: &str =
-    "pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return x;\n}\n";
+const INPUT: &str = "pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return   x;\n}\n";
+const EXPECTED: &str = "pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return x;\n}\n";
 
 struct TempDirectory(PathBuf);
 
@@ -82,10 +80,7 @@ fn return_spacing_cli_stdout_check_and_explicit_write_are_consistent() {
 
 #[test]
 fn stdin_modes_apply_same_return_spacing_without_touching_files() {
-    for (input, check_code, expected_stdout) in [
-        (INPUT, 1, EXPECTED),
-        (EXPECTED, 0, EXPECTED),
-    ] {
+    for (input, check_code, expected_stdout) in [(INPUT, 1, EXPECTED), (EXPECTED, 0, EXPECTED)] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
             .arg("-")
             .stdin(Stdio::piped())
@@ -93,7 +88,12 @@ fn stdin_modes_apply_same_return_spacing_without_touching_files() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
         assert_eq!(String::from_utf8(output.stdout).unwrap(), expected_stdout);
@@ -105,7 +105,12 @@ fn stdin_modes_apply_same_return_spacing_without_touching_files() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
         let checked = child.wait_with_output().unwrap();
         assert_eq!(checked.status.code(), Some(check_code), "{checked:?}");
         assert!(checked.stdout.is_empty());
