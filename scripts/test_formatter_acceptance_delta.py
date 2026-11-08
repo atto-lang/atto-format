@@ -57,6 +57,8 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
     def test_clean_corpus_passes(self):
         status, report = self.run_main(("ok.atto", "fnc main() {}\n"))
         self.assertEqual(status, 0, report)
+        self.assertEqual(json.loads(report)["errors"], [])
+        self.assertEqual(json.loads(report)["findings"], [])
 
     def test_meaning_change_is_reported_as_newly_accepted(self):
         status, report = self.run_main(("m.atto", "val x; write-to-val\n"))
@@ -114,6 +116,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(result, 2, report)
         self.assertIn('"baseline_unadmitted": 1', report)
         self.assertIn('"harness_errors": 1', report)
+        errors = json.loads(report)["errors"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("no original sources accepted", errors[0]["message"])
 
     def test_empty_compiler_set_is_rejected(self):
         (self.corpus / "ok.atto").write_text("fnc main() {}\n", encoding="utf-8")
@@ -296,7 +301,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         )
         status, report = self.run_main()
         self.assertEqual(status, 2, report)
-        self.assertIn("invalid syntax control was accept", report)
+        errors = json.loads(report)["errors"]
+        self.assertTrue(any("invalid syntax control was accept" in entry["message"]
+                            for entry in errors), errors)
         self.assertEqual((self.corpus / "src" / "main.atto").read_text(),
                          "fnc main() {}\n")
 
