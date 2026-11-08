@@ -52,7 +52,8 @@ the full field contract.
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when` in both delimiter styles;
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
 - braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
-- LF line endings, no trailing whitespace, one final newline;
+- LF line endings, no trailing whitespace, one final newline; CRLF is normalized to LF, but a bare CR is rejected because the import-v1 conformance spec ends a `//` comment at CR while the Java and LLVM lexers do not, so rewriting it would expose or hide code;
+- a `for`/`while ... do` header whose body starts on the same line (closed by a later `done`) gets its body on the next line; a complete one-line `... do body; done` loop is kept;
 - bare and `final [mut]` type-first class field initializers canonically use `:`:
   `final int foo = 5` becomes `final int foo: 5`, and `string bar = "100"`
   becomes `string bar: "100"`; fields declared with `val`, `let`, or `const`
@@ -344,7 +345,11 @@ relative imports still resolve). It fails on any file a compiler accepted
 before formatting but rejects after (`broken`), rejected before but accepts
 after (`newly-accepted`: formatting changed meaning), on compiler-valid source
 the formatter rejects (`rejects-valid`), and on non-idempotent output. A
-missing compiler or a timeout is a harness error, never a rejection.
+missing compiler or a timeout is a harness error, never a rejection. Reviewed
+findings, such as documented migrations that repair source a compiler
+rejected, go in a `--triaged` file (`tests/acceptance_delta_triage.tsv` lists
+those from the wide audit); a triaged entry that no longer occurs is reported
+as stale.
 
 The harness snapshots all bounded, regular corpus inputs into both comparison
 trees, including `.ores.pkg.toml`, non-source import dependencies and supporting

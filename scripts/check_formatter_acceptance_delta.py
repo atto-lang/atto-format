@@ -16,6 +16,12 @@ Findings (each makes the run fail):
   rejects-valid  the formatter rejects a file at least one compiler accepts
   not-idempotent formatting the formatted copy changes it again
 
+Reviewed findings (for example a documented migration that repairs source a
+compiler rejected) can be listed in a --triaged file, one per line:
+`CASE<TAB>FINDING<TAB>reason`. Triaged findings are reported but do not fail
+the run; a triaged entry that no longer occurs is reported as stale. Triage
+never suppresses harness errors.
+
 Acceptance means exit status 0. A compiler timeout or a missing tool is a
 harness failure (exit 2), never silently counted as a rejection. This is
 parse/typecheck admission evidence only: it is NOT guest execution parity and
@@ -58,8 +64,12 @@ def snapshot_corpus(root, destination, integrity=None):
     Refuse links/special files and unstable inputs instead of silently
     following paths outside the source tree. Git/build caches are excluded.
     """
-    if root.is_symlink():
-        raise ValueError(f"corpus root is a symlink: {root}")
+    # Refuse an existing symlink in any ancestor, not only at the final
+    # corpus component. A directory under a linked parent is otherwise
+    # traversed by os.walk even though root.is_symlink() itself is false.
+    for component in (root, *root.parents):
+        if component.is_symlink():
+            raise ValueError(f"symlinked corpus root/ancestor: {component}")
     total_bytes = 0
     total_files = 0
     for current, dirs, files in os.walk(root, followlinks=False):
@@ -230,7 +240,18 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--report", type=Path, help="write the full JSON report here")
+    parser.add_argument("--triaged", type=Path,
+                        help="CASE<TAB>FINDING<TAB>reason lines for reviewed findings")
     args = parser.parse_args(argv)
+    triaged = {}
+    if args.triaged:
+        for number, line in enumerate(args.triaged.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3 or not parts[2].strip():
+                parser.error(f"{args.triaged}:{number}: expected CASE<TAB>FINDING<TAB>reason")
+            triaged[(parts[0], parts[1])] = parts[2].strip()
 
     formatter = shlex.split(args.formatter)
     if not formatter:
@@ -242,9 +263,18 @@ def main(argv=None):
         parser.error("compiler labels must be unique; duplicate names overwrite evidence")
     if args.jobs < 1 or args.timeout < 1:
         parser.error("--jobs and --timeout must be positive integers")
+    resolved = []
     for root in args.corpus:
+        if root.is_symlink():
+            parser.error(f"corpus root is a symlink: {root}")
         if not root.is_dir():
             parser.error(f"corpus is not a directory: {root}")
+        # Resolve operator-supplied ancestors once (macOS /tmp and /var are
+        # system symlinks to /private). snapshot_corpus still rejects any
+        # symlinked component of the resolved path, so a component swapped
+        # during the audit fails closed.
+        resolved.append(root.resolve(strict=True))
+    args.corpus = resolved
     if len({root.name for root in args.corpus}) != len(args.corpus):
         parser.error("corpus directory names must be distinct")
 
@@ -409,7 +439,10 @@ def main(argv=None):
                             ("<snapshot>", f"{tree_name} input removed/replaced during audit: {item}")
                         )
 
-    findings = [(r["case"], f) for r in results for f in r["findings"]]
+    all_findings = [(r["case"], f) for r in results for f in r["findings"]]
+    findings = [item for item in all_findings if item not in triaged]
+    accepted = [item for item in all_findings if item in triaged]
+    stale = sorted(set(triaged) - set(all_findings))
     errors = [(r["case"], e) for r in results for e in r["harness_errors"]]
     errors.extend(invalid_controls)
     errors.extend(integrity_errors)
@@ -423,9 +456,12 @@ def main(argv=None):
         "files": len(results),
         "formatter_rejected": sum(r.get("format") == "rejected" for r in results),
         "compilers": [name for name, _ in args.compiler],
+        "corpus_roots": [str(root) for root in args.corpus],
         "baseline_accepted_by_compiler": admitted,
         "baseline_unadmitted": sum(not r.get("baseline_admitted", False) for r in results),
         "findings": len(findings),
+        "triaged": len(accepted),
+        "stale_triage": len(stale),
         "harness_errors": len(errors),
     }
     if args.report:
@@ -437,11 +473,18 @@ def main(argv=None):
             "results": results,
             "errors": [{"case": case, "message": message} for case, message in errors],
             "findings": [{"case": case, "reason": reason} for case, reason in findings],
+            "triaged": [{"case": case, "reason": reason, "triage": triaged[(case, reason)]}
+                        for case, reason in accepted],
+            "stale_triage": [{"case": case, "reason": reason} for case, reason in stale],
         }
         args.report.write_text(json.dumps(report, indent=2) + "\n",
                                encoding="utf-8")
     for case, finding in findings:
         print(f"FINDING {finding}: {case}")
+    for case, finding in accepted:
+        print(f"TRIAGED {finding}: {case} ({triaged[(case, finding)]})")
+    for case, finding in stale:
+        print(f"STALE-TRIAGE {finding}: {case}")
     for case, error in errors:
         print(f"HARNESS-ERROR {case}: {error}", file=sys.stderr)
     print(json.dumps(summary))

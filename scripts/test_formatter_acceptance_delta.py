@@ -15,7 +15,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
-        self.path = Path(self.root.name)
+        # Resolve once: macOS temp dirs live under the /var -> /private/var
+        # system symlink, which snapshot_corpus refuses as an ancestor.
+        self.path = Path(self.root.name).resolve()
         self.corpus = self.path / "corpus"
         self.corpus.mkdir()
         # Fake formatter: drops the word "val " (a meaning change), rejects
@@ -78,6 +80,44 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("not-idempotent", report)
         self.assertIn("broken:cc", report)
+
+    def test_triaged_findings_do_not_fail_and_stale_entries_are_reported(self):
+        (self.corpus / "m.atto").write_text("val x; write-to-val\n", encoding="utf-8")
+        (self.corpus / "baseline.atto").write_text("fnc main() {}\n", encoding="utf-8")
+        triage = self.path / "triage.tsv"
+        triage.write_text(
+            "corpus/m.atto\tnewly-accepted:cc\treviewed migration\n"
+            "corpus/gone.atto\tbroken:cc\tno longer occurs\n",
+            encoding="utf-8",
+        )
+        status = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+            "--corpus", str(self.corpus),
+            "--triaged", str(triage),
+        ])
+        self.assertEqual(status, 0)
+
+    def test_imports_of_formatter_rejected_files_still_resolve(self):
+        # The importer is formatted; the imported file is rejected by the
+        # formatter. The compiler needs the import to exist in both trees.
+        importer = self.path / "imp.py"
+        importer.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "if '!!!' in p.read_text(): sys.exit(1)\n"
+            "sys.exit(0 if (p.parent / 'dep.atto').exists() else 1)\n",
+            encoding="utf-8",
+        )
+        (self.corpus / "main.atto").write_text("uses dep\n", encoding="utf-8")
+        (self.corpus / "dep.atto").write_text("bad dep\n", encoding="utf-8")
+        status = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--compiler", f"cc={sys.executable} {importer} {{source}}",
+            "--corpus", str(self.corpus),
+        ])
+        # dep.atto itself is formatter-rejected but compiler-valid.
+        self.assertEqual(status, 1)
 
     def test_unrelated_extensions_are_ignored(self):
         status, report = self.run_main(("notes.txt", "bad\n"))
@@ -223,6 +263,41 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         alias.symlink_to(self.corpus, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "symlink"):
             snapshot_corpus(alias, self.path / "snapshot")
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks")
+    def test_snapshot_refuses_symlinked_ancestor(self):
+        alias = self.path / "linked_parent"
+        alias.symlink_to(self.path, target_is_directory=True)
+        nested_root = alias / "corpus"
+        # The final directory is ordinary; only an ancestor is linked.
+        self.assertFalse(nested_root.is_symlink())
+        with self.assertRaisesRegex(ValueError, "symlinked corpus root/ancestor"):
+            snapshot_corpus(nested_root, self.path / "snapshot")
+        (self.corpus / "main.atto").write_text("fnc main() {}\n", encoding="utf-8")
+        report = self.path / "alias_report.json"
+        status = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+            "--corpus", str(nested_root),
+            "--report", str(report),
+        ])
+        # The operator-supplied path is resolved once at argument parsing and
+        # the real root is what gets audited and recorded; the snapshot layer
+        # above still refuses a symlinked component of the path it is given.
+        self.assertEqual(status, 0)
+        roots = json.loads(report.read_text())["summary"]["corpus_roots"]
+        self.assertEqual(roots, [str(self.corpus)])
+
+    def test_symlinked_corpus_root_itself_is_refused(self):
+        (self.corpus / "main.atto").write_text("fnc main() {}\n", encoding="utf-8")
+        link = self.path / "corpus_link"
+        link.symlink_to(self.corpus, target_is_directory=True)
+        with self.assertRaises(SystemExit):
+            main([
+                "--formatter", f"{sys.executable} {self.formatter}",
+                "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+                "--corpus", str(link),
+            ])
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFO")
     def test_snapshot_refuses_special_files_without_opening_them(self):
