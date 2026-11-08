@@ -679,7 +679,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             content = canonicalize_initialize_header(&content, lex, line_no)?;
         }
         content = canonicalize_generator_output_line(&content, lex);
-        content = canonicalize_return_expression_spacing(&content, lex);
+        // Most source lines are not returns. Avoid copying them solely to
+        // run the return-separator normalization pass.
+        if starts_word(&content, "return") {
+            content = canonicalize_return_expression_spacing(&content, lex);
+        }
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
         }
