@@ -116,3 +116,20 @@ fn stdin_modes_apply_same_return_spacing_without_touching_files() {
         assert!(checked.stdout.is_empty());
     }
 }
+
+#[test]
+fn write_override_does_not_modify_syntactically_invalid_return_source() {
+    let directory = TempDirectory::new();
+    let original = "pub fnc broken() -> int {\nreturn    1;\n";
+    let source = directory.0.join("broken.atto");
+    fs::write(&source, original).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_oresfmt"))
+        .current_dir(&directory.0)
+        .args(["--write", "--ok-to-mod-outside-git", "broken.atto"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(fs::read_to_string(&source).unwrap(), original);
+}
