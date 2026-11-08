@@ -38,6 +38,10 @@ for (const source of cases) {
   const b=format(a.text);
   assert.deepEqual(b, a, 'canonical formatter not idempotent');
 }
+const paddedReturn = format('pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return   x;\n}\n');
+assert.equal(paddedReturn.ok, true, 'Wasm formatter must accept a padded return');
+assert.equal(paddedReturn.text, 'pub fnc main() -> int {\n  val x = 10;\n  x = 20;\n  return x;\n}\n');
+assert.deepEqual(format(paddedReturn.text), paddedReturn, 'Wasm padded return must be idempotent');
 const unicode=format('// 🚀 日本語\nfnc main() -> int { return 42; }\n');
 assert.ok(unicode.ok && unicode.text.includes('🚀 日本語'));
 const invalid=format('fnc identity(int x) -> int do return x; end\n');
