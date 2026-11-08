@@ -356,5 +356,57 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertGreater(json.loads(report)["summary"]["harness_errors"], 0)
 
 
+    def test_formatted_manifest_mutation_fails_closed(self):
+        original = "[package]\nname = 'fixture'\n"
+        (self.corpus / ".ores.pkg.toml").write_text(original, encoding="utf-8")
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "t=p.read_text()\n"
+            "if '/fmt/' in str(p):\n"
+            " (p.parent/'.ores.pkg.toml').write_text('changed manifest\\n')\n"
+            "sys.stdout.write(t)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertTrue(any(
+            "formatted auxiliary input modified during audit" in error["message"]
+            for error in json.loads(report)["errors"]
+        ))
+        self.assertEqual((self.corpus / ".ores.pkg.toml").read_text(), original)
+
+    def test_formatter_cannot_create_hidden_auxiliary_config(self):
+        self.formatter.write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[-1])\n"
+            "t=p.read_text()\n"
+            "if '/fmt/' in str(p):\n"
+            " (p.parent/'unexpected.toml').write_text('[package]\\nname=\"bad\"\\n')\n"
+            "sys.stdout.write(t)\n",
+            encoding="utf-8",
+        )
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertTrue(any(
+            "formatted auxiliary input created during audit" in error["message"]
+            for error in json.loads(report)["errors"]
+        ))
+        self.assertFalse((self.corpus / "unexpected.toml").exists())
+
+    def test_invalid_scheduler_budgets_rejected(self):
+        (self.corpus / "main.atto").write_text("fnc main() {}\n", encoding="utf-8")
+        for option, invalid in [
+            ("--jobs", "0"), ("--jobs", "-1"),
+            ("--timeout", "0"), ("--timeout", "-10"),
+        ]:
+            with self.subTest(option=option, invalid=invalid):
+                with self.assertRaises(SystemExit) as caught:
+                    main(["--formatter", f"{sys.executable} {self.formatter}",
+                          "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+                          "--corpus", str(self.corpus), option, invalid])
+                self.assertEqual(caught.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
