@@ -96,7 +96,59 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
             "--corpus", str(self.corpus),
             "--triaged", str(triage),
         ])
+        # A stale exemption must fail the evidence gate even when the
+        # remaining triaged finding is correctly reviewed.
+        self.assertEqual(status, 2)
+
+    def test_triaged_findings_pass_when_every_entry_is_live(self):
+        (self.corpus / "m.atto").write_text("val x; write-to-val\\n", encoding="utf-8")
+        (self.corpus / "baseline.atto").write_text("fnc main() {}\\n", encoding="utf-8")
+        triage = self.path / "triage.tsv"
+        triage.write_text(
+            "corpus/m.atto\\tnewly-accepted:cc\\treviewed migration\\n",
+            encoding="utf-8",
+        )
+        status = main([
+            "--formatter", f"{sys.executable} {self.formatter}",
+            "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+            "--corpus", str(self.corpus),
+            "--triaged", str(triage),
+        ])
         self.assertEqual(status, 0)
+
+    def test_duplicate_triage_rows_fail_closed(self):
+        triage = self.path / "triage.tsv"
+        triage.write_text(
+            "corpus/a.atto\\tbroken:cc\\tfirst reason\\n"
+            "corpus/a.atto\\tbroken:cc\\toverriding reason\\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(SystemExit) as failure:
+            main([
+                "--formatter", f"{sys.executable} {self.formatter}",
+                "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+                "--corpus", str(self.corpus),
+                "--triaged", str(triage),
+            ])
+        self.assertEqual(failure.exception.code, 2)
+
+    def test_malformed_triage_rows_fail_closed(self):
+        for row in [
+            "\\tbroken:cc\\treason\\n",
+            "corpus/a.atto\\t\\treason\\n",
+            "corpus/a.atto\\tbroken:cc\\treason\\textra\\n",
+        ]:
+            with self.subTest(row=row):
+                triage = self.path / "triage.tsv"
+                triage.write_text(row, encoding="utf-8")
+                with self.assertRaises(SystemExit) as failure:
+                    main([
+                        "--formatter", f"{sys.executable} {self.formatter}",
+                        "--compiler", f"cc={sys.executable} {self.compiler} {{source}}",
+                        "--corpus", str(self.corpus),
+                        "--triaged", str(triage),
+                    ])
+                self.assertEqual(failure.exception.code, 2)
 
     def test_imports_of_formatter_rejected_files_still_resolve(self):
         # The importer is formatted; the imported file is rejected by the
