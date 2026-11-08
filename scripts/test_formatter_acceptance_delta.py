@@ -125,6 +125,7 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertFalse(Path(self.path / "missing-report.json").exists())
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX symlinks")
     def test_symlinked_auxiliary_inputs_fail_closed(self):
         outside = self.path / "outside.toml"
         outside.write_text("private-data\n", encoding="utf-8")
@@ -191,8 +192,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(report, "")
 
     def test_snapshot_refuses_oversized_auxiliary_file(self):
-        (self.corpus / "resource.bin").write_bytes(b"123456")
-        with mock.patch("check_formatter_acceptance_delta.MAX_SOURCE_BYTES", 5):
+        (self.corpus / "resource.bin").write_bytes(b"12345678901234567")
+        # Source fits: only the 17-byte auxiliary resource violates the cap.
+        with mock.patch("check_formatter_acceptance_delta.MAX_SOURCE_BYTES", 16):
             status, report = self.run_main(("main.atto", "fnc main() {}\n"))
         self.assertEqual(status, 2)
         self.assertEqual(report, "")
