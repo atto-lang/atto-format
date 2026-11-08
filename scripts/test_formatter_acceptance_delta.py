@@ -275,8 +275,8 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         status, report = self.run_main(("main.atto", "fnc main() {}\n"))
         self.assertEqual(status, 0, report)
         self.assertIn('"files": 1', report)
-        self.assertNotIn("invalid-control.atto", report)
-        self.assertFalse((self.corpus / "invalid-control.atto").exists())
+        self.assertNotIn("__oresfmt_invalid_syntax_control.atto", report)
+        self.assertFalse((self.corpus / "__oresfmt_invalid_syntax_control.atto").exists())
 
 
     def test_manifest_only_compiler_cannot_fake_invalid_syntax_rejection(self):
