@@ -679,6 +679,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             content = canonicalize_initialize_header(&content, lex, line_no)?;
         }
         content = canonicalize_generator_output_line(&content, lex);
+        content = canonicalize_return_expression_spacing(&content, lex);
         if insert_mtd && instance_member && pending_callable_parameter_depth == 0 {
             content = insert_contextual_mtd(&content, lex);
         }
@@ -1202,6 +1203,22 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
         }
         _ => None,
     }
+}
+
+// Only the separator after a visible return keyword is layout whitespace.
+// Leave the expression, string literals, and comment payloads byte-for-byte intact.
+fn canonicalize_return_expression_spacing(line: &str, initial: LexState) -> String {
+    if initial.block_comment || initial.quote.is_some() || !starts_word(line, "return") {
+        return line.to_owned();
+    }
+
+    let remainder = &line["return".len()..];
+    let expression = remainder.trim_start_matches([' ', '\t']);
+    if expression.len() == remainder.len() || expression.is_empty() {
+        return line.to_owned();
+    }
+
+    format!("return {expression}")
 }
 
 fn starts_word(line: &str, word: &str) -> bool {
