@@ -81,7 +81,7 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertIn("not-idempotent", report)
         self.assertIn("broken:cc", report)
 
-    def test_triaged_findings_do_not_fail_and_stale_entries_are_reported(self):
+    def test_stale_triage_exemption_fails_closed(self):
         (self.corpus / "m.atto").write_text("val x; write-to-val\n", encoding="utf-8")
         (self.corpus / "baseline.atto").write_text("fnc main() {}\n", encoding="utf-8")
         triage = self.path / "triage.tsv"
