@@ -274,10 +274,23 @@ def main(argv=None):
         # formatting its imported sibling observes a mixed project tree and
         # can create spurious acceptance differences. Finish all formatted
         # outputs before executing any compiler admission command.
+        # Formatter subprocesses must be sequential: concurrent invocations
+        # can rewrite another file before its own formatting pass records the
+        # original content, making the audit schedule-dependent.
+        prepared = [prepare_one(case, formatter, work, args.timeout)
+                    for case in cases]
+        # Capture the fully prepared source tree before any compiler runs.
+        # A compiler that rewrites an imported module must never be able to
+        # influence a later admission and still yield a passing receipt.
+        formatted_source_integrity = {}
+        for root, rel in cases:
+            path = work / "fmt" / root.name / rel
+            try:
+                formatted_source_integrity[path] = hashlib.sha256(path.read_bytes()).digest()
+            except OSError:
+                # The per-case result or inventory check reports this too.
+                formatted_source_integrity[path] = None
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            prepared = list(pool.map(
-                lambda case: prepare_one(case, formatter, work, args.timeout),
-                cases))
             results = list(pool.map(
                 lambda pair: compare_one(pair[0], pair[1], args.compiler, work, args.timeout),
                 zip(cases, prepared)))
@@ -314,6 +327,16 @@ def main(argv=None):
             except (OSError, ValueError) as error:
                 integrity_errors.append(
                     ("<snapshot>", f"formatted auxiliary input modified during audit: {path}: {error}")
+                )
+        for path, digest in formatted_source_integrity.items():
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise OSError("formatted source replaced with nonregular file")
+                if digest is None or hashlib.sha256(path.read_bytes()).digest() != digest:
+                    raise ValueError("formatted source content changed")
+            except (OSError, ValueError) as error:
+                integrity_errors.append(
+                    ("<snapshot>", f"formatted source modified by compiler: {path}: {error}")
                 )
         # A compiler/formatter must not add, remove or symlink ANY source
         # or auxiliary input in either tree. An added .atto file was
