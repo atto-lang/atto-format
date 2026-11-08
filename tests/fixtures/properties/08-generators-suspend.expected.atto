@@ -1,0 +1,19 @@
+fnc gen* numbers(): Iterator<int> {
+  yield 1;
+  yield 2;
+  return;
+}
+
+
+suspend fnc spin(): void {
+  return;
+}
+
+
+pub fnc main() -> int {
+  let int total = 0;
+  for const n of numbers() do
+    total = total + n;
+  done
+  return total;
+}

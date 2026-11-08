@@ -109,7 +109,13 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks.
+**Compiler status (verified 2026-11-08 against Java `6d8eb70048` and LLVM `0ee037ca3`):** both production
+compilers currently reject an end-delimited body on a free or module callable (Java: "expected '{'"; LLVM:
+"native '::' body requires a class method"). Both accept the `-> Type ::` ... `end` form on class methods.
+The formatter lays the free-callable form out but never rewrites a braced body into it. Likewise,
+`define actor Name as { ... }` (a brace body after `as`) is accepted by LLVM but rejected by Java.
+
 
 ```ores
 fnc classify(int x) -> tuple (int, int, string) ::
