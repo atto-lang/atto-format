@@ -101,11 +101,11 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertEqual(status, 2)
 
     def test_triaged_findings_pass_when_every_entry_is_live(self):
-        (self.corpus / "m.atto").write_text("val x; write-to-val\\n", encoding="utf-8")
-        (self.corpus / "baseline.atto").write_text("fnc main() {}\\n", encoding="utf-8")
+        (self.corpus / "m.atto").write_text("val x; write-to-val\n", encoding="utf-8")
+        (self.corpus / "baseline.atto").write_text("fnc main() {}\n", encoding="utf-8")
         triage = self.path / "triage.tsv"
         triage.write_text(
-            "corpus/m.atto\\tnewly-accepted:cc\\treviewed migration\\n",
+            "corpus/m.atto\tnewly-accepted:cc\treviewed migration\n",
             encoding="utf-8",
         )
         status = main([
@@ -119,8 +119,8 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
     def test_duplicate_triage_rows_fail_closed(self):
         triage = self.path / "triage.tsv"
         triage.write_text(
-            "corpus/a.atto\\tbroken:cc\\tfirst reason\\n"
-            "corpus/a.atto\\tbroken:cc\\toverriding reason\\n",
+            "corpus/a.atto\tbroken:cc\tfirst reason\n"
+            "corpus/a.atto\tbroken:cc\toverriding reason\n",
             encoding="utf-8",
         )
         with self.assertRaises(SystemExit) as failure:
@@ -134,9 +134,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
 
     def test_malformed_triage_rows_fail_closed(self):
         for row in [
-            "\\tbroken:cc\\treason\\n",
-            "corpus/a.atto\\t\\treason\\n",
-            "corpus/a.atto\\tbroken:cc\\treason\\textra\\n",
+            "\tbroken:cc\treason\n",
+            "corpus/a.atto\t\treason\n",
+            "corpus/a.atto\tbroken:cc\treason\textra\n",
         ]:
             with self.subTest(row=row):
                 triage = self.path / "triage.tsv"
