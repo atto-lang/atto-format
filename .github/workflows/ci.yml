@@ -82,6 +82,9 @@ jobs:
       - name: Install wasm32 target
         run: rustup target add wasm32-unknown-unknown
       - name: Build standalone formatter Wasm
+        env:
+          # Match the canonical browser publishing build's size/ABI flags.
+          RUSTFLAGS: '-C opt-level=z -C panic=abort'
         run: cargo build --release --lib --target wasm32-unknown-unknown --offline
       - name: Execute formatter Wasm API regressions
         run: node tests/browser-wasm.mjs
