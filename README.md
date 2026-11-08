@@ -359,13 +359,18 @@ records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
 reject/reject case may be a valid negative fixture, but it is **not** proof of
 semantic or compiler-admission equivalence; every such case is counted.
 A corpus containing only rejects fails as a harness error. Compiler
-labels must be unique, and each configured compiler must reject a separate
-syntactically invalid `.atto` control so an always-successful stub cannot
-attest to a clean differential result. A compiler crash or a formatter that
-changes its own input despite `--stdout` is a harness error, not acceptance
-or evidence of successful formatting. This does not supersede exact-head
-compiler execution, semantic AST comparisons, or compiler-specific
-conformance tests.
+labels must be unique, and each configured compiler must reject a syntactically
+invalid `.atto` control **in a package whose original source it accepted**.
+This rejects always-successful stubs and avoids misinterpreting missing-package
+errors as proof of syntax checking. The control is isolated from the original
+corpus and removed before final reporting.
+
+Compiler crashes, source mutation despite `--stdout`, or changes to **any**
+file in the original snapshot (including manifests or other auxiliary inputs)
+are harness errors. Snapshot integrity is checked with streamed SHA-256 digests
+before accepting the comparison. This is still parse/typecheck admission
+evidence only, not exact-head compiler execution certification, semantic AST
+equivalence, or cross-backend guest parity.
 
 ```bash
 scripts/check_formatter_acceptance_delta.py \
