@@ -1208,7 +1208,12 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
 // Only the separator after a visible return keyword is layout whitespace.
 // Leave the expression, string literals, and comment payloads byte-for-byte intact.
 fn canonicalize_return_expression_spacing(line: &str, initial: LexState) -> String {
-    if initial.block_comment || initial.quote.is_some() || !starts_word(line, "return") {
+    // Keep this gate valid whether block comments are stored as a boolean
+    // (legacy) or a nesting depth (nested-comment integration).
+    if initial.block_comment != Default::default()
+        || initial.quote.is_some()
+        || !starts_word(line, "return")
+    {
         return line.to_owned();
     }
 
@@ -4132,7 +4137,7 @@ mod tests {
         let source = "return    comment payload";
         for lexical_state in [
             LexState {
-                block_comment: true,
+                block_comment: true.into(),
                 ..LexState::default()
             },
             LexState {
