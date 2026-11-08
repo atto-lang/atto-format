@@ -240,8 +240,8 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.compiler.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
         status, report = self.run_main(("main.atto", "fnc main() {}\n"))
         self.assertEqual(status, 2)
-        self.assertEqual(report, "")
-        self.assertFalse((self.corpus / "invalid-control.atto").exists())
+        self.assertEqual(json.loads(report)["summary"]["harness_errors"], 1)
+        self.assertFalse((self.corpus / "__oresfmt_invalid_syntax_control.atto").exists())
 
     def test_formatter_that_mutates_source_during_stdout_is_rejected(self):
         initial = "fnc main() {}\n"
@@ -267,7 +267,9 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         )
         status, report = self.run_main(("main.atto", "fnc main() {}\n"))
         self.assertEqual(status, 2)
-        self.assertEqual(report, "")
+        summary = json.loads(report)["summary"]
+        self.assertGreater(summary["harness_errors"], 0)
+        self.assertEqual(summary["baseline_accepted_by_compiler"]["cc"], 0)
 
     def test_canary_is_absent_from_baseline_inventory_and_diff_trees(self):
         status, report = self.run_main(("main.atto", "fnc main() {}\n"))
