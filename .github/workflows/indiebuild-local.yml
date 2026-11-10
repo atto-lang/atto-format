@@ -1,15 +1,17 @@
 name: IndieBuild local verification
 on:
   push:
-    branches: [codex/indiebuild-local-proof]
-    paths: [.github/workflows/indiebuild-local.yml]
+    branches: [main, codex/indiebuild-local-proof]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 env:
-  EXPECTED_SHA: ${{ github.sha }}
+  EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
   test:
+    name: IndieBuild / test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [indiebuild-linux-arm64]
     timeout-minutes: 45
     steps:
@@ -34,6 +36,8 @@ jobs:
       - run: cargo build --release --bins
 
   msrv:
+    name: IndieBuild / msrv
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [indiebuild-linux-arm64]
     timeout-minutes: 30
     steps:
