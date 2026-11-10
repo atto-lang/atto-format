@@ -666,6 +666,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_export_line(&content);
         let instance_member =
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
+        if keyword_stack.is_empty()
+            && in_direct_declaration_container(&define_stack, &brace_stack)
+        {
+            content = canonicalize_nested_define_member(&content, lex);
+        }
         content = canonicalize_declaration_line(
             &content,
             lex,
@@ -1298,6 +1303,69 @@ fn nearest_signature_context(defines: &[DefineFrame], braces: &[BraceFrame]) -> 
     newest
         .map(|(_, is_signature)| is_signature)
         .unwrap_or(false)
+}
+
+// Members of immediate declaration containers omit the file-root `define`.
+// A callable or expression body is not a declaration container.
+fn in_direct_declaration_container(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let latest_define = defines.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, DefineKind::Module | DefineKind::Class
+            | DefineKind::Actor | DefineKind::Interface | DefineKind::Contract
+            | DefineKind::Trait | DefineKind::Struct)
+    ));
+    let latest_brace = braces.last().map(|frame| (
+        frame.order,
+        matches!(frame.kind, BraceKind::Module | BraceKind::Class
+            | BraceKind::Actor | BraceKind::Interface | BraceKind::Contract
+            | BraceKind::Trait | BraceKind::Struct)
+    ));
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
+// Remove nested `define` only in an unambiguous, plain-word declaration
+// prefix. Comments and malformed prefixes are preserved for diagnostics.
+fn canonicalize_nested_define_member(line: &str, initial: LexState) -> String {
+    let words = visible_word_spans(line, initial);
+    if words.len() < 3 {
+        return line.to_owned();
+    }
+    let word = |i: usize| &line[words[i].start..words[i].end];
+    let define_index = if word(0) == "define" {
+        0
+    } else if matches!(word(0), "pub" | "private") && word(1) == "define" {
+        1
+    } else {
+        return line.to_owned();
+    };
+    let mut head = define_index + 1;
+    while head < words.len() && matches!(word(head),
+        "pub" | "private" | "static" | "async" | "suspends"
+            | "suspend" | "abstract" | "pure" | "nlex" | "structural"
+    ) {
+        head += 1;
+    }
+    if head >= words.len()
+        || !matches!(word(head), "fnc" | "routine" | "class" | "actor"
+            | "isoactor" | "module" | "interface" | "contract"
+            | "trait" | "type" | "mtd" | "method" | "constructor"
+            | "let" | "val" | "const")
+        || !plain_word_prefix(line, &words[..=head])
+    {
+        return line.to_owned();
+    }
+    let define = words[define_index];
+    let mut normalized = String::with_capacity(line.len());
+    normalized.push_str(line[..define.start].trim_end());
+    if define_index == 1 {
+        normalized.push(' ');
+    }
+    normalized.push_str(line[define.end..].trim_start());
+    normalized
 }
 
 // Only class/actor immediate members can use implicit receivers. Nested
@@ -1957,6 +2025,10 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         return None;
     }
     let name = &words[prefix_len];
+    // Preserve explicit `fnc new` for a potential user-defined Newable factory.
+    if &line[name.start..name.end] == "new" {
+        return None;
+    }
     let suffix = line[name.end..].trim_start();
     if !(suffix.starts_with('(') || suffix.starts_with('<')) {
         return None;
@@ -2261,6 +2333,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
                 | "structural"
                 | "abstract"
                 | "quantum"
+                | "define"
                 | "fnc"
                 | "routine"
         )
@@ -2292,6 +2365,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
         }
     }
 
+    let mut saw_define = false;
     let mut visibility: Option<&str> = None;
     let mut is_static = false;
     let mut is_async = false;
@@ -2308,6 +2382,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     for span in prefix {
         let word = &line[span.start..span.end];
         let duplicate = match word {
+            "define" => set_once(&mut saw_define),
             "pub" | "private" => {
                 if visibility.is_some() {
                     true
@@ -2355,6 +2430,9 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     }
 
     let mut canonical = Vec::new();
+    if saw_define {
+        canonical.push("define");
+    }
     if let Some(visibility) = visibility {
         canonical.push(visibility);
     }
