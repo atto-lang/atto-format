@@ -2538,12 +2538,29 @@ fn define_kind(line: &str) -> Option<DefineKind> {
         };
     }
 
-    let mut words = line.split_whitespace();
-    if words.next()? != "define" {
-        return None;
+    let header: Vec<&str> = line.split_whitespace().collect();
+    let has_define = header.first() == Some(&"define");
+    if !has_define {
+        // Nested types omit `define` canonically, including end-delimited
+        // class/interface/trait/contract bodies. Do not interpret an arbitrary
+        // use of `class` or `module` in an expression as a declaration.
+        let mut found_kind = None;
+        for word in &header {
+            match *word {
+                "pub" | "private" | "abstract" | "shared" | "untrusted" | "static" => {}
+                "class" => { found_kind = Some(DefineKind::Class); break; }
+                "module" => { found_kind = Some(DefineKind::Module); break; }
+                "interface" => { found_kind = Some(DefineKind::Interface); break; }
+                "contract" => { found_kind = Some(DefineKind::Contract); break; }
+                "trait" => { found_kind = Some(DefineKind::Trait); break; }
+                "struct" => { found_kind = Some(DefineKind::Struct); break; }
+                _ => return None,
+            }
+        }
+        return if header.last() == Some(&"as") { found_kind } else { None };
     }
 
-    for word in words {
+    for word in header.iter().skip(1).copied() {
         match word {
             "pub" | "private" | "abstract" | "shared" | "untrusted" | "static" => continue,
             "module" => return Some(DefineKind::Module),
