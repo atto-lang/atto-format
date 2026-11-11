@@ -31,6 +31,11 @@ MAX_TRACKED = 20000
 MAX_TRACKED_BYTES = 64 * 1024 * 1024
 
 
+class FormatterRejected(ValueError):
+    """The formatter returned the documented syntax/format rejection code 1."""
+
+
+
 def parse_named(spec):
     name, sep, value = spec.partition("=")
     if not sep or name not in REPOS or not value:
@@ -160,16 +165,55 @@ def inspect_repo(name, repo, sha, stats=None):
         stats["tracked_bytes_verified"] = total_bytes
     return source_paths
 
+def read_bounded_regular_source(source):
+    """Read without following a leaf or parent symlink, bounded after formatting.
+
+    Source checkouts have already been resolved and SHA-verified. Using
+    openat-style dirfds protects the final read from path substitution
+    even when a formatter replaces a parent directory during execution.
+    """
+    if (os.name != "posix" or any(
+            not hasattr(os, value)
+            for value in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK"))):
+        raise ValueError("secure source reads require POSIX nofollow dirfd support")
+    parts = Path(os.path.abspath(source)).parts[1:]
+    if not parts:
+        raise ValueError("missing source filename")
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    current = os.open("/", dir_flags)
+    try:
+        for component in parts[:-1]:
+            following = os.open(component, dir_flags, dir_fd=current)
+            os.close(current)
+            current = following
+        fd = os.open(parts[-1], file_flags, dir_fd=current)
+    finally:
+        os.close(current)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("source replaced by a nonregular file")
+        if info.st_size > MAX_BYTES:
+            raise ValueError("source exceeded file size bound")
+        data = stream.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise ValueError("source exceeded byte bound during read")
+    return data
+
+
 def format_once(formatter, source, timeout):
     status, code, stdout, stderr = run_process(
         [str(formatter), "--stdout", str(source)], timeout,
         stdout_limit=2 * MAX_BYTES,
     )
-    if status != "exited" or code != 0:
-        raise ValueError(
-            f"formatter {status} / exit {code}: "
-            f"{stderr[:250].decode('utf-8', errors='replace')}"
-        )
+    diagnostic = stderr[:250].decode("utf-8", errors="replace")
+    if status != "exited":
+        raise ValueError(f"formatter execution failure: {status}: {diagnostic}")
+    if code == 1:
+        raise FormatterRejected(f"formatter rejected source (exit 1): {diagnostic}")
+    if code != 0:
+        raise ValueError(f"formatter tool failure (exit {code}): {diagnostic}")
     try:
         stdout.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -180,14 +224,7 @@ def format_once(formatter, source, timeout):
 def audit_source(formatter, source, suffix, timeout):
     # Bound the read even if a checked source grows after the tracked-file
     # inventory. O_NOFOLLOW also closes a leaf-symlink substitution race.
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(source, flags), "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise ValueError("source is not a regular file")
-        before = stream.read(MAX_BYTES + 1)
-    if len(before) > MAX_BYTES:
-        raise ValueError("source exceeded byte bound during read")
+    before = read_bounded_regular_source(source)
     try:
         before.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -195,12 +232,17 @@ def audit_source(formatter, source, suffix, timeout):
     original_sha256 = hashlib.sha256(before).hexdigest()
     with tempfile.TemporaryDirectory(prefix="oresfmt-tip-") as tmp:
         once = format_once(formatter, source, timeout)
+        if len(once) > MAX_BYTES:
+            raise ValueError("formatter output exceeded bounded source size")
         again_path = Path(tmp) / ("again" + suffix)
         again_path.write_bytes(once)
-        twice = format_once(formatter, again_path, timeout)
+        try:
+            twice = format_once(formatter, again_path, timeout)
+        except FormatterRejected as error:
+            raise ValueError("formatter rejected its own output on second pass") from error
     if once != twice:
         raise ValueError("formatter output is not idempotent")
-    if source.read_bytes() != before:
+    if read_bounded_regular_source(source) != before:
         raise ValueError("formatter mutated input despite --stdout")
     return {"changed": once != before, "sha256": original_sha256}
 
@@ -235,11 +277,11 @@ def main(argv=None):
     report = {"schema": "oresfmt-compiler-tip-v1", "ok": False,
               "scope": "read-only-formatting-and-idempotence-only",
               "formatter_sha256": formatter_digest.hexdigest(),
-              "repos": {}, "failures": []}
+              "repos": {}, "rejections": [], "failures": []}
     for name in REPOS:
         supplied_root = Path(repos[name])
         root = supplied_root.resolve()
-        stats = {"head": heads[name], "files": 0, "changed": 0, "unchanged": 0}
+        stats = {"head": heads[name], "files": 0, "changed": 0, "unchanged": 0, "rejected": 0, "format_errors": 0}
         report["repos"][name] = stats
         try:
             if supplied_root.is_symlink():
@@ -251,7 +293,21 @@ def main(argv=None):
                 try:
                     result = audit_source(formatter, source, rel.suffix, args.timeout)
                     stats["changed" if result["changed"] else "unchanged"] += 1
+                except FormatterRejected:
+                    # Do not infer from the filename that this is an expected
+                    # compiler-negative fixture. A real compiler baseline is
+                    # needed before source rejection can be triaged.
+                    stats["rejected"] += 1
+                    report["rejections"].append({
+                        "backend": name,
+                        "path": rel.as_posix(),
+                        "status": "requires-compiler-baseline",
+                    })
+                    report["failures"].append(
+                        f"{name}/{rel}: formatter rejected source; compiler baseline unverified"
+                    )
                 except (OSError, ValueError) as error:
+                    stats["format_errors"] += 1
                     report["failures"].append(f"{name}/{rel}: {error}")
             # A formatter processing a later file can alter an earlier one,
             # even with assume-unchanged set. Recheck every immutable blob
@@ -281,7 +337,8 @@ def main(argv=None):
                                encoding="utf-8")
     for name, stats in report["repos"].items():
         print(f"{name} @{stats['head'][:12]}: {stats['files']} tracked sources, "
-              f"{stats['changed']} changed, {stats['unchanged']} already canonical")
+              f"{stats['changed']} changed, {stats['unchanged']} already canonical, "
+              f"{stats['rejected']} rejected, {stats['format_errors']} tool/audit failures")
     for failure in report["failures"][:30]:
         print(f"FAIL: {failure}", file=sys.stderr)
     if len(report["failures"]) > 30:

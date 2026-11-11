@@ -62,6 +62,23 @@ source files, or if a source is rejected, non-idempotent or modified.
 The JSON receipt contains commit IDs, file counts and failures, not source
 bytes. Explicit source paths are never sent over the network by the auditor.
 
+## Compiler-negative fixture handling
+
+The five pinned backend trees include intentional compiler-rejection fixtures.
+A filename containing `negative` or `reject` is **not** proof that a formatter
+should reject that file: many type-checking/runtime rejection fixtures still
+have syntactically valid source. Therefore the tip audit never exempts files
+based on path spelling. It records formatter exit-1 cases separately in
+`rejections[]` with status `requires-compiler-baseline`, and still fails
+the release gate until real compiler acceptance evidence is available.
+Formatter exit 2 (tool/usage/filesystem error) is not a compiler rejection.
+Failure to format the formatter's own first-pass output is an idempotence error.
+
+Physical post-format source reads use bounded POSIX nofollow directory
+descriptors; a formatter swapping a leaf or parent directory for a symlink
+cannot trick the audit into reading through it. The gate fails closed if that
+secure filesystem interface is unavailable.
+
 ## What this gate does *not* prove
 
 A passing formatting/idempotence audit **does not show that a compiler accepts

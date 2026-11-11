@@ -259,6 +259,54 @@ class TipAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsafe Git tree entry|linked source component"):
             audit.inspect_repo(name, root, head)
 
+    def test_formatter_exit_one_is_rejection_but_exit_two_is_tool_error(self):
+        root, _ = self.init_repo(audit.REPOS[0])
+        source = root / "sample.atto"
+        self.write_formatter("#!/usr/bin/env python3\nimport sys\nsys.exit(1)\n")
+        with self.assertRaises(audit.FormatterRejected):
+            audit.audit_source(self.formatter, source, ".atto", 10)
+        self.write_formatter("#!/usr/bin/env python3\nimport sys\nsys.exit(2)\n")
+        with self.assertRaisesRegex(ValueError, "formatter tool failure"):
+            audit.audit_source(self.formatter, source, ".atto", 10)
+
+    def test_formatter_rejection_receipt_cannot_pass_without_compiler_evidence(self):
+        roots = [self.init_repo(name) for name in audit.REPOS]
+        self.write_formatter(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "sys.exit(1 if 'oreslang-source.java' in sys.argv[2] else 0)\n"
+        )
+        args = ["--formatter", str(self.formatter)]
+        for name, (root, head) in zip(audit.REPOS, roots):
+            args.extend(["--repo", f"{name}={root}", "--head", f"{name}={head}"])
+        report = self.root / "reject-report.json"
+        self.assertEqual(audit.main(args + ["--report", str(report)]), 1)
+        data = json.loads(report.read_text(encoding="utf-8"))
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["repos"][audit.REPOS[0]]["rejected"], 1)
+        self.assertEqual(data["repos"][audit.REPOS[0]]["format_errors"], 0)
+        self.assertEqual(len(data["rejections"]), 1)
+        self.assertEqual(data["rejections"][0]["status"], "requires-compiler-baseline")
+
+    @unittest.skipUnless(os.name == "posix", "secure nofollow read requires POSIX")
+    def test_formatter_cannot_hide_leaf_symlink_in_post_format_read(self):
+        root, _ = self.init_repo(audit.REPOS[0])
+        target = self.root / "out-of-repository.atto"
+        target.write_text("outside\n", encoding="utf-8")
+        self.write_formatter(
+            "#!/usr/bin/env python3\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            "p = Path(sys.argv[2])\n"
+            "data = p.read_bytes()\n"
+            "if p.name == 'sample.atto':\n"
+            " p.unlink()\n"
+            f" p.symlink_to({str(target)!r})\n"
+            "sys.stdout.buffer.write(data)\n"
+        )
+        with self.assertRaises(OSError):
+            audit.audit_source(self.formatter, root / "sample.atto", ".atto", 10)
+
     def test_non_utf8_source_fails_closed(self):
         root, _ = self.init_repo(audit.REPOS[0])
         source = root / "sample.atto"
