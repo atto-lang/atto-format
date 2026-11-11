@@ -68,3 +68,22 @@ return ~tuple("Tuple[int, int]", "~tuple(value)");
     assert!(formatted.contains("\"~tuple(value)\""), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn explicit_array_and_tuple_constructors_keep_their_family_tokens() {
+    let source = r#"fnc array_old(): Array[int] {
+return arr[40, 2];
+}
+fnc array_new(): Array[int] {
+return ~array(40, 2);
+}
+fnc tuple_new(): Tuple[int, int] {
+return ~tuple(40, 2);
+}
+"#;
+    let formatted = format_source(source).expect("array/tuple literals should format");
+    for fragment in ["arr[40, 2]", "~array(40, 2)", "~tuple(40, 2)"] {
+        assert!(formatted.contains(fragment), "changed aggregate family: {formatted}");
+    }
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
