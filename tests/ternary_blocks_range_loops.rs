@@ -1,7 +1,7 @@
 use oreslang_format::{format_source, is_formatted};
 
-// The formatter must never insert a semicolon after the final expression in a
-// value block: doing so changes a value-producing expression into an error.
+// The formatter must never insert a semicolon after a ternary arm's implicit
+// result expression; ordinary standalone brace blocks do not produce values.
 #[test]
 fn preserves_ternary_block_values_and_range_spelling() {
     let source = r#"pub routine main(): void {
@@ -32,12 +32,14 @@ fn preserves_ternary_block_values_and_range_spelling() {
 }
 
 #[test]
-fn preserves_block_expression_tail_and_literal_comments() {
+fn preserves_ternary_arm_tail_and_literal_comments() {
     let source = r#"pub routine main(): void {
-  val result: int = {
+  val result: int = true ? {
     val left = 20;
     val right = 22;
     left + right
+  } : {
+    return 0;
   };
   // A comment with ? { } : { } and 1..=80 is not executable source.
   stdio.stdout.write("literal ? { } : { } 1..1024");
