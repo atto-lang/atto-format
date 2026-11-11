@@ -44,29 +44,25 @@ fn does_not_rewrite_unsupported_operators_into_valid_attolang_operators() {
         "7 neqvalue 8",
     ] {
         let input = format!("fnc check() -> bool {{\n  return {expr};\n}}\n");
-        match format_source(&input) {
-            Ok(output) => {
-                // Rejecting invalid syntax is also safe, but if this formatter
-                // passes it through, it must not delete or rewrite a byte of
-                // the unsupported operator expression.
-                assert!(
-                    output.contains(&format!("return {expr};")),
-                    "{expr}: modified unsupported expression: {output}"
-                );
-                assert!(
-                    !output.contains("return 7 eq 7;"),
-                    "{expr}: rewritten to eq"
-                );
-                assert!(
-                    !output.contains("return 7 neq 8;"),
-                    "{expr}: rewritten to neq"
-                );
-                assert!(
-                    !output.contains("return 7 !eq 8;"),
-                    "{expr}: rewritten to !eq"
-                );
-            }
-            Err(_) => {} // Fail-closed formatter rejection is permitted.
+        // Rejecting unsupported syntax is safe. If the formatter accepts
+        // it, it must not rewrite an invalid operator into a valid one.
+        if let Ok(output) = format_source(&input) {
+            assert!(
+                output.contains(&format!("return {expr};")),
+                "{expr}: modified unsupported expression: {output}"
+            );
+            assert!(
+                !output.contains("return 7 eq 7;"),
+                "{expr}: rewritten to eq"
+            );
+            assert!(
+                !output.contains("return 7 neq 8;"),
+                "{expr}: rewritten to neq"
+            );
+            assert!(
+                !output.contains("return 7 !eq 8;"),
+                "{expr}: rewritten to !eq"
+            );
         }
     }
 }
