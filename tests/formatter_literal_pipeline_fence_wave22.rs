@@ -36,7 +36,8 @@ return 23;
         "// if ready; then return 19; fi",
         "// critical-read actor select over end",
         "// if ready; then return 23; fi",
-        "return 19;", "return 23;"
+        "return 19;",
+        "return 23;",
     ] {
         assert!(output.contains(marker), "lost lexical marker: {marker}");
     }
@@ -52,6 +53,9 @@ fn unrelated_numeric_literals_remain_stable_across_multiple_functions() {
         );
         let output = fixed_point(&source);
         assert!(output.contains(&format!("return {left};")), "index {index}");
-        assert!(output.contains(&format!("return {right};")), "index {index}");
+        assert!(
+            output.contains(&format!("return {right};")),
+            "index {index}"
+        );
     }
 }
