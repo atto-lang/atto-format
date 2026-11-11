@@ -102,7 +102,10 @@ fn stdout_refuses_symlink_file_and_symlink_parent() {
 
     for (path, diagnostic) in [
         ("alias.atto", "refusing explicit symlink input"),
-        ("linked/nested.atto", "refusing path through symlinked directory"),
+        (
+            "linked/nested.atto",
+            "refusing path through symlinked directory",
+        ),
     ] {
         let output = work.run(&["--stdout", path]);
         assert_eq!(output.status.code(), Some(2), "{path}: {output:?}");
