@@ -41,7 +41,7 @@ OTHER:
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
-    only *.ores files are selected. '-' reads stdin and writes stdout.
+    only *.atto and *.ores files are selected. '-' reads stdin and writes stdout.
 
 There are intentionally no general style flags or configuration files.
 "#;
@@ -145,7 +145,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
     if paths.is_empty() {
         return Err(
-            "no input paths; pass one or more .ores files/directories, or '-' for stdin".into(),
+            "no input paths; pass one or more .atto/.ores files/directories, or '-' for stdin".into(),
         );
     }
 
@@ -195,7 +195,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         if paths.len() != 1 || !paths[0].is_file() {
             return Err("--stdout requires exactly one filesystem file".into());
         }
-        let input = fs::read_to_string(&paths[0])?;
+        // Reuse the normal path verifier: --stdout must not bypass the
+        // extension and symlink rules used by --check and --write.
+        let verified = collect_files(&paths)?;
+        let input = fs::read_to_string(&verified[0])?;
         let formatted = if insert_mtd {
             format_source_with_mtd(&input)?
         } else {
@@ -704,6 +707,11 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, Box<dyn std::error:
     Ok(files)
 }
 
+fn is_atto_source(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext == "atto" || ext == "ores")
+}
+
 fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|err| format!("cannot inspect {}: {err}", path.display()))?;
@@ -717,6 +725,13 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
     }
     reject_symlinked_ancestors(path)?;
     if metadata.is_file() {
+        if !is_atto_source(path) {
+            return Err(format!(
+                "unsupported source extension: {} (expected .atto or .ores)",
+                path.display()
+            )
+            .into());
+        }
         out.push(path.to_path_buf());
         return Ok(());
     }
@@ -743,7 +758,7 @@ fn collect_path(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn std::
         }
         if file_type.is_dir() {
             collect_path(&child, out)?;
-        } else if file_type.is_file() && child.extension().is_some_and(|ext| ext == "atto" || ext == "ores") {
+        } else if file_type.is_file() && is_atto_source(&child) {
             out.push(child);
         }
     }
