@@ -268,7 +268,8 @@ oresfmt --check -- -generated.ores
 ```
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
-alias. Directories are walked recursively and only `.ores` files are selected.
+alias. Directories are walked recursively and both canonical `.atto` and legacy
+`.ores` source files are selected.
 Filesystem arguments are parsed as native OS strings rather than forced through
 UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
 
