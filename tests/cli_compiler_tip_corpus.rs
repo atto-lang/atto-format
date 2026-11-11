@@ -75,7 +75,9 @@ fn recursive_check_reports_every_unsupported_source_and_every_noncanonical_file(
         }
         for name in ["three.atto", "four.ores"] {
             assert!(
-                stderr.lines().any(|line| line.contains("rejected") && line.contains(name)),
+                stderr
+                    .lines()
+                    .any(|line| line.contains("rejected") && line.contains(name)),
                 "missing source rejection for {name}: {stderr}"
             );
         }
@@ -92,7 +94,10 @@ fn recursive_check_reports_every_unsupported_source_and_every_noncanonical_file(
 fn check_clean_atto_and_ores_tree_returns_zero() {
     let corpus = Corpus::new("mixed-clean");
     corpus.add("src/one.atto", "fnc answer() -> int {\n  return 42;\n}\n");
-    corpus.add("src/sub/two.ores", "fnc answer() -> int {\n  return 42;\n}\n");
+    corpus.add(
+        "src/sub/two.ores",
+        "fnc answer() -> int {\n  return 42;\n}\n",
+    );
     let output = corpus.run(&["--check", "src"]);
     assert_eq!(
         output.status.code(),
