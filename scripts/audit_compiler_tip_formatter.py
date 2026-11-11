@@ -59,6 +59,29 @@ def inspect_repo(name, repo, sha):
     paths = git(repo, "ls-files", "-z").split(b"\0")
     if len(paths) > MAX_TRACKED + 1:
         raise ValueError(f"{name}: tracked-file limit exceeded")
+    # Git status alone can be bypassed with assume-unchanged or
+    # skip-worktree index flags. Compare physical compiler source bytes
+    # against immutable HEAD blob hashes, without Git clean/smudge filters.
+    object_format = git(repo, "rev-parse", "--show-object-format=storage").decode("ascii").strip()
+    if object_format not in ("sha1", "sha256"):
+        raise ValueError(f"{name}: unsupported Git object hash: {object_format}")
+    expected_blobs = {}
+    for entry in git(repo, "ls-tree", "-r", "-z", "HEAD").split(b"\0"):
+        if not entry:
+            continue
+        metadata, separator, raw_path = entry.partition(b"\t")
+        parts = metadata.split()
+        if not separator or len(parts) != 3:
+            raise ValueError(f"{name}: malformed immutable Git tree entry")
+        mode, kind, blob_sha = parts
+        try:
+            rel = Path(raw_path.decode("utf-8"))
+        except UnicodeDecodeError as error:
+            raise ValueError(f"{name}: non-UTF8 Git tree path") from error
+        if rel.suffix in SUFFIXES:
+            if kind != b"blob" or mode not in (b"100644", b"100755"):
+                raise ValueError(f"{name}: unsafe Git tree entry: {rel}")
+            expected_blobs[rel] = blob_sha.decode("ascii")
     source_paths = []
     for raw in paths:
         if not raw:
@@ -80,7 +103,22 @@ def inspect_repo(name, repo, sha):
         info = source.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
             raise ValueError(f"{name}: unsafe or oversized source: {rel}")
+        if rel not in expected_blobs:
+            raise ValueError(f"{name}: source absent from immutable HEAD tree: {rel}")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(source, flags), "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError(f"{name}: source replaced by special file: {rel}")
+            physical = stream.read(MAX_BYTES + 1)
+        if len(physical) > MAX_BYTES:
+            raise ValueError(f"{name}: source grew past bounded read: {rel}")
+        payload = b"blob " + str(len(physical)).encode("ascii") + b"\0" + physical
+        actual_blob_sha = hashlib.new(object_format, payload).hexdigest()
+        if actual_blob_sha != expected_blobs[rel]:
+            raise ValueError(f"{name}: physical Git blob mismatch: {rel}")
         source_paths.append((rel, source))
+    if {rel for rel, _ in source_paths} != set(expected_blobs):
+        raise ValueError(f"{name}: index source list does not match immutable HEAD tree")
     if not source_paths:
         raise ValueError(f"{name}: no tracked .atto/.ores source at {sha}")
     return source_paths
@@ -153,9 +191,14 @@ def main(argv=None):
     if not formatter.is_file() or not os.access(formatter, os.X_OK):
         parser.error("formatter must be an existing executable")
 
+    formatter_digest = hashlib.sha256()
+    with formatter.open("rb") as binary:
+        for chunk in iter(lambda: binary.read(1024 * 1024), b""):
+            formatter_digest.update(chunk)
     report = {"schema": "oresfmt-compiler-tip-v1", "ok": False,
-              "scope": "read-only-formatting-and-idempotence-only", "repos": {},
-              "failures": []}
+              "scope": "read-only-formatting-and-idempotence-only",
+              "formatter_sha256": formatter_digest.hexdigest(),
+              "repos": {}, "failures": []}
     for name in REPOS:
         supplied_root = Path(repos[name])
         root = supplied_root.resolve()
@@ -165,6 +208,7 @@ def main(argv=None):
             if supplied_root.is_symlink():
                 raise ValueError("symlinked worktree argument")
             files = inspect_repo(name, root, heads[name])
+            stats["tree"] = git(root, "rev-parse", "HEAD^{tree}").decode("ascii").strip()
             for rel, source in files:
                 stats["files"] += 1
                 try:
