@@ -6,7 +6,9 @@ independently checked-out compiler trees, rejects stale/dirty repositories,
 checks `oresfmt --stdout` twice for byte-level idempotence, and confirms
 that **all tracked compiler-repository files**, including manifests,
 configuration and imported resources, remain unchanged. The inventory is
-bounded to 20,000 tracked files, 8 MiB per file and 64 MiB per repository. It hashes
+bounded to 20,000 tracked files, 8 MiB per file and 64 MiB per repository. Any untracked or
+ignored worktree files fail admission; the receipt records physically
+verified tracked-file counts and total tracked bytes by backend. It hashes
 physical source bytes against immutable Git `HEAD` blob IDs, so `git status`
 shortcuts such as `assume-unchanged` or `skip-worktree` cannot forge a clean
 source checkout. The JSON receipt records each compiler Git tree and a

@@ -112,6 +112,24 @@ class TipAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
             audit.inspect_repo(name, root, head)
 
+    def test_untracked_and_ignored_inputs_fail_closed(self):
+        name = audit.REPOS[0]
+        root, head = self.init_repo(name)
+        added = root / "untracked.toml"
+        added.write_text("untracked config", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "untracked worktree files"):
+            audit.inspect_repo(name, root, head)
+        added.unlink()
+        (root / ".gitignore").write_text("hidden-config.toml\n", encoding="utf-8")
+        git(root, "add", ".gitignore")
+        git(root, "commit", "-qm", "ignore sensitive config")
+        head = git(root, "rev-parse", "HEAD")
+        hidden = root / "hidden-config.toml"
+        hidden.write_text("hidden config", encoding="utf-8")
+        self.assertEqual(git(root, "status", "--porcelain=v1", "--untracked-files=no"), "")
+        with self.assertRaisesRegex(ValueError, "ignored worktree files"):
+            audit.inspect_repo(name, root, head)
+
     def test_non_source_manifest_assume_unchanged_is_verified(self):
         name = audit.REPOS[0]
         root, head = self.init_repo(name)
@@ -182,6 +200,12 @@ class TipAuditTests(unittest.TestCase):
         self.assertTrue(receipt["ok"])
         self.assertEqual(len(receipt["formatter_sha256"]), 64)
         self.assertEqual(set(receipt["repos"]), set(audit.REPOS))
+        self.assertEqual(
+            sum(item["tracked_files_verified"] for item in receipt["repos"].values()), 5
+        )
+        self.assertGreater(
+            sum(item["tracked_bytes_verified"] for item in receipt["repos"].values()), 0
+        )
         for item in receipt["repos"].values():
             self.assertEqual(item["files"], 1)
             self.assertEqual(item["unchanged"], 1)

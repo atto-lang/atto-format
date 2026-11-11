@@ -61,7 +61,7 @@ def git(repo, *args):
     return result.stdout
 
 
-def inspect_repo(name, repo, sha):
+def inspect_repo(name, repo, sha, stats=None):
     if repo.is_symlink() or not repo.is_dir():
         raise ValueError(f"{name}: missing or symlinked worktree: {repo}")
     expected_root = repo.resolve(strict=True)
@@ -73,6 +73,12 @@ def inspect_repo(name, repo, sha):
         raise ValueError(f"{name}: stale checkout: HEAD {actual}, expected {sha}")
     if git(repo, "status", "--porcelain=v1", "--untracked-files=no"):
         raise ValueError(f"{name}: tracked worktree is dirty")
+    # Untracked and ignored files can change package discovery or compiler
+    # inputs without appearing in the checked immutable Git tree.
+    if git(repo, "ls-files", "--others", "--exclude-standard", "-z"):
+        raise ValueError(f"{name}: untracked worktree files are not admitted")
+    if git(repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"):
+        raise ValueError(f"{name}: ignored worktree files are not admitted")
 
     paths = [raw for raw in git(repo, "ls-files", "-z").split(b"\0") if raw]
     if len(paths) > MAX_TRACKED:
@@ -149,6 +155,9 @@ def inspect_repo(name, repo, sha):
         raise ValueError(f"{name}: index file list does not match immutable HEAD tree")
     if not source_paths:
         raise ValueError(f"{name}: no tracked .atto/.ores source at {sha}")
+    if stats is not None:
+        stats["tracked_files_verified"] = len(seen)
+        stats["tracked_bytes_verified"] = total_bytes
     return source_paths
 
 def format_once(formatter, source, timeout):
@@ -235,7 +244,7 @@ def main(argv=None):
         try:
             if supplied_root.is_symlink():
                 raise ValueError("symlinked worktree argument")
-            files = inspect_repo(name, root, heads[name])
+            files = inspect_repo(name, root, heads[name], stats)
             stats["tree"] = git(root, "rev-parse", "HEAD^{tree}").decode("ascii").strip()
             for rel, source in files:
                 stats["files"] += 1
