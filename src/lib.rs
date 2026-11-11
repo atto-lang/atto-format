@@ -9,9 +9,9 @@ mod inline_blocks;
 mod keyword_blocks;
 mod match_switch;
 mod select;
-mod unused_imports;
 #[cfg(target_arch = "wasm32")]
 mod browser_wasm;
+mod unused_imports;
 
 const INDENT: &str = "  ";
 

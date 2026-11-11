@@ -399,6 +399,16 @@ scripts/check_formatter_acceptance_delta.py \
 This is parse/typecheck admission evidence for the exact compiler builds
 used, not guest execution parity and not semantic AST equivalence.
 
+## SHA-pinned compiler-tip CLI audit
+
+The read-only `scripts/audit_compiler_tip_formatter.py` checks every Git-tracked
+`.atto` and `.ores` file across five SHA-pinned compiler worktrees for
+successful formatting, byte-for-byte idempotence and no source mutation.
+`oresfmt --check` reports all syntax rejections on mixed-source trees.
+See [the compiler-tip audit contract](docs/COMPILER_TIP_FORMAT_AUDIT.md).
+**This does not certify compiler admission, AST equivalence or guest execution.**
+The real-compiler acceptance differential above is a separate mandatory gate.
+
 ## Why no configuration?
 
 Oreslang should have one mechanically enforceable source style. This avoids
