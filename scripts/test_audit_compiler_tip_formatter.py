@@ -76,7 +76,7 @@ class TipAuditTests(unittest.TestCase):
         name = audit.REPOS[0]
         root, good_head = self.init_repo(name)
         source = root / "sample.atto"
-        forged_source = "fnc forged() -> int {\\n  return 0;\\n}\\n"
+        forged_source = "fnc forged() -> int {\n  return 0;\n}\n"
         source.write_text(forged_source, encoding="utf-8")
         git(root, "add", "sample.atto")
         git(root, "commit", "-qm", "evil alternate tree")
