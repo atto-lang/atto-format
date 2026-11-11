@@ -19,7 +19,7 @@ Findings (each makes the run fail):
 Reviewed findings (for example a documented migration that repairs source a
 compiler rejected) can be listed in a --triaged file, one per line:
 `CASE<TAB>FINDING<TAB>reason`. Triaged findings are reported but do not fail
-the run; a triaged entry that no longer occurs is reported as stale. Triage
+the run; a triaged entry that no longer occurs blocks the gate as stale evidence. Triage
 never suppresses harness errors.
 
 Acceptance means exit status 0. A compiler timeout or a missing tool is a
@@ -256,9 +256,12 @@ def main(argv=None):
             if not line.strip() or line.startswith("#"):
                 continue
             parts = line.split("\t")
-            if len(parts) < 3 or not parts[2].strip():
+            if len(parts) != 3 or not all(part.strip() for part in parts):
                 parser.error(f"{args.triaged}:{number}: expected CASE<TAB>FINDING<TAB>reason")
-            triaged[(parts[0], parts[1])] = parts[2].strip()
+            key = (parts[0], parts[1])
+            if key in triaged:
+                parser.error(f"{args.triaged}:{number}: duplicate triage entry: {parts[0]} / {parts[1]}")
+            triaged[key] = parts[2].strip()
 
     formatter = shlex.split(args.formatter)
     if not formatter:
@@ -495,7 +498,8 @@ def main(argv=None):
     for case, error in errors:
         print(f"HARNESS-ERROR {case}: {error}", file=sys.stderr)
     print(json.dumps(summary))
-    if errors:
+    # Stale exemptions are invalid release evidence; require a fresh review.
+    if errors or stale:
         return 2
     return 1 if findings else 0
 

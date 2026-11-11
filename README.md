@@ -348,8 +348,8 @@ the formatter rejects (`rejects-valid`), and on non-idempotent output. A
 missing compiler or a timeout is a harness error, never a rejection. Reviewed
 findings, such as documented migrations that repair source a compiler
 rejected, go in a `--triaged` file (`tests/acceptance_delta_triage.tsv` lists
-those from the wide audit); a triaged entry that no longer occurs is reported
-as stale.
+those from the wide audit); a triaged entry that no longer occurs is a blocking
+stale-evidence error.
 
 The harness snapshots all bounded, regular corpus inputs into both comparison
 trees, including `.ores.pkg.toml`, non-source import dependencies and supporting
