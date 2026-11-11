@@ -111,5 +111,12 @@ jobs:
           # Match the canonical browser publishing build's size/ABI flags.
           RUSTFLAGS: '-C opt-level=z -C panic=abort'
         run: cargo build --release --lib --target wasm32-unknown-unknown --offline
+      - name: Install pinned Node.js runtime for Wasm API regressions
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          check-latest: false
+      - name: Verify Node.js is available
+        run: node --version
       - name: Execute formatter Wasm API regressions
         run: node tests/browser-wasm.mjs
