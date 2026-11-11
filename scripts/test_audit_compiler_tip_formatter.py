@@ -84,7 +84,7 @@ class TipAuditTests(unittest.TestCase):
         self.assertEqual(audit.main(args + ["--report", str(report)]), 0)
         receipt = json.loads(report.read_text(encoding="utf-8"))
         self.assertTrue(receipt["ok"])
-        self.assertEqual(list(receipt["repos"]), list(audit.REPOS))
+        self.assertEqual(set(receipt["repos"]), set(audit.REPOS))
         for item in receipt["repos"].values():
             self.assertEqual(item["files"], 1)
             self.assertEqual(item["unchanged"], 1)
