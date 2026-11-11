@@ -36,12 +36,52 @@ end
 
 #[test]
 fn does_not_rewrite_unsupported_operators_into_valid_attolang_operators() {
-    for expr in ["7 == 7", "7 != 8", "7 =:= 7"] {
+    for expr in ["7 == 7", "7 != 8", "7 =:= 7", "7 ! eq 8", "7 !eqvalue 8", "7 neqvalue 8"] {
         let input = format!("fnc check() -> bool as\n  return {expr};\nend\n");
-        if let Ok(output) = format_source(&input) {
-            assert!(!output.contains("return 7 eq 7;"), "{expr}: rewritten to eq");
-            assert!(!output.contains("return 7 neq 8;"), "{expr}: rewritten to neq");
-            assert!(!output.contains("return 7 !eq 8;"), "{expr}: rewritten to !eq");
+        match format_source(&input) {
+            Ok(output) => {
+                // Rejecting invalid syntax is also safe, but if this formatter
+                // passes it through, it must not delete or rewrite a byte of
+                // the unsupported operator expression.
+                assert!(output.contains(&format!("return {expr};")), "{expr}: modified unsupported expression: {output}");
+                assert!(!output.contains("return 7 eq 7;"), "{expr}: rewritten to eq");
+                assert!(!output.contains("return 7 neq 8;"), "{expr}: rewritten to neq");
+                assert!(!output.contains("return 7 !eq 8;"), "{expr}: rewritten to !eq");
+            }
+            Err(_) => {} // Fail-closed formatter rejection is permitted.
         }
     }
+}
+
+#[test]
+fn operator_keywords_are_not_substrings_of_longer_identifiers() {
+    let src = r#"fnc check() -> bool as
+  val eq_value = 7;
+  val unequal_value = 8;
+  // !eq is a prospective atomic binary token, not unary ! followed by eq
+  return eq_value neq unequal_value;
+end
+"#;
+    let once = format_source(src).expect("ordinary identifier spellings");
+    assert!(once.contains("eq_value"), "{once}");
+    assert!(once.contains("unequal_value"), "{once}");
+    assert!(once.contains("return eq_value neq unequal_value;"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
+}
+
+#[test]
+fn no_operator_rewrites_inside_multiline_comments_and_strings() {
+    let src = r#"fnc check() -> bool as
+  /*
+  7 == 7; 7 != 8; 7 eq 7; 7 neq 8; 7 !eq 8;
+  */
+  val label = "7 eq 7; 7 neq 8; 7 !eq 8;";
+  return 7 !eq 8;
+end
+"#;
+    let once = format_source(src).expect("valid operator source");
+    assert!(once.contains("7 == 7; 7 != 8; 7 eq 7; 7 neq 8; 7 !eq 8;"), "{once}");
+    assert!(once.contains("\"7 eq 7; 7 neq 8; 7 !eq 8;\""), "{once}");
+    assert!(once.contains("return 7 !eq 8;"), "{once}");
+    assert_eq!(once, format_source(&once).unwrap());
 }
