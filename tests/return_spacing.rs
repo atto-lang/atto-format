@@ -17,7 +17,10 @@ fn only_collapses_horizontal_whitespace_after_visible_return_keyword() {
     let formatted = format_source(source).unwrap();
 
     assert!(formatted.contains("  return x;\n"), "{formatted}");
-    assert!(formatted.contains("  return_value   = 10;\n"), "{formatted}");
+    assert!(
+        formatted.contains("  return_value   = 10;\n"),
+        "{formatted}"
+    );
     assert!(formatted.contains("  return;\n"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -32,8 +35,14 @@ return   s; // leave   comment   payload
 "#;
     let formatted = format_source(source).unwrap();
 
-    assert!(formatted.contains("\"return   inside  string\""), "{formatted}");
-    assert!(formatted.contains("// return   inside comment"), "{formatted}");
+    assert!(
+        formatted.contains("\"return   inside  string\""),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("// return   inside comment"),
+        "{formatted}"
+    );
     assert!(
         formatted.contains("  return s; // leave   comment   payload"),
         "{formatted}"
@@ -52,7 +61,10 @@ return   1;
 "#;
     let formatted = format_source(source).unwrap();
 
-    assert!(formatted.contains("return   do_not_change_this_comment"), "{formatted}");
+    assert!(
+        formatted.contains("return   do_not_change_this_comment"),
+        "{formatted}"
+    );
     assert!(formatted.contains("  return 1;"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -66,7 +78,16 @@ fn assert_stable_format(source: &str, expected: &str) {
 
 #[test]
 fn table_driven_return_gaps_and_expression_forms() {
-    let gaps = [" ", "  ", "   ", "\t", "\t\t", " \t ", "\t  \t ", "          "];
+    let gaps = [
+        " ",
+        "  ",
+        "   ",
+        "\t",
+        "\t\t",
+        " \t ",
+        "\t  \t ",
+        "          ",
+    ];
     let expressions = [
         "0",
         "value",
@@ -202,7 +223,10 @@ return     6;
 "#;
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("return   preserved text"), "{formatted}");
-    assert!(formatted.contains("return   more preserved text"), "{formatted}");
+    assert!(
+        formatted.contains("return   more preserved text"),
+        "{formatted}"
+    );
     assert!(formatted.contains("  return 6;"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -238,7 +262,14 @@ fn already_canonical_return_is_a_fixed_point() {
 #[test]
 fn deterministic_horizontal_gap_stress_matrix() {
     // No external fuzz dependency: this exercises 384 reproducible cases.
-    let expressions = ["x", "-x", "x + 1", "f(x)", "items[3]", "\"return   payload\""];
+    let expressions = [
+        "x",
+        "-x",
+        "x + 1",
+        "f(x)",
+        "items[3]",
+        "\"return   payload\"",
+    ];
     let mut state = 0x9e3779b97f4a7c15_u64;
     for width in 1..=64 {
         let mut gap = String::with_capacity(width);
@@ -333,7 +364,13 @@ return    "path \\srv\\share return   🦀 東京";
 
 #[test]
 fn non_return_names_do_not_match_keyword_prefix() {
-    let identifiers = ["return_value", "returned", "returning", "returns", "return2"];
+    let identifiers = [
+        "return_value",
+        "returned",
+        "returning",
+        "returns",
+        "return2",
+    ];
     for identifier in identifiers {
         let source = format!("fnc demo() -> int {{\n{identifier}   = 42;\n}}\n");
         let expected = format!("fnc demo() -> int {{\n  {identifier}   = 42;\n}}\n");

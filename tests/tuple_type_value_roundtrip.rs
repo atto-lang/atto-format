@@ -18,7 +18,10 @@ return ~tuple(42, ~tuple("left", "right"));
     ] {
         assert!(formatted.contains(fragment), "lost {fragment}: {formatted}");
     }
-    assert!(!formatted.contains("~ tuple("), "split the value-constructor sigil: {formatted}");
+    assert!(
+        !formatted.contains("~ tuple("),
+        "split the value-constructor sigil: {formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
     assert!(is_formatted(&formatted).unwrap());
 }
@@ -51,9 +54,18 @@ return ~tuple(42, "value");
 }
 "#;
     let formatted = format_source(source).expect("legacy type spellings should round trip");
-    assert!(formatted.contains("Tuple<int, string>"), "erased nominal type syntax: {formatted}");
-    assert!(formatted.contains("Tuple[int, string]"), "erased intrinsic type syntax: {formatted}");
-    assert!(formatted.contains("~tuple(42, \"value\")"), "rewrote tuple value: {formatted}");
+    assert!(
+        formatted.contains("Tuple<int, string>"),
+        "erased nominal type syntax: {formatted}"
+    );
+    assert!(
+        formatted.contains("Tuple[int, string]"),
+        "erased intrinsic type syntax: {formatted}"
+    );
+    assert!(
+        formatted.contains("~tuple(42, \"value\")"),
+        "rewrote tuple value: {formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
@@ -83,7 +95,10 @@ return ~tuple(40, 2);
 "#;
     let formatted = format_source(source).expect("array/tuple literals should format");
     for fragment in ["arr[40, 2]", "~array(40, 2)", "~tuple(40, 2)"] {
-        assert!(formatted.contains(fragment), "changed aggregate family: {formatted}");
+        assert!(
+            formatted.contains(fragment),
+            "changed aggregate family: {formatted}"
+        );
     }
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
