@@ -6,6 +6,7 @@
 use std::fmt;
 
 mod inline_blocks;
+mod inequality;
 mod keyword_blocks;
 mod match_switch;
 mod select;
@@ -575,6 +576,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = inequality::canonicalize_neq_alias(&normalized);
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
     // Legacy/hand-formatted explicit callable headers may already split their
     // parameter list across physical lines. Reassemble only that narrow header
