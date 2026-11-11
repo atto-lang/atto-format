@@ -216,12 +216,26 @@ def main(argv=None):
                     stats["changed" if result["changed"] else "unchanged"] += 1
                 except (OSError, ValueError) as error:
                     report["failures"].append(f"{name}/{rel}: {error}")
-            if git(root, "rev-parse", "HEAD").decode("ascii").strip() != heads[name]:
-                report["failures"].append(f"{name}: HEAD changed during audit")
-            if git(root, "status", "--porcelain=v1", "--untracked-files=no"):
-                report["failures"].append(f"{name}: tracked worktree changed during audit")
+            # A formatter processing a later file can alter an earlier one,
+            # even with assume-unchanged set. Recheck every immutable blob
+            # after the final invocation; a preflight alone is insufficient.
+            verified = inspect_repo(name, root, heads[name])
+            if [rel for rel, _ in verified] != [rel for rel, _ in files]:
+                report["failures"].append(f"{name}: source inventory changed during audit")
         except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             report["failures"].append(f"{name}: {error}")
+    # The formatter binary is an executable input to every result. Reject a
+    # replacement/modification during the audit rather than recording the
+    # hash of a different executable than the one used.
+    try:
+        final_formatter_digest = hashlib.sha256()
+        with formatter.open("rb") as binary:
+            for chunk in iter(lambda: binary.read(1024 * 1024), b""):
+                final_formatter_digest.update(chunk)
+        if final_formatter_digest.hexdigest() != report["formatter_sha256"]:
+            report["failures"].append("formatter executable modified during audit")
+    except OSError as error:
+        report["failures"].append(f"formatter executable unavailable after audit: {error}")
     report["ok"] = not report["failures"] and all(
         stats["files"] > 0 for stats in report["repos"].values()
     )

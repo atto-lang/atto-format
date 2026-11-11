@@ -106,6 +106,37 @@ class TipAuditTests(unittest.TestCase):
             f"{audit.REPOS[4]}={'0' * 40}"
         self.assertEqual(audit.main(wrong), 1)
 
+    def test_late_mutation_of_earlier_source_fails_final_blob_scan(self):
+        roots = [self.init_repo(name) for name in audit.REPOS]
+        first_root, first_head = roots[0]
+        (first_root / "later.atto").write_text(
+            "fnc later() -> int {\\n  return 99;\\n}\\n", encoding="utf-8")
+        git(first_root, "add", "later.atto")
+        git(first_root, "commit", "-qm", "add later source")
+        roots[0] = first_root, git(first_root, "rev-parse", "HEAD")
+        git(first_root, "update-index", "--assume-unchanged", "sample.atto")
+        self.write_formatter(
+            "#!/usr/bin/env python3\\n"
+            "from pathlib import Path\\n"
+            "import sys\\n"
+            "p=Path(sys.argv[2])\\n"
+            "data=p.read_bytes()\\n"
+            f"if p.name == 'later.atto' and p.parent.name == {audit.REPOS[0]!r}:\\n"
+            " (p.parent/'sample.atto').write_text('tampered after preflight\\\\n')\\n"
+            "sys.stdout.buffer.write(data)\\n"
+        )
+        args = ["--formatter", str(self.formatter)]
+        for name, (root, sha) in zip(audit.REPOS, roots):
+            args.extend(["--repo", f"{name}={root}", "--head", f"{name}={sha}"])
+        receipt = self.root / "late-mutation.json"
+        self.assertEqual(audit.main(args + ["--report", str(receipt)]), 1)
+        report = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertFalse(report["ok"])
+        self.assertTrue(
+            any("physical Git blob mismatch" in message for message in report["failures"]),
+            report["failures"]
+        )
+
     @unittest.skipUnless(os.name == "posix", "symlink test requires POSIX")
     def test_tracked_symlink_is_rejected(self):
         name = audit.REPOS[0]
