@@ -669,7 +669,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         if keyword_stack.is_empty()
             && in_direct_declaration_container(&define_stack, &brace_stack)
         {
-            content = canonicalize_nested_define_member(&content, lex);
+            let allow_types = in_direct_module_container(&define_stack, &brace_stack);
+            content = canonicalize_nested_define_member(&content, lex, allow_types);
         }
         content = canonicalize_declaration_line(
             &content,
@@ -1327,9 +1328,25 @@ fn in_direct_declaration_container(defines: &[DefineFrame], braces: &[BraceFrame
     }
 }
 
+// Nested type declarations belong at module scope, never in a class or
+// actor body. Preserve unsupported nested heads for compiler diagnostics.
+fn in_direct_module_container(defines: &[DefineFrame], braces: &[BraceFrame]) -> bool {
+    let latest_define = defines.last().map(|frame| {
+        (frame.order, frame.kind == DefineKind::Module)
+    });
+    let latest_brace = braces.last().map(|frame| {
+        (frame.order, frame.kind == BraceKind::Module)
+    });
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
 // Remove nested `define` only in an unambiguous, plain-word declaration
 // prefix. Comments and malformed prefixes are preserved for diagnostics.
-fn canonicalize_nested_define_member(line: &str, initial: LexState) -> String {
+fn canonicalize_nested_define_member(line: &str, initial: LexState, allow_types: bool) -> String {
     let words = visible_word_spans(line, initial);
     if words.len() < 3 {
         return line.to_owned();
@@ -1351,9 +1368,11 @@ fn canonicalize_nested_define_member(line: &str, initial: LexState) -> String {
     }
     if head >= words.len()
         || !matches!(word(head), "fnc" | "routine" | "class" | "actor"
-            | "isoactor" | "module" | "interface" | "contract"
+            | "isoactor" | "interface" | "contract"
             | "trait" | "type" | "mtd" | "method" | "constructor"
             | "let" | "val" | "const")
+        || (matches!(word(head), "class" | "actor" | "isoactor"
+            | "interface" | "contract" | "trait" | "type") && !allow_types)
         || !plain_word_prefix(line, &words[..=head])
     {
         return line.to_owned();
@@ -2570,6 +2589,10 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
             "struct" => return Some(DefineKind::Struct),
+            // A callable ending in `end` is tracked by its own Callable
+            // frame. Treating `define fnc` as a type frame would leave a
+            // phantom frame after the function closes.
+            "fnc" | "routine" => return None,
             _ => return Some(DefineKind::Other),
         }
     }
