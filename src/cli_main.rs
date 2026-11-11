@@ -233,14 +233,25 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let mut dirty = false;
             for path in files {
                 let input = fs::read_to_string(&path)?;
-                let formatted = if insert_mtd {
-                    format_source_with_mtd(&input)?
+                let result = if insert_mtd {
+                    format_source_with_mtd(&input)
                 } else {
-                    format_source(&input)?
+                    format_source(&input)
                 };
-                if formatted != input {
-                    eprintln!("needs formatting: {}", path.display());
-                    dirty = true;
+                // A compiler-tip corpus can contain more than one unsupported
+                // source file. Report *every* formatter rejection, not just
+                // the first one, while preserving syntax failure exit code 1.
+                // I/O failures still stop immediately with exit code 2.
+                match result {
+                    Ok(formatted) if formatted != input => {
+                        eprintln!("needs formatting: {}", path.display());
+                        dirty = true;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!("oresfmt: rejected {}: {error}", path.display());
+                        dirty = true;
+                    }
                 }
             }
             Ok(if dirty {
