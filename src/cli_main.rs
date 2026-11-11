@@ -41,7 +41,8 @@ OTHER:
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
-    only *.ores files are selected. '-' reads stdin and writes stdout.
+    tracked and untracked *.atto and *.ores files are selected.
+    '-' reads stdin and writes stdout.
 
 There are intentionally no general style flags or configuration files.
 "#;
