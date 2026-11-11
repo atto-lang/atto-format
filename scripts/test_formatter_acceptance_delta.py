@@ -153,6 +153,20 @@ class AcceptanceDeltaHarnessTests(unittest.TestCase):
         self.assertIn('"baseline_accepted_by_compiler": {', report)
         self.assertIn('"baseline_unadmitted": 0', report)
 
+    def test_usage_exit_two_is_not_source_rejection(self):
+        # A broken compiler command may otherwise look like reject/reject.
+        self.compiler.write_text("import sys\nsys.exit(2)\n", encoding="utf-8")
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertIn("invalid-exit-2", report)
+        self.assertGreater(json.loads(report)["summary"]["harness_errors"], 0)
+
+    def test_tool_exit_seventy_is_not_source_rejection(self):
+        self.compiler.write_text("import sys\nsys.exit(70)\n", encoding="utf-8")
+        status, report = self.run_main(("main.atto", "fnc main() {}\n"))
+        self.assertEqual(status, 2, report)
+        self.assertIn("invalid-exit-70", report)
+
     def test_all_baseline_rejections_cannot_certify_parity(self):
         self.compiler.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
         result, report = self.run_main(("rejected.atto", "fnc main() {}\n"))
