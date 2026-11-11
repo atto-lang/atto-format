@@ -1,0 +1,51 @@
+{
+  "schema": "oresfmt-five-backend-tip-inventory-v1",
+  "source": "immutable-github-git-tree-metadata-only",
+  "repos": {
+    "oreslang-source.java": {
+      "head": "6d8eb70048eafc9a84c5aebe9c1bb06104f16e76",
+      "tree": "f16af3c76a2a5e6927d760dc09bc9a13233e4d6d",
+      "tracked_files": 1884,
+      "tracked_bytes": 15520206,
+      "source_files": 223,
+      "atto_files": 37,
+      "ores_files": 186
+    },
+    "oreslang-source.llvm": {
+      "head": "0ee037ca3e5dd9ac6ac1e9cc3d40f19ee6326a9c",
+      "tree": "6324f2fdbaf77d92e04e4b6148cf9b7adaa95217",
+      "tracked_files": 1813,
+      "tracked_bytes": 9267135,
+      "source_files": 633,
+      "atto_files": 75,
+      "ores_files": 558
+    },
+    "oreslang-source.wasm": {
+      "head": "2c6ce5988592080ea47b8877e2b8c1d3df5cb9bd",
+      "tree": "f604a918d8308f336f0dbbb3507119db102ebff8",
+      "tracked_files": 602,
+      "tracked_bytes": 2199949,
+      "source_files": 120,
+      "atto_files": 52,
+      "ores_files": 68
+    },
+    "oreslang-source.net": {
+      "head": "3f3606cc3ef81dad117047b4cb57609ad1a92672",
+      "tree": "41cde0cea138969aac446d4fdc228fdd032d3c70",
+      "tracked_files": 451,
+      "tracked_bytes": 2142813,
+      "source_files": 83,
+      "atto_files": 14,
+      "ores_files": 69
+    },
+    "oreslang-source.forge": {
+      "head": "2acf59d589f8016f879581f17a27df144fa73075",
+      "tree": "3011dbcebb0f3a52ecac4321d835e0d592cacc54",
+      "tracked_files": 250,
+      "tracked_bytes": 1172710,
+      "source_files": 24,
+      "atto_files": 6,
+      "ores_files": 18
+    }
+  }
+}

@@ -215,6 +215,54 @@ class TipAuditTests(unittest.TestCase):
             f"{audit.REPOS[4]}={'0' * 40}"
         self.assertEqual(audit.main(wrong), 1)
 
+    def test_pinned_inventory_rejects_mismatched_counts_and_duplicate_keys(self):
+        roots = [self.init_repo(name, ".atto" if i % 2 == 0 else ".ores")
+                 for i, name in enumerate(audit.REPOS)]
+        entries = {}
+        args = ["--formatter", str(self.formatter)]
+        for name, (root, sha) in zip(audit.REPOS, roots):
+            args.extend(["--repo", f"{name}={root}", "--head", f"{name}={sha}"])
+            source = next(root.glob("*.atto" if name in (audit.REPOS[0],
+                                                         audit.REPOS[2],
+                                                         audit.REPOS[4])
+                                    else "*.ores"))
+            entries[name] = {
+                "head": sha, "tree": git(root, "rev-parse", "HEAD^{tree}"),
+                "tracked_files": 1, "tracked_bytes": source.stat().st_size,
+                "source_files": 1,
+                "atto_files": int(source.suffix == ".atto"),
+                "ores_files": int(source.suffix == ".ores"),
+            }
+        manifest = self.root / "inventory.json"
+        manifest.write_text(json.dumps({
+            "schema": "oresfmt-five-backend-tip-inventory-v1",
+            "source": "immutable-github-git-tree-metadata-only",
+            "repos": entries,
+        }), encoding="utf-8")
+        report = self.root / "inventory-receipt.json"
+        self.assertEqual(audit.main(args + [
+            "--inventory", str(manifest), "--report", str(report)
+        ]), 0)
+        row = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(len(row["inventory_sha256"]), 64)
+        self.assertEqual(sum(x["atto_files"] for x in row["repos"].values()), 3)
+
+        entries[audit.REPOS[0]]["tracked_bytes"] += 1
+        manifest.write_text(json.dumps({
+            "schema": "oresfmt-five-backend-tip-inventory-v1",
+            "source": "immutable-github-git-tree-metadata-only",
+            "repos": entries,
+        }), encoding="utf-8")
+        self.assertEqual(audit.main(args + [
+            "--inventory", str(manifest), "--report", str(report)
+        ]), 1)
+        self.assertTrue(any("inventory tracked_bytes mismatch" in x
+                            for x in json.loads(report.read_text())["failures"]))
+        manifest.write_text('{"schema":"x","schema":"y"}', encoding="utf-8")
+        with self.assertRaises(SystemExit) as error:
+            audit.main(args + ["--inventory", str(manifest)])
+        self.assertEqual(error.exception.code, 2)
+
     def test_late_mutation_of_earlier_source_fails_final_blob_scan(self):
         roots = [self.init_repo(name) for name in audit.REPOS]
         first_root, first_head = roots[0]

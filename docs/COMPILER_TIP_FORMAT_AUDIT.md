@@ -33,6 +33,20 @@ PR. Substitute reviewed feature-branch SHA values when auditing a compiler
 PR tip. Never call an old pinned source tree the latest without rechecking
 the real repository refs.
 
+## Source-free pinned inventory
+
+`contracts/v1/compiler-tip-inventory-20261110.json` records the five
+observed Git HEAD commits, immutable tree IDs, tracked file and source counts,
+and Git blob byte totals. This is an independently fetched **metadata
+inventory only**: it does not contain private source, formatter results,
+compiler admissions or an executable test certificate. It is immutable for
+these specific commits; refresh and independently review it when any compiler
+head changes.
+
+A release candidate should supply `--inventory` to make the auditor
+validate every expected count and Git tree, not merely a nonempty checkout.
+Its SHA-256 is included in the final JSON receipt.
+
 ## Run in an authorized environment with all five repositories checked out
 
 Build the formatter from the **reviewed, pinned formatter Git commit**, then
@@ -53,6 +67,7 @@ python3 scripts/audit_compiler_tip_formatter.py \
   --head oreslang-source.net=3f3606cc3ef81dad117047b4cb57609ad1a92672 \
   --repo oreslang-source.forge=../oreslang-source.forge \
   --head oreslang-source.forge=2acf59d589f8016f879581f17a27df144fa73075 \
+  --inventory contracts/v1/compiler-tip-inventory-20261110.json \
   --report formatter-tip-audit.json
 ```
 

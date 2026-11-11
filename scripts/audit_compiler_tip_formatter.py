@@ -36,6 +36,52 @@ class FormatterRejected(ValueError):
 
 
 
+def read_inventory(path):
+    """Validate source-free Git tree metadata, never syntax expectations."""
+    raw = path.read_bytes()
+    if not raw or len(raw) > 64 * 1024:
+        raise ValueError("inventory missing or oversized")
+    def unique_keys(pairs):
+        output = {}
+        for name, value in pairs:
+            if name in output:
+                raise ValueError(f"duplicate inventory key: {name}")
+            output[name] = value
+        return output
+    try:
+        document = json.loads(raw, object_pairs_hook=unique_keys)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError("invalid inventory JSON") from error
+    if (not isinstance(document, dict)
+            or set(document) != {"schema", "source", "repos"}
+            or document["schema"] != "oresfmt-five-backend-tip-inventory-v1"
+            or document["source"] != "immutable-github-git-tree-metadata-only"
+            or not isinstance(document["repos"], dict)
+            or set(document["repos"]) != set(REPOS)):
+        raise ValueError("inventory schema or backend coverage mismatch")
+    fields = {"head", "tree", "tracked_files", "tracked_bytes",
+              "source_files", "atto_files", "ores_files"}
+    for name, entry in document["repos"].items():
+        if not isinstance(entry, dict) or set(entry) != fields:
+            raise ValueError(f"{name}: inventory fields mismatch")
+        for field in ("head", "tree"):
+            value = entry[field]
+            if (not isinstance(value, str) or len(value) != 40
+                    or any(c not in "0123456789abcdef" for c in value)):
+                raise ValueError(f"{name}: invalid inventory {field}")
+        for field in ("tracked_files", "tracked_bytes", "source_files",
+                      "atto_files", "ores_files"):
+            value = entry[field]
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name}: invalid inventory {field}")
+        if (entry["source_files"] < 1
+                or entry["source_files"] != entry["atto_files"] + entry["ores_files"]
+                or entry["source_files"] > entry["tracked_files"]
+                or entry["tracked_bytes"] < entry["tracked_files"]):
+            raise ValueError(f"{name}: inconsistent inventory counts")
+    return document, hashlib.sha256(raw).hexdigest()
+
+
 def parse_named(spec):
     name, sep, value = spec.partition("=")
     if not sep or name not in REPOS or not value:
@@ -255,9 +301,15 @@ def main(argv=None):
     parser.add_argument("--head", action="append", type=parse_named, required=True,
                         help="oreslang-source.BACKEND=EXACT_40_HEX_COMMIT")
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--inventory", type=Path, help="pin exact five-backend Git tree inventory")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
+    try:
+        inventory, inventory_digest = read_inventory(args.inventory) if args.inventory else (None, None)
+    except (OSError, ValueError) as error:
+        parser.error(f"unusable expected inventory: {error}")
     repos, heads = dict(args.repo), dict(args.head)
+
     if (len(args.repo) != len(REPOS) or len(args.head) != len(REPOS)
             or set(repos) != set(REPOS) or set(heads) != set(REPOS)):
         parser.error("exactly one --repo and --head for each of the five backends is required")
@@ -277,7 +329,8 @@ def main(argv=None):
     report = {"schema": "oresfmt-compiler-tip-v1", "ok": False,
               "scope": "read-only-formatting-and-idempotence-only",
               "formatter_sha256": formatter_digest.hexdigest(),
-              "repos": {}, "rejections": [], "failures": []}
+              "repos": {}, "inventory_sha256": inventory_digest,
+              "rejections": [], "failures": []}
     for name in REPOS:
         supplied_root = Path(repos[name])
         root = supplied_root.resolve()
@@ -288,6 +341,24 @@ def main(argv=None):
                 raise ValueError("symlinked worktree argument")
             files = inspect_repo(name, root, heads[name], stats)
             stats["tree"] = git(root, "rev-parse", "HEAD^{tree}").decode("ascii").strip()
+            stats["atto_files"] = sum(1 for rel, _ in files if rel.suffix == ".atto")
+            stats["ores_files"] = sum(1 for rel, _ in files if rel.suffix == ".ores")
+            if inventory is not None:
+                expected = inventory["repos"][name]
+                fields = {
+                    "head": heads[name], "tree": stats["tree"],
+                    "tracked_files": stats["tracked_files_verified"],
+                    "tracked_bytes": stats["tracked_bytes_verified"],
+                    "source_files": len(files),
+                    "atto_files": stats["atto_files"], "ores_files": stats["ores_files"],
+                }
+                for field, value in fields.items():
+                    if expected[field] != value:
+                        report["failures"].append(
+                            f"{name}: inventory {field} mismatch: "
+                            f"expected {expected[field]}, got {value}"
+                        )
+
             for rel, source in files:
                 stats["files"] += 1
                 try:
