@@ -51,3 +51,31 @@ fn preserves_block_expression_tail_and_literal_comments() {
     assert!(formatted.contains("\"literal ? { } : { } 1..1024\""), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn keeps_ternary_thunks_distinct_from_immediate_typed_lambda_calls() {
+    let source = r#"pub routine main(): void {
+  for id in 1..1024 {
+    val thunked: Array<int> = id eq 1023 ? || -> {
+      return []
+    } : || -> {
+      return [id + 1]
+    };
+    val called: Array<int> = id eq 1023 ? (|int v| -> {
+      return []
+    })(3) : (|int g| -> {
+      return [id + 1]
+    })(5);
+  }
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("? || -> {"), "{formatted}");
+    assert!(formatted.contains("} : || -> {"), "{formatted}");
+    assert!(formatted.contains("(|int v| -> {"), "{formatted}");
+    assert!(formatted.contains("(|int g| -> {"), "{formatted}");
+    assert!(formatted.contains("})(3)"), "{formatted}");
+    assert!(formatted.contains("})(5)"), "{formatted}");
+    assert!(formatted.contains("return []"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
