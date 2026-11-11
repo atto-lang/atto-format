@@ -92,8 +92,6 @@ def audit_file(root, name, formatter, timeout, max_bytes, require_clean):
     if first != second:
         raise ValueError("formatter is not idempotent")
     changed = source != first
-    if changed and require_clean:
-        raise ValueError("compiler source differs from canonical formatting")
     return {
         "path": name, "source_sha256": hashlib.sha256(source).hexdigest(),
         "formatted_sha256": hashlib.sha256(first).hexdigest(),
@@ -126,12 +124,18 @@ def audit_repo(name, root, expected, formatter, timeout, max_bytes, max_files, r
         if len(names) > max_files:
             raise ValueError(f"source count {len(names)} exceeds --max-files={max_files}")
         digest = hashlib.sha256()
+        inventoried = 0
         for path in names:
             result["scanned"] += 1
             try:
                 record = audit_file(root, path, formatter, timeout, max_bytes, require_clean)
                 result["changed"] += int(record["changed"])
+                if require_clean and record["changed"]:
+                    result["failures"].append({
+                        "path": path, "error": "compiler source differs from canonical formatting"
+                    })
                 # Pin each checked source path and its exact pre-format bytes.
+                inventoried += 1
                 digest.update(path.encode("utf-8", errors="surrogateescape"))
                 digest.update(b"\0")
                 digest.update(bytes.fromhex(record["source_sha256"]))
@@ -139,7 +143,8 @@ def audit_repo(name, root, expected, formatter, timeout, max_bytes, max_files, r
             except (OSError, ValueError, UnicodeError) as error:
                 result["failures"].append({"path": path, "error": str(error)[:500]})
         result["source_manifest_sha256"] = digest.hexdigest()
-        result["ok"] = not result["failures"]
+        result["source_manifest_complete"] = inventoried == len(names)
+        result["ok"] = not result["failures"] and result["source_manifest_complete"]
     except (OSError, ValueError, UnicodeError, subprocess.TimeoutExpired) as error:
         result["failures"].append({"error": str(error)[:500]})
     return result
