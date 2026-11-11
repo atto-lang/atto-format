@@ -667,6 +667,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         let instance_member =
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
         if keyword_stack.is_empty()
+            && pending_callable_parameter_depth == 0
+            && lambda_expr_continuation.is_none()
+            && !pending_assignment_continuation
             && in_direct_declaration_container(&define_stack, &brace_stack)
         {
             let allow_types = in_direct_module_container(&define_stack, &brace_stack);
