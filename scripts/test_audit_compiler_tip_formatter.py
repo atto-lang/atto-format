@@ -110,20 +110,20 @@ class TipAuditTests(unittest.TestCase):
         roots = [self.init_repo(name) for name in audit.REPOS]
         first_root, first_head = roots[0]
         (first_root / "later.atto").write_text(
-            "fnc later() -> int {\\n  return 99;\\n}\\n", encoding="utf-8")
+            "fnc later() -> int {\n  return 99;\n}\n", encoding="utf-8")
         git(first_root, "add", "later.atto")
         git(first_root, "commit", "-qm", "add later source")
         roots[0] = first_root, git(first_root, "rev-parse", "HEAD")
         git(first_root, "update-index", "--assume-unchanged", "sample.atto")
         self.write_formatter(
-            "#!/usr/bin/env python3\\n"
-            "from pathlib import Path\\n"
-            "import sys\\n"
-            "p=Path(sys.argv[2])\\n"
-            "data=p.read_bytes()\\n"
-            f"if p.name == 'later.atto' and p.parent.name == {audit.REPOS[0]!r}:\\n"
-            " (p.parent/'sample.atto').write_text('tampered after preflight\\\\n')\\n"
-            "sys.stdout.buffer.write(data)\\n"
+            "#!/usr/bin/env python3\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            "p=Path(sys.argv[2])\n"
+            "data=p.read_bytes()\n"
+            f"if p.name == 'later.atto' and p.parent.name == {audit.REPOS[0]!r}:\n"
+            " (p.parent/'sample.atto').write_text('tampered after preflight\\\n')\n"
+            "sys.stdout.buffer.write(data)\n"
         )
         args = ["--formatter", str(self.formatter)]
         for name, (root, sha) in zip(audit.REPOS, roots):
