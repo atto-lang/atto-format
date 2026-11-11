@@ -4,7 +4,9 @@ This gate tests the **actual `oresfmt` executable**, not a Python model of
 formatting. It audits every tracked `.atto` and `.ores` input in **all five**
 independently checked-out compiler trees, rejects stale/dirty repositories,
 checks `oresfmt --stdout` twice for byte-level idempotence, and confirms
-that the compiler source files and Git worktrees remain unchanged. It hashes
+that **all tracked compiler-repository files**, including manifests,
+configuration and imported resources, remain unchanged. The inventory is
+bounded to 20,000 tracked files, 8 MiB per file and 64 MiB per repository. It hashes
 physical source bytes against immutable Git `HEAD` blob IDs, so `git status`
 shortcuts such as `assume-unchanged` or `skip-worktree` cannot forge a clean
 source checkout. The JSON receipt records each compiler Git tree and a

@@ -28,6 +28,7 @@ REPOS = (
 SUFFIXES = {".atto", ".ores"}
 MAX_BYTES = 8 * 1024 * 1024
 MAX_TRACKED = 20000
+MAX_TRACKED_BYTES = 64 * 1024 * 1024
 
 
 def parse_named(spec):
@@ -72,15 +73,17 @@ def inspect_repo(name, repo, sha):
         raise ValueError(f"{name}: stale checkout: HEAD {actual}, expected {sha}")
     if git(repo, "status", "--porcelain=v1", "--untracked-files=no"):
         raise ValueError(f"{name}: tracked worktree is dirty")
-    paths = git(repo, "ls-files", "-z").split(b"\0")
-    if len(paths) > MAX_TRACKED + 1:
+
+    paths = [raw for raw in git(repo, "ls-files", "-z").split(b"\0") if raw]
+    if len(paths) > MAX_TRACKED:
         raise ValueError(f"{name}: tracked-file limit exceeded")
-    # Git status alone can be bypassed with assume-unchanged or
-    # skip-worktree index flags. Compare physical compiler source bytes
-    # against immutable HEAD blob hashes, without Git clean/smudge filters.
     object_format = git(repo, "rev-parse", "--show-object-format=storage").decode("ascii").strip()
     if object_format not in ("sha1", "sha256"):
         raise ValueError(f"{name}: unsupported Git object hash: {object_format}")
+
+    # Include every tracked file, not just AttoLang source. An attacker can
+    # hide edits to package manifests, compiler config, or imported resources
+    # with assume-unchanged / skip-worktree flags.
     expected_blobs = {}
     for entry in git(repo, "ls-tree", "-r", "-z", "HEAD").split(b"\0"):
         if not entry:
@@ -94,51 +97,59 @@ def inspect_repo(name, repo, sha):
             rel = Path(raw_path.decode("utf-8"))
         except UnicodeDecodeError as error:
             raise ValueError(f"{name}: non-UTF8 Git tree path") from error
-        if rel.suffix in SUFFIXES:
-            if kind != b"blob" or mode not in (b"100644", b"100755"):
-                raise ValueError(f"{name}: unsafe Git tree entry: {rel}")
-            expected_blobs[rel] = blob_sha.decode("ascii")
+        if rel.is_absolute() or ".." in rel.parts or rel in expected_blobs:
+            raise ValueError(f"{name}: unsafe Git tree path: {rel}")
+        if kind != b"blob" or mode not in (b"100644", b"100755"):
+            raise ValueError(f"{name}: unsafe Git tree entry: {rel}")
+        expected_blobs[rel] = (blob_sha.decode("ascii"), mode)
+
     source_paths = []
+    seen = set()
+    total_bytes = 0
     for raw in paths:
-        if not raw:
-            continue
         try:
             rel = Path(raw.decode("utf-8"))
         except UnicodeDecodeError as error:
             raise ValueError(f"{name}: non-UTF8 tracked filename") from error
-        if rel.suffix not in SUFFIXES:
-            continue
-        if rel.is_absolute() or ".." in rel.parts:
+        if rel.is_absolute() or ".." in rel.parts or rel in seen:
             raise ValueError(f"{name}: unsafe tracked path: {rel}")
-        source = repo / rel
-        # Reject tracked symlinks, including parent directories. Never
-        # follow a linked source out of the approved compiler worktree.
+        seen.add(rel)
+        if rel not in expected_blobs:
+            raise ValueError(f"{name}: index file absent from immutable HEAD tree: {rel}")
+        path = repo / rel
         for part in (repo / Path(*rel.parts[:i]) for i in range(1, len(rel.parts) + 1)):
             if part.is_symlink():
                 raise ValueError(f"{name}: linked source component: {part}")
-        info = source.lstat()
+        info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
-            raise ValueError(f"{name}: unsafe or oversized source: {rel}")
-        if rel not in expected_blobs:
-            raise ValueError(f"{name}: source absent from immutable HEAD tree: {rel}")
+            raise ValueError(f"{name}: unsafe or oversized tracked file: {rel}")
+        if os.name == "posix":
+            expected_executable = expected_blobs[rel][1] == b"100755"
+            if bool(info.st_mode & 0o111) != expected_executable:
+                raise ValueError(f"{name}: physical executable mode mismatch: {rel}")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        with os.fdopen(os.open(source, flags), "rb") as stream:
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise ValueError(f"{name}: source replaced by special file: {rel}")
+                raise ValueError(f"{name}: tracked file replaced by special file: {rel}")
             physical = stream.read(MAX_BYTES + 1)
         if len(physical) > MAX_BYTES:
-            raise ValueError(f"{name}: source grew past bounded read: {rel}")
+            raise ValueError(f"{name}: tracked file grew past bounded read: {rel}")
+        total_bytes += len(physical)
+        if total_bytes > MAX_TRACKED_BYTES:
+            raise ValueError(f"{name}: total tracked byte budget exceeded")
         payload = b"blob " + str(len(physical)).encode("ascii") + b"\0" + physical
         actual_blob_sha = hashlib.new(object_format, payload).hexdigest()
-        if actual_blob_sha != expected_blobs[rel]:
+        if actual_blob_sha != expected_blobs[rel][0]:
             raise ValueError(f"{name}: physical Git blob mismatch: {rel}")
-        source_paths.append((rel, source))
-    if {rel for rel, _ in source_paths} != set(expected_blobs):
-        raise ValueError(f"{name}: index source list does not match immutable HEAD tree")
+        if rel.suffix in SUFFIXES:
+            source_paths.append((rel, path))
+
+    if seen != set(expected_blobs):
+        raise ValueError(f"{name}: index file list does not match immutable HEAD tree")
     if not source_paths:
         raise ValueError(f"{name}: no tracked .atto/.ores source at {sha}")
     return source_paths
-
 
 def format_once(formatter, source, timeout):
     status, code, stdout, stderr = run_process(
@@ -161,6 +172,7 @@ def audit_source(formatter, source, suffix, timeout):
     # Bound the read even if a checked source grows after the tracked-file
     # inventory. O_NOFOLLOW also closes a leaf-symlink substitution race.
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(source, flags), "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError("source is not a regular file")

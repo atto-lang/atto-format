@@ -112,6 +112,48 @@ class TipAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
             audit.inspect_repo(name, root, head)
 
+    def test_non_source_manifest_assume_unchanged_is_verified(self):
+        name = audit.REPOS[0]
+        root, head = self.init_repo(name)
+        manifest = root / ".ores.pkg.toml"
+        manifest.write_text("[package]\nname = 'demo'\n", encoding="utf-8")
+        git(root, "add", ".ores.pkg.toml")
+        git(root, "commit", "-qm", "tracked manifest")
+        head = git(root, "rev-parse", "HEAD")
+        git(root, "update-index", "--assume-unchanged", ".ores.pkg.toml")
+        manifest.write_text("[package]\nname = 'forged'\n", encoding="utf-8")
+        self.assertEqual(git(root, "status", "--porcelain=v1", "--untracked-files=no"), "")
+        with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
+            audit.inspect_repo(name, root, head)
+
+    def test_manifest_mutated_during_formatter_run_fails_final_scan(self):
+        roots = [self.init_repo(name) for name in audit.REPOS]
+        root, _ = roots[0]
+        manifest = root / ".ores.pkg.toml"
+        manifest.write_text("[package]\nname = 'demo'\n", encoding="utf-8")
+        git(root, "add", ".ores.pkg.toml")
+        git(root, "commit", "-qm", "tracked manifest")
+        roots[0] = root, git(root, "rev-parse", "HEAD")
+        git(root, "update-index", "--assume-unchanged", ".ores.pkg.toml")
+        self.write_formatter(
+            "#!/usr/bin/env python3\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            "p = Path(sys.argv[2])\n"
+            "if p.parent.name == 'oreslang-source.java':\n"
+            " (p.parent/'.ores.pkg.toml').write_text('[package]\\nname = \"forged\"\\n')\n"
+            "sys.stdout.buffer.write(p.read_bytes())\n"
+        )
+        args = ["--formatter", str(self.formatter)]
+        for name, (where, sha) in zip(audit.REPOS, roots):
+            args.extend(["--repo", f"{name}={where}", "--head", f"{name}={sha}"])
+        receipt = self.root / "manifest-attack.json"
+        self.assertEqual(audit.main(args + ["--report", str(receipt)]), 1)
+        row = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertFalse(row["ok"])
+        self.assertTrue(any(".ores.pkg.toml" in message and "physical Git blob mismatch" in message
+                            for message in row["failures"]), row["failures"])
+
     def test_formatting_stays_read_only_and_is_idempotent(self):
         root, _ = self.init_repo(audit.REPOS[0])
         source = root / "sample.atto"
