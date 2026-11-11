@@ -162,7 +162,14 @@ def admit(template, path, timeout):
         return status, diagnostics
     if returncode is None or returncode < 0:
         return "crashed", diagnostics
-    return ("accept" if returncode == 0 else "reject"), diagnostics
+    if returncode == 0:
+        return "accept", diagnostics
+    if returncode == 1:
+        return "reject", diagnostics
+    # Exit 2 conventionally means invalid compiler invocation, and higher
+    # statuses can mean loader/tool errors. Never treat those as syntactic
+    # source rejection: reject/reject would otherwise mask broken adapters.
+    return f"invalid-exit-{returncode}", diagnostics
 
 
 def prepare_one(case, formatter, work, timeout):
