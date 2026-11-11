@@ -83,12 +83,14 @@ class TipAuditTests(unittest.TestCase):
         alternate_head = git(root, "rev-parse", "HEAD")
         git(root, "checkout", "-q", "--detach", good_head)
         git(root, "replace", good_head, alternate_head)
+        # Stage the forged tree without advancing HEAD. With replacement
+        # objects enabled, both 'status' and 'ls-tree HEAD' now look clean.
+        git(root, "read-tree", alternate_head)
         source.write_text(forged_source, encoding="utf-8")
-        git(root, "update-index", "--assume-unchanged", "sample.atto")
         self.assertEqual(git(root, "status", "--porcelain=v1", "--untracked-files=no"), "")
-        # Without GIT_NO_REPLACE_OBJECTS=1, ls-tree HEAD would resolve the
-        # substituted blob and accept the forged physical content.
-        with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
+        # The auditor disables replacement objects, revealing the staged
+        # tree mismatch even though the reported HEAD SHA is unchanged.
+        with self.assertRaisesRegex(ValueError, "tracked worktree is dirty|physical Git blob mismatch"):
             audit.inspect_repo(name, root, good_head)
 
     def test_nested_directory_cannot_impersonate_repository_root(self):
