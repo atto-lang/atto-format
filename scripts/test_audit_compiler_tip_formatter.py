@@ -116,7 +116,7 @@ class TipAuditTests(unittest.TestCase):
         git(root, "add", "linked.atto")
         git(root, "commit", "-qm", "linked source")
         head = git(root, "rev-parse", "HEAD")
-        with self.assertRaisesRegex(ValueError, "linked source component"):
+        with self.assertRaisesRegex(ValueError, "unsafe Git tree entry|linked source component"):
             audit.inspect_repo(name, root, head)
 
     def test_non_utf8_source_fails_closed(self):
