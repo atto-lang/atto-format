@@ -43,8 +43,15 @@ def git(repo, *args):
     # as an authority for compiler source identity.
     clean_env = {key: value for key, value in os.environ.items()
                  if not key.startswith("GIT_")}
+    # Git replace refs stored inside .git can transparently substitute a
+    # different commit tree while rev-parse still prints the trusted HEAD.
+    # Ignore all replacement objects, even those created locally.
+    clean_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    clean_env["LC_ALL"] = "C"
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], stdout=subprocess.PIPE,
+        ["git", "-c", "core.fsmonitor=false",
+         "-c", "core.hooksPath=/dev/null",
+         "-C", str(repo), *args], stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, check=False, timeout=30, env=clean_env,
     )
     if result.returncode:

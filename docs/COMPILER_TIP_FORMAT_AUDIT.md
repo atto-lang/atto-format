@@ -10,7 +10,9 @@ shortcuts such as `assume-unchanged` or `skip-worktree` cannot forge a clean
 source checkout. The JSON receipt records each compiler Git tree and a
 SHA-256 digest of the formatter executable. Git subprocesses strip inherited
 `GIT_*` control variables and confirm each checkout is the exact repository
-root, rather than a nested directory or a redirected foreign worktree.
+root, rather than a nested directory or a redirected foreign worktree. Git replacement
+objects are explicitly disabled; a local `.git/refs/replace` entry cannot
+substitute a different HEAD tree for the audited immutable commit.
 
 ## Compiler main heads observed on 2026-11-10
 

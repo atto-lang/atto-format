@@ -72,6 +72,25 @@ class TipAuditTests(unittest.TestCase):
             files = audit.inspect_repo(name, root, head)
         self.assertEqual([rel.name for rel, _ in files], ["sample.atto"])
 
+    def test_git_replace_cannot_substitute_untrusted_head_tree(self):
+        name = audit.REPOS[0]
+        root, good_head = self.init_repo(name)
+        source = root / "sample.atto"
+        forged_source = "fnc forged() -> int {\\n  return 0;\\n}\\n"
+        source.write_text(forged_source, encoding="utf-8")
+        git(root, "add", "sample.atto")
+        git(root, "commit", "-qm", "evil alternate tree")
+        alternate_head = git(root, "rev-parse", "HEAD")
+        git(root, "checkout", "-q", "--detach", good_head)
+        git(root, "replace", good_head, alternate_head)
+        source.write_text(forged_source, encoding="utf-8")
+        git(root, "update-index", "--assume-unchanged", "sample.atto")
+        self.assertEqual(git(root, "status", "--porcelain=v1", "--untracked-files=no"), "")
+        # Without GIT_NO_REPLACE_OBJECTS=1, ls-tree HEAD would resolve the
+        # substituted blob and accept the forged physical content.
+        with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
+            audit.inspect_repo(name, root, good_head)
+
     def test_nested_directory_cannot_impersonate_repository_root(self):
         name = audit.REPOS[0]
         root, head = self.init_repo(name)
