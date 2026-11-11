@@ -58,6 +58,17 @@ class TipAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dirty"):
             audit.inspect_repo(name, root, head)
 
+    def test_assume_unchanged_cannot_hide_modified_compiler_source(self):
+        name = audit.REPOS[0]
+        root, head = self.init_repo(name)
+        git(root, "update-index", "--assume-unchanged", "sample.atto")
+        (root / "sample.atto").write_text("fnc forged() -> int { return 0; }\n",
+                                          encoding="utf-8")
+        # Git status is fooled, but immutable HEAD's blob is authoritative.
+        self.assertEqual(git(root, "status", "--porcelain=v1", "--untracked-files=no"), "")
+        with self.assertRaisesRegex(ValueError, "physical Git blob mismatch"):
+            audit.inspect_repo(name, root, head)
+
     def test_formatting_stays_read_only_and_is_idempotent(self):
         root, _ = self.init_repo(audit.REPOS[0])
         source = root / "sample.atto"
@@ -84,10 +95,12 @@ class TipAuditTests(unittest.TestCase):
         self.assertEqual(audit.main(args + ["--report", str(report)]), 0)
         receipt = json.loads(report.read_text(encoding="utf-8"))
         self.assertTrue(receipt["ok"])
+        self.assertEqual(len(receipt["formatter_sha256"]), 64)
         self.assertEqual(set(receipt["repos"]), set(audit.REPOS))
         for item in receipt["repos"].values():
             self.assertEqual(item["files"], 1)
             self.assertEqual(item["unchanged"], 1)
+            self.assertEqual(len(item["tree"]), 40)
         wrong = list(args)
         wrong[wrong.index(f"{audit.REPOS[4]}={roots[4][1]}")] = \
             f"{audit.REPOS[4]}={'0' * 40}"
