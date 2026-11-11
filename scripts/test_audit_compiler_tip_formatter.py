@@ -58,6 +58,28 @@ class TipAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dirty"):
             audit.inspect_repo(name, root, head)
 
+    def test_git_control_environment_cannot_redirect_source_identity(self):
+        from unittest import mock
+        name = audit.REPOS[0]
+        root, head = self.init_repo(name)
+        other, _ = self.init_repo("foreign-checkout")
+        # Git would normally let GIT_DIR / GIT_WORK_TREE override -C.
+        # The audit must still inventory the intended exact worktree.
+        with mock.patch.dict(os.environ, {
+            "GIT_DIR": str(other / ".git"),
+            "GIT_WORK_TREE": str(other),
+        }):
+            files = audit.inspect_repo(name, root, head)
+        self.assertEqual([rel.name for rel, _ in files], ["sample.atto"])
+
+    def test_nested_directory_cannot_impersonate_repository_root(self):
+        name = audit.REPOS[0]
+        root, head = self.init_repo(name)
+        nested = root / "src"
+        nested.mkdir()
+        with self.assertRaisesRegex(ValueError, "not an exact Git repository root"):
+            audit.inspect_repo(name, nested, head)
+
     def test_assume_unchanged_cannot_hide_modified_compiler_source(self):
         name = audit.REPOS[0]
         root, head = self.init_repo(name)

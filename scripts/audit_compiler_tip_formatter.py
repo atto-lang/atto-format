@@ -38,9 +38,14 @@ def parse_named(spec):
 
 
 def git(repo, *args):
+    # Inherited Git control variables can redirect -C to a different
+    # repository, object database, index or remote config. Never use them
+    # as an authority for compiler source identity.
+    clean_env = {key: value for key, value in os.environ.items()
+                 if not key.startswith("GIT_")}
     result = subprocess.run(
         ["git", "-C", str(repo), *args], stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, check=False, timeout=30,
+        stderr=subprocess.PIPE, check=False, timeout=30, env=clean_env,
     )
     if result.returncode:
         raise ValueError(f"git {' '.join(args)} failed in {repo}: "
@@ -51,6 +56,10 @@ def git(repo, *args):
 def inspect_repo(name, repo, sha):
     if repo.is_symlink() or not repo.is_dir():
         raise ValueError(f"{name}: missing or symlinked worktree: {repo}")
+    expected_root = repo.resolve(strict=True)
+    reported_root = git(repo, "rev-parse", "--show-toplevel").decode("utf-8").strip()
+    if Path(reported_root).resolve(strict=True) != expected_root:
+        raise ValueError(f"{name}: not an exact Git repository root: {repo}")
     actual = git(repo, "rev-parse", "HEAD").decode("ascii").strip()
     if actual != sha:
         raise ValueError(f"{name}: stale checkout: HEAD {actual}, expected {sha}")

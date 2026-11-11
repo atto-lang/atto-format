@@ -8,7 +8,9 @@ that the compiler source files and Git worktrees remain unchanged. It hashes
 physical source bytes against immutable Git `HEAD` blob IDs, so `git status`
 shortcuts such as `assume-unchanged` or `skip-worktree` cannot forge a clean
 source checkout. The JSON receipt records each compiler Git tree and a
-SHA-256 digest of the formatter executable.
+SHA-256 digest of the formatter executable. Git subprocesses strip inherited
+`GIT_*` control variables and confirm each checkout is the exact repository
+root, rather than a nested directory or a redirected foreign worktree.
 
 ## Compiler main heads observed on 2026-11-10
 
