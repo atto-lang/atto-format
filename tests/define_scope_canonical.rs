@@ -94,3 +94,19 @@ fn nested_define_removal_preserves_modifier_conflicts_and_literal_payloads() {
     // Do not silently collapse duplicate visibility into a valid declaration.
     assert!(formatted.contains("pub pub fnc bad()"), "{formatted}");
 }
+
+#[test]
+fn multiline_member_header_round_trips_without_nested_scope_inference() {
+    let source = r#"define pub class Cart as
+  pub define fnc new(
+    int id
+  ) -> Cart {
+    return new Cart();
+  }
+end
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("pub fnc new("), "{formatted}");
+    assert!(formatted.contains("int id"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
