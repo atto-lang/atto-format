@@ -104,7 +104,13 @@ def format_once(formatter, source, timeout):
 
 
 def audit_source(formatter, source, suffix, timeout):
-    before = source.read_bytes()
+    # Bound the read even if a checked source grows after the tracked-file
+    # inventory. O_NOFOLLOW also closes a leaf-symlink substitution race.
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(source, flags), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("source is not a regular file")
+        before = stream.read(MAX_BYTES + 1)
     if len(before) > MAX_BYTES:
         raise ValueError("source exceeded byte bound during read")
     try:
@@ -151,10 +157,13 @@ def main(argv=None):
               "scope": "read-only-formatting-and-idempotence-only", "repos": {},
               "failures": []}
     for name in REPOS:
-        root = Path(repos[name]).resolve()
+        supplied_root = Path(repos[name])
+        root = supplied_root.resolve()
         stats = {"head": heads[name], "files": 0, "changed": 0, "unchanged": 0}
         report["repos"][name] = stats
         try:
+            if supplied_root.is_symlink():
+                raise ValueError("symlinked worktree argument")
             files = inspect_repo(name, root, heads[name])
             for rel, source in files:
                 stats["files"] += 1
