@@ -25,8 +25,14 @@ fn preserves_ternary_block_values_and_range_spelling() {
     assert!(once.contains("for id in 1..=80"), "{once}");
     assert!(once.contains("id eq 1023 ? {"), "{once}");
     assert!(once.contains("} : {"), "{once}");
-    assert!(once.contains("answer\n"), "value-block tail lost or terminated: {once}");
-    assert!(!once.contains("answer;\n"), "value-block tail was terminated: {once}");
+    assert!(
+        once.contains("answer\n"),
+        "value-block tail lost or terminated: {once}"
+    );
+    assert!(
+        !once.contains("answer;\n"),
+        "value-block tail was terminated: {once}"
+    );
     assert_eq!(format_source(&once).unwrap(), once);
     assert!(is_formatted(&once).unwrap());
 }
@@ -49,8 +55,14 @@ fn preserves_ternary_arm_tail_and_literal_comments() {
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("left + right\n"), "{formatted}");
     assert!(!formatted.contains("left + right;"), "{formatted}");
-    assert!(formatted.contains("// A comment with ? { } : { } and 1..=80"), "{formatted}");
-    assert!(formatted.contains("\"literal ? { } : { } 1..1024\""), "{formatted}");
+    assert!(
+        formatted.contains("// A comment with ? { } : { } and 1..=80"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("\"literal ? { } : { } 1..1024\""),
+        "{formatted}"
+    );
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
