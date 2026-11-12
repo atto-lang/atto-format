@@ -79,9 +79,38 @@ fn main() -> ExitCode {
             eprintln!("oresfmt: {err}");
             // Syntax/formatting rejection is an ordinary input failure.
             // Keep usage, Git-policy, filesystem and process failures distinct.
-            ExitCode::from(if err.is::<FormatError>() { 1 } else { 2 })
+            let rejected = err.is::<FormatError>() || err.is::<FileFormatError>();
+            ExitCode::from(if rejected { 1 } else { 2 })
         }
     }
+}
+
+/// A source rejection attributed to the file that caused it, so a multi-file
+/// run names the offending path. Still exit status 1 (rejected source).
+#[derive(Debug)]
+struct FileFormatError {
+    path: PathBuf,
+    inner: FormatError,
+}
+
+impl std::fmt::Display for FileFormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.inner)
+    }
+}
+
+impl std::error::Error for FileFormatError {}
+
+fn format_file(path: &Path, input: &str, insert_mtd: bool) -> Result<String, FileFormatError> {
+    let result = if insert_mtd {
+        format_source_with_mtd(input)
+    } else {
+        format_source(input)
+    };
+    result.map_err(|inner| FileFormatError {
+        path: path.to_path_buf(),
+        inner,
+    })
 }
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -198,11 +227,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Err("--stdout requires exactly one filesystem file".into());
         }
         let input = fs::read_to_string(&paths[0])?;
-        let formatted = if insert_mtd {
-            format_source_with_mtd(&input)?
-        } else {
-            format_source(&input)?
-        };
+        let formatted = format_file(&paths[0], &input, insert_mtd)?;
         io::stdout().write_all(formatted.as_bytes())?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -220,11 +245,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Mode::DryRun => {
             for path in files {
                 let input = fs::read_to_string(&path)?;
-                let formatted = if insert_mtd {
-                    format_source_with_mtd(&input)?
-                } else {
-                    format_source(&input)?
-                };
+                let formatted = format_file(&path, &input, insert_mtd)?;
                 if formatted != input {
                     println!("would format {}", path.display());
                 }
@@ -235,11 +256,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let mut dirty = false;
             for path in files {
                 let input = fs::read_to_string(&path)?;
-                let formatted = if insert_mtd {
-                    format_source_with_mtd(&input)?
-                } else {
-                    format_source(&input)?
-                };
+                let formatted = format_file(&path, &input, insert_mtd)?;
                 if formatted != input {
                     eprintln!("needs formatting: {}", path.display());
                     dirty = true;
@@ -282,11 +299,7 @@ fn write_files(
 
     for path in files {
         let input = fs::read_to_string(&path)?;
-        let formatted = if insert_mtd {
-            format_source_with_mtd(&input)?
-        } else {
-            format_source(&input)?
-        };
+        let formatted = format_file(&path, &input, insert_mtd)?;
         if formatted != input {
             changes.push((path, input, formatted));
         }

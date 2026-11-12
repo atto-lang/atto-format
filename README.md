@@ -20,20 +20,24 @@ define class Foo as
 end
 ```
 
-The formatter preserves explicit direct-class-member `let`, `const`,
-and `final` modifiers because they carry distinct semantics. Redundant
-`val T x` is elided only for recognized direct class fields, where the
-bare type-first field is implicitly VAL. Type-first initializers may
-canonicalize `=` to `:`. Actor state, module bindings, local bindings,
+The formatter preserves every explicit direct-class-member binding keyword
+(`val`, `let`, `const`, `final`) because each carries distinct semantics in
+the production compilers: Java parses a bare type-first field as LET, and
+LLVM gives `val` a final slot plus a mutable referent while a bare field has
+neither. Eliding `val` therefore changes a program's meaning (the LLVM
+fixture `class-val-alias-write-reject` went from rejected to accepted), and an
+uninitialized bare `String method;` is parsed by Java as a method header.
+Only bare and `final [mut]` type-first initializers canonicalize `=` to `:`;
+Java's `parseField` accepts only `=` after `val`/`let`/`const`, so those keep
+`=`. Actor state, module bindings, local bindings,
 nested declarations, malformed or conflicting qualifiers, and ambiguous
 source are not silently migrated, and unsupported named-struct declarations,
 trait signatures, and callable-local declarations are left alone.
 Formatter output alone does not prove compiler AST equivalence across backends.
 
-For recognized direct class fields, uninitialized `val T x;` becomes
-`T x;` without altering the implicit VAL binding. Uninitialized `let`,
-`const`, and `final` remain explicit. These spellings still require compiler
-validation, especially where constructors assign stored fields.
+Uninitialized `val`, `let`, `const`, and `final` fields remain explicit.
+These spellings still require compiler validation, especially where
+constructors assign stored fields.
 
 The language's final initialization rules are compiler constraints, not
 formatter transformations. Formatting does not make an uninitialized final
@@ -48,26 +52,33 @@ the full field contract.
 - every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when` in both delimiter styles;
 - brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
 - braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
-- LF line endings, no trailing whitespace, one final newline;
-- direct type-first class field initializers canonically use `:`: `final int foo = 5`
-  becomes `final int foo: 5`, and `string bar = "100"` becomes
-  `string bar: "100"`; ordinary assignments, name-first declarations,
-  comments, string literals, and nested method bodies are never rewritten;
+- LF line endings, no trailing whitespace, one final newline; CRLF is normalized to LF, but a bare CR is rejected because the import-v1 conformance spec ends a `//` comment at CR while the Java and LLVM lexers do not, so rewriting it would expose or hide code;
+- a `for`/`while ... do` header whose body starts on the same line (closed by a later `done`) gets its body on the next line; a complete one-line `... do body; done` loop is kept;
+- bare and `final [mut]` type-first class field initializers canonically use `:`:
+  `final int foo = 5` becomes `final int foo: 5`, and `string bar = "100"`
+  becomes `string bar: "100"`; fields declared with `val`, `let`, or `const`
+  keep `=` (the only separator Java accepts there); ordinary assignments,
+  name-first declarations, comments, string literals, and nested method
+  bodies are never rewritten;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
 - in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
   explicit `method name(...)` remains explicit, and `static fnc` is preserved;
   instance methods require an explicit lambda to be used as callbacks;
-- executable declarations and method implementations use the slim arrow `->`;
+- executable declarations and method implementations use the slim arrow `->`,
+  except actor callables and top-level legacy `suspend fnc` declarations, which
+  use `:` because LLVM requires it there (Java accepts both);
 - ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; `::` may separate the complete return type from the body and permit compact same-line source; callable-body `as` is rejected; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
-- module/static contract callable signatures use the slim arrow `->`, while interface/trait callable signatures use the type-level fat arrow `=>`;
-- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line;
+- interface, contract, and trait callable signatures use the type-level fat arrow `=>` (Java's interface parser accepts only `=>`/`:` and LLVM requires `=>` for contracts);
+- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line; brace-form conditionals (`if c { ... } elif d { ... } else { ... } fi`) are also accepted, keep their author's line layout, and still require `fi`, which may share a line with the closing brace (`} fi`);
+- `/* ... */` block comments nest, as in the Java and LLVM lexers;
+- lines inside an unclosed `(`/`[`, after a line ending in a binary operator, or starting with `.`/`&&`/`||`/`and`/`or` receive one continuation indent level;
 - complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
 - declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
   - classes: `define [pub|private] [abstract] class Name ... as`;
   - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
   - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
-  - package/module callables use the ordinary `fnc|routine` modifier order; generator declarations canonicalize separately to `[pub|private] [static] [async|suspend] gen* name ...`; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - package/module callables use the ordinary `fnc|routine` modifier order; generator declaration headers are preserved verbatim (see below); the `suspend`/`suspends` spelling is preserved; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
   - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
   - class headers keep `as` after the complete inheritance/conformance clause.
 
@@ -86,7 +97,7 @@ formats as:
 
 ```ores
 define pub class User extends Entity implements Named, Serializable as
-  pub val String name;
+  pub final String name: "guest";
 end
 
 pub async fnc refresh() {
@@ -98,7 +109,13 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks:
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks.
+**Compiler status (verified 2026-11-08 against Java `6d8eb70048` and LLVM `0ee037ca3`):** both production
+compilers currently reject an end-delimited body on a free or module callable (Java: "expected '{'"; LLVM:
+"native '::' body requires a class method"). Both accept the `-> Type ::` ... `end` form on class methods.
+The formatter lays the free-callable form out but never rewrites a braced body into it. Likewise,
+`define actor Name as { ... }` (a brace body after `as`) is accepted by LLVM but rejected by Java.
+
 
 ```ores
 fnc classify(int x) -> tuple (int, int, string) ::
@@ -166,11 +183,13 @@ multiline expression body, the formatter adds one continuation indent and
 fails closed if the containing statement never reaches its required explicit
 semicolon. Block lambdas keep explicit `return` statements.
 
-Generator declaration aliases accepted by the compiler are normalized to the
-canonical bare marker: `fnc gen* values()`, `fnc generator* values()`,
-`generator fnc values()`, and `generator routine values()` become
-`gen* values()`. Already-canonical `gen*` stays idempotent, while a callable
-literally named `generator` is preserved. Delegating `yield* source;` is
+Generator declaration headers are preserved exactly as written (only their
+indentation changes): the production compilers currently accept disjoint
+spellings. Java accepts `fnc gen*`, `async fnc gen*`, and `generator fnc`
+but rejects a top-level bare `gen*`; LLVM accepts only bare sync `gen*` /
+`generator*` with a `:` return type. No rewrite between them is accepted by
+both, so none is made until the backends converge. A callable literally named
+`generator` is an ordinary function. Delegating `yield* source;` is
 preserved, and only the scheduler compatibility spelling `rt yield` is
 rewritten to `rt cooperate`.
 
@@ -268,7 +287,8 @@ oresfmt --check -- -generated.ores
 ```
 
 The installed binary is `oresfmt`; `oreslang-format` is also provided as an
-alias. Directories are walked recursively and only `.ores` files are selected.
+alias. Directories are walked recursively and only `.atto` (canonical) and
+legacy `.ores` files are selected.
 Filesystem arguments are parsed as native OS strings rather than forced through
 UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
 
@@ -321,6 +341,69 @@ assert!(clean);
 
 `format_source` is idempotent: formatting canonical output again produces the
 same bytes.
+
+## Compiler acceptance differential
+
+`scripts/check_formatter_acceptance_delta.py` formats every `.atto`/`.ores`
+file in one or more corpora and asks each supplied compiler whether it accepts
+the original and the formatted copy (the two trees keep their layout so
+relative imports still resolve). It fails on any file a compiler accepted
+before formatting but rejects after (`broken`), rejected before but accepts
+after (`newly-accepted`: formatting changed meaning), on compiler-valid source
+the formatter rejects (`rejects-valid`), and on non-idempotent output. A
+missing compiler or a timeout is a harness error, never a rejection. Reviewed
+findings, such as documented migrations that repair source a compiler
+rejected, go in a `--triaged` file (`tests/acceptance_delta_triage.tsv` lists
+those from the wide audit); a triaged entry that no longer occurs is reported
+as stale.
+
+The harness snapshots all bounded, regular corpus inputs into both comparison
+trees, including `.ores.pkg.toml`, non-source import dependencies and supporting
+configuration; Git and generated build/cache directories are excluded. Symlinks,
+special files, unstable inputs and snapshot-budget overruns fail closed. This
+preserves package-root resolution instead of treating a broken original
+checkout and equally broken formatted checkout as equivalent.
+
+A successful differential audit requires at least one configured compiler and
+at least one baseline-accepted original source **for each** compiler. The report
+records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
+reject/reject case may be a valid negative fixture, but it is **not** proof of
+semantic or compiler-admission equivalence; every such case is counted.
+A corpus containing only rejects fails as a harness error. Compiler
+labels must be unique, and each configured compiler must reject a syntactically
+invalid `.atto` control **in a package whose original source it accepted**.
+This rejects always-successful stubs and avoids misinterpreting missing-package
+errors as proof of syntax checking. The control is isolated from the original
+corpus and removed before final reporting.
+
+Compiler crashes, source mutation despite `--stdout`, or changes to **any**
+file in the original snapshot (including manifests or other auxiliary inputs)
+are harness errors. The formatter pass runs sequentially, **completes across
+the whole corpus before compiler admission begins**, and then compiler
+admissions may run in parallel (`--jobs`). This phase barrier prevents
+mixed pre/post-format imports from producing schedule-dependent results.
+
+Snapshot inventories and streamed SHA-256 digests reject source or auxiliary
+file additions, replacements, deletions, and persistent content changes in
+either comparison tree. Formatted source content is fixed before compiler
+admission and must remain unchanged afterward; compiler side effects cannot
+quietly become acceptance evidence. `--jobs` and `--timeout` must be
+positive. Run compiler commands only in an isolated, trusted environment:
+the harness is evidence collection, not a general untrusted-code sandbox.
+This is still parse/typecheck admission evidence only, not exact-head compiler
+execution certification, semantic AST equivalence, or cross-backend guest
+parity.
+
+```bash
+scripts/check_formatter_acceptance_delta.py \
+  --formatter target/release/oresfmt \
+  --compiler 'java=java -cp CLASSPATH dev.oreslang.launcher.OresMain --check {source}' \
+  --compiler 'llvm=PATH/TO/oreslang-llvmc {source}' \
+  --corpus ../oreslang-source.java --corpus ../oreslang-source.llvm
+```
+
+This is parse/typecheck admission evidence for the exact compiler builds
+used, not guest execution parity and not semantic AST equivalence.
 
 ## Why no configuration?
 

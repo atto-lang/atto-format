@@ -1,0 +1,17 @@
+fnc pick(int a, int b, int c, int d): int {
+return a;
+}
+pub fnc main(): int {
+val int total = pick(
+1,
+2,
+3,
+4
+);
+val bool ok = total > 0 &&
+total < 10 ||
+total == 42;
+if ok; then return total +
+1; fi
+return 0;
+}

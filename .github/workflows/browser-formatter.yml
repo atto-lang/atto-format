@@ -1,0 +1,44 @@
+name: Build canonical browser formatter Wasm
+on:
+  push:
+    branches:
+      - feat/browser-wasm-formatter-20261107
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'tests/browser-wasm.mjs'
+      - '.github/workflows/browser-formatter.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  wasm:
+    if: github.repository == 'ores-truffle-oreslang/oreslang-format' && github.ref == 'refs/heads/feat/browser-wasm-formatter-20261107'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: true
+      - name: Install canonical wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check formatter native tests
+        run: cargo test --lib --offline
+      - name: Build real formatter as freestanding Wasm
+        env:
+          RUSTFLAGS: '-C opt-level=z -C panic=abort'
+        run: cargo build --release --lib --target wasm32-unknown-unknown --offline
+      - name: Assert no imports and exercise canonical formatter from Node
+        run: node tests/browser-wasm.mjs
+      - name: Store verified binary on this source-only branch
+        run: |
+          set -eu
+          mkdir -p build/browser
+          cp target/wasm32-unknown-unknown/release/oreslang_format.wasm build/browser/oreslang_format.wasm
+          sha256sum build/browser/oreslang_format.wasm | awk '{ print $1 }' > build/browser/FORMATTER_SHA256.txt
+          printf '%s\n' "$GITHUB_SHA" > build/browser/SOURCE_COMMIT.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -f build/browser/oreslang_format.wasm build/browser/FORMATTER_SHA256.txt build/browser/SOURCE_COMMIT.txt
+          git commit -m 'build(format): pin verified browser Wasm from source commit' || exit 0
+          git push origin "HEAD:refs/heads/feat/browser-wasm-formatter-20261107"
