@@ -155,8 +155,8 @@ define module oci_lifecycle as
     bool sandbox_identity_valid
   ) -> bool {
     return current_agent_epoch > 0 &&
-    claimed_agent_epoch == current_agent_epoch &&
-    sandbox_identity_valid;
+      claimed_agent_epoch == current_agent_epoch &&
+      sandbox_identity_valid;
   }
 
   pub fnc release_resources(bool stop_requested, bool process_absent_confirmed) -> bool {

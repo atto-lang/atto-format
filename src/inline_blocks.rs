@@ -139,10 +139,16 @@ fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
     let mut chars = line.char_indices().peekable();
     while let Some((at, ch)) = chars.next() {
         let next = chars.peek().map(|&(_, ch)| ch);
-        if state.block_comment {
+        if state.block_comment > 0 {
+            // AttoLang block comments nest (Java Lexer and LLVM agree).
+            if ch == '/' && next == Some('*') {
+                state.block_comment += 1;
+                chars.next();
+                continue;
+            }
             if ch == '*' && next == Some('/') {
                 chars.next();
-                state.block_comment = false;
+                state.block_comment -= 1;
             }
             continue;
         }
@@ -161,7 +167,7 @@ fn visible_punctuation(line: &str, state: &mut LexState) -> Vec<(usize, char)> {
         }
         if ch == '/' && next == Some('*') {
             chars.next();
-            state.block_comment = true;
+            state.block_comment = 1;
             continue;
         }
         if ch == '"' || ch == '\'' || ch == 0x60 as char {
