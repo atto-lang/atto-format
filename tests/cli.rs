@@ -851,7 +851,11 @@ fn directory_walk_discovers_atto_and_legacy_ores_but_ignores_other_files() {
     assert_eq!(fs::read_to_string(&legacy).unwrap(), UNFORMATTED);
 
     let written = repo.run(&["--write", "src"]);
-    assert!(written.status.success(), "{}", String::from_utf8_lossy(&written.stderr));
+    assert!(
+        written.status.success(),
+        "{}",
+        String::from_utf8_lossy(&written.stderr)
+    );
     assert_eq!(fs::read_to_string(atto).unwrap(), FORMATTED);
     assert_eq!(fs::read_to_string(legacy).unwrap(), FORMATTED);
     assert_eq!(fs::read_to_string(text).unwrap(), UNFORMATTED);
