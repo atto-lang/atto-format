@@ -1,6 +1,8 @@
 # oreslang-format
 
-The canonical formatter for Oreslang source code.
+The canonical formatter for AttoLang (`.atto`) and explicitly supported legacy Oreslang (`.ores`) source code.
+
+Directory traversal discovers both `.atto` and `.ores` files; explicit file paths are also accepted. Legacy `.ores` files are retained for migration and conformance checks, not as the extension for new AttoLang sources.
 
 There is deliberately **one format and no style configuration**. The same Rust
 library powers the CLI, so editor integrations, CI, and local development use
@@ -109,7 +111,7 @@ The nesting engine understands `module`, `class`, `interface`, `contract`, `trai
 `implements Foo, Bar` never creates formatter nesting; the class body begins
 only after the class header and is closed by its matching `end`.
 
-End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks.
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks. The optional `::` delimiter is preserved when supplied; the default formatter does not minify or insert it automatically. Any separate minifier must emit `::` before deleting the newline that separates a return type from its function body.
 **Compiler status (verified 2026-11-08 against Java `6d8eb70048` and LLVM `0ee037ca3`):** both production
 compilers currently reject an end-delimited body on a free or module callable (Java: "expected '{'"; LLVM:
 "native '::' body requires a class method"). Both accept the `-> Type ::` ... `end` form on class methods.
