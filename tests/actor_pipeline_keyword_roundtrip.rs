@@ -71,6 +71,9 @@ fn split_actor_pipe_keyword_continuations_preserve_stage_order() {
         "pipe spawn Validate()",
         "pipe spawn Sink();",
     ] {
-        assert!(output.contains(marker), "lost pipeline stage {marker}: {output}");
+        assert!(
+            output.contains(marker),
+            "lost pipeline stage {marker}: {output}"
+        );
     }
 }
