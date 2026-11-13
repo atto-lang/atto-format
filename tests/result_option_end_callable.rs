@@ -36,5 +36,8 @@ fn compact_end_delimited_result_type_requires_body_separator() {
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 
     let ambiguous = "fnc checked(int port) -> Result<int, string> return Ok(port); end\n";
-    assert!(format_source(ambiguous).is_err(), "missing :: cannot be guessed safely");
+    assert!(
+        format_source(ambiguous).is_err(),
+        "missing :: cannot be guessed safely"
+    );
 }
