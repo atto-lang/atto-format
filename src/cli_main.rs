@@ -41,7 +41,7 @@ OTHER:
 
 PATHS:
     Files are formatted directly. Directories are traversed recursively and
-    only *.ores files are selected. '-' reads stdin and writes stdout.
+    *.atto and legacy *.ores files are selected. '-' reads stdin and writes stdout.
 
 There are intentionally no general style flags or configuration files.
 "#;
@@ -174,7 +174,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
     if paths.is_empty() {
         return Err(
-            "no input paths; pass one or more .ores files/directories, or '-' for stdin".into(),
+            "no input paths; pass one or more .atto/.ores files or directories, or '-' for stdin".into(),
         );
     }
 

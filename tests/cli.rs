@@ -832,3 +832,42 @@ fn analyze_argument_errors_remain_usage_errors() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown option"));
 }
+
+#[test]
+fn directory_walk_discovers_atto_and_legacy_ores_but_ignores_other_files() {
+    let repo = TempRepo::new("atto-discovery");
+    let atto = repo.write("src/entry.atto", UNFORMATTED);
+    let legacy = repo.write("src/legacy.ores", UNFORMATTED);
+    let text = repo.write("src/unrelated.txt", UNFORMATTED);
+    repo.commit_all("baseline");
+
+    let checked = repo.run(&["--check", "src"]);
+    assert_eq!(checked.status.code(), Some(1));
+    let errors = String::from_utf8_lossy(&checked.stderr);
+    assert!(errors.contains("src/entry.atto"), "{errors}");
+    assert!(errors.contains("src/legacy.ores"), "{errors}");
+    assert!(!errors.contains("unrelated.txt"), "{errors}");
+    assert_eq!(fs::read_to_string(&atto).unwrap(), UNFORMATTED);
+    assert_eq!(fs::read_to_string(&legacy).unwrap(), UNFORMATTED);
+
+    let written = repo.run(&["--write", "src"]);
+    assert!(written.status.success(), "{}", String::from_utf8_lossy(&written.stderr));
+    assert_eq!(fs::read_to_string(atto).unwrap(), FORMATTED);
+    assert_eq!(fs::read_to_string(legacy).unwrap(), FORMATTED);
+    assert_eq!(fs::read_to_string(text).unwrap(), UNFORMATTED);
+    assert!(repo.run(&["--check", "src"]).status.success());
+}
+
+#[test]
+fn explicit_atto_input_is_formatted_and_help_documents_atto_discovery() {
+    let repo = TempRepo::new("atto-explicit");
+    let source = repo.write("program.atto", UNFORMATTED);
+    let checked = repo.run(&["--check", "program.atto"]);
+    assert_eq!(checked.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(source).unwrap(), UNFORMATTED);
+
+    let output = repo.run(&["--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("*.atto and legacy *.ores"), "{help}");
+}
