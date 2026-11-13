@@ -49,3 +49,28 @@ fn actor_pipe_words_in_comments_and_string_literals_are_not_operators() {
     assert!(output.contains("\"pipe | |> spawn A()\""));
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn split_actor_pipe_keyword_continuations_preserve_stage_order() {
+    let source = r#"pub fnc main(): int {
+  val chained = spawn Parse() pipe
+  spawn Validate() pipe
+  spawn Sink();
+  val prefixed = spawn Parse()
+  pipe spawn Validate()
+  pipe spawn Sink();
+  return 0;
+}
+"#;
+    let output = format_source(source).expect("multiline actor pipe");
+    assert_eq!(format_source(&output).unwrap(), output);
+    for marker in [
+        "spawn Parse() pipe",
+        "spawn Validate() pipe",
+        "spawn Sink();",
+        "pipe spawn Validate()",
+        "pipe spawn Sink();",
+    ] {
+        assert!(output.contains(marker), "lost pipeline stage {marker}: {output}");
+    }
+}
