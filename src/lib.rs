@@ -2627,7 +2627,7 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
                 .rev()
                 .find(|&(_, c)| !is_ident_char(c))
                 .map_or(0, |(at, c)| at + c.len_utf8());
-            matches!(&line[word_start..], "and" | "or")
+            matches!(&line[word_start..], "and" | "or" | "pipe")
         }
     }
 }
@@ -2641,6 +2641,7 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || (line.starts_with('.') && !line.starts_with(".."))
         || starts_word(line, "and")
         || starts_word(line, "or")
+        || starts_word(line, "pipe")
 }
 
 fn set_once(value: &mut bool) -> bool {
