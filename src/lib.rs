@@ -2864,10 +2864,17 @@ fn canonicalize_initialize_header(
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
+    // A static fnc *inside a class* is still a legitimate :: callable.
+    // Do not relax the ban for top-level static declarations, nor treat an
+    // arbitrary static member as a callable frame without an exact marker.
+    let static_class_function = instance_member
+        && contains_word(line, "static")
+        && contains_word(line, "fnc")
+        && line.ends_with("::");
     if line.ends_with(';')
         || contains_word(line, "actor")
         || contains_word(line, "isoactor")
-        || contains_word(line, "static")
+        || (contains_word(line, "static") && !static_class_function)
         || contains_word(line, "abstract")
         || starts_word(line, "constructor")
     {
