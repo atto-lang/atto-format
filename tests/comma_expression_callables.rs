@@ -79,7 +79,10 @@ fn typed_inline_and_inferred_comma_lambdas_preserve_result_delimiters() {
         "5 |> foo |> |x, y| -> stdio.println(x + y)",
         "|| -> void => 5 |> foo",
     ] {
-        assert!(formatted.contains(important), "lost: {important}; formatted: {formatted}");
+        assert!(
+            formatted.contains(important),
+            "lost: {important}; formatted: {formatted}"
+        );
     }
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
