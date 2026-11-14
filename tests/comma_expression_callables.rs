@@ -60,24 +60,24 @@ end
 #[test]
 fn typed_inline_and_inferred_comma_lambdas_preserve_result_delimiters() {
     let input = r#"fnc main(): void {
-  val typed = || -> int => 5 + 3;
+  val typed = || => int -> 5 + 3;
   val inferred = || -> 5 + 3;
-  val typed_local = || -> int => val int x = 5, x + 3;
+  val typed_local = || => int -> val int x = 5, x + 3;
   val inferred_local = || -> val int x = 5, x + 3;
   val block = || -> void :: 5 |> foo |> |x, y| -> stdio.println(x + y) end;
-  val pipe = || -> void => 5 |> foo |> |x, y| -> stdio.println(x + y);
+  val pipe = || => void -> 5 |> foo |> |x, y| -> stdio.println(x + y);
   return;
 }
 "#;
     let formatted = format_source(input).expect("typed and inferred lambdas");
     for important in [
-        "|| -> int => 5 + 3",
+        "|| => int -> 5 + 3",
         "|| -> 5 + 3",
-        "|| -> int => val int x = 5, x + 3",
+        "|| => int -> val int x = 5, x + 3",
         "|| -> val int x = 5, x + 3",
         "|| -> void ::",
         "5 |> foo |> |x, y| -> stdio.println(x + y)",
-        "|| -> void => 5 |> foo",
+        "|| => void -> 5 |> foo",
     ] {
         assert!(
             formatted.contains(important),
@@ -90,11 +90,11 @@ fn typed_inline_and_inferred_comma_lambdas_preserve_result_delimiters() {
 #[test]
 fn typed_pipeline_lambda_and_return_type_keeps_arrow_direction() {
     let source = r#"fnc main(): int {
-  return 5 |> |n| -> int => val int x = n + 1, x * 2 |> increment;
+  return 5 |> |n| => int -> val int x = n + 1, x * 2 |> increment;
 }
 "#;
     let formatted = format_source(source).expect("typed inline pipeline stage");
-    assert!(formatted.contains("|n| -> int =>"));
+    assert!(formatted.contains("|n| => int ->"));
     assert!(formatted.contains("val int x = n + 1, x * 2"));
     assert!(formatted.contains("|> increment"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
