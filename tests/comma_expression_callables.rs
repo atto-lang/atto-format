@@ -61,6 +61,7 @@ end
 fn typed_inline_and_inferred_comma_lambdas_preserve_result_delimiters() {
     let input = r#"fnc main(): void {
   val typed = || => int -> 5 + 3;
+  val typed_alias = || (=> int) -> 5 + 3;
   val inferred = || -> 5 + 3;
   val typed_local = || => int -> val int x = 5, x + 3;
   val inferred_local = || -> val int x = 5, x + 3;
@@ -72,6 +73,7 @@ fn typed_inline_and_inferred_comma_lambdas_preserve_result_delimiters() {
     let formatted = format_source(input).expect("typed and inferred lambdas");
     for important in [
         "|| => int -> 5 + 3",
+        "|| (=> int) -> 5 + 3",
         "|| -> 5 + 3",
         "|| => int -> val int x = 5, x + 3",
         "|| -> val int x = 5, x + 3",
