@@ -43,3 +43,11 @@ fn never_rewrites_literals_or_comments_or_ownership_like_identifiers() {
     assert!(output.contains("val copied = 1;"));
     assert!(output.contains("rt /* preserved */ copy foo;"));
 }
+
+#[test]
+fn mixed_legacy_and_bang_tokens_never_create_double_bang() {
+    let source = "fnc f(): int {\n  return rt copy! foo;\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(!formatted.contains("copy!!"), "{formatted}");
+    assert!(formatted.contains("rt copy! foo;"), "{formatted}");
+}
