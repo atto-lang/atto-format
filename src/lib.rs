@@ -4115,7 +4115,31 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
         cursor = end;
     }
     normalized.push_str(&result[cursor..]);
-    normalized
+
+    // A mutable loan may have a parenthesized operand with no source gap
+    // after its distinct 'mut' keyword: borrow!mut(value). Preserve the
+    // parentheses and insert the canonical separator without touching
+    // ordinary identifiers such as mutfoo or text inside comments/quotes.
+    let mut qualifier_parens = Vec::new();
+    for span in visible_word_spans(&normalized, initial) {
+        if &normalized[span.start..span.end] == "borrow"
+            && normalized[span.end..].starts_with("! mut(")
+        {
+            qualifier_parens.push(span.end + "! mut".len());
+        }
+    }
+    if qualifier_parens.is_empty() {
+        return normalized;
+    }
+    let mut formatted = String::with_capacity(normalized.len() + qualifier_parens.len());
+    let mut cursor = 0usize;
+    for at in qualifier_parens {
+        formatted.push_str(&normalized[cursor..at]);
+        formatted.push(' ');
+        cursor = at;
+    }
+    formatted.push_str(&normalized[cursor..]);
+    formatted
 }
 
 fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError> {
