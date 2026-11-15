@@ -15,6 +15,8 @@ fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
         ("rt borrow mut foo", "mut borrow! foo"),
         ("share!foo", "share! foo"),
         ("rt share foo", "share! foo"),
+        ("rt copy !foo", "copy! !foo"),
+        ("copy!!foo", "copy! !foo"),
         ("copy!(foo + bar)", "copy! (foo + bar)"),
     ] {
         let source = format!("fnc f(): int {{\n  return {input};\n}}\n");
