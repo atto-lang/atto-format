@@ -14,8 +14,11 @@ export async function normalize_verified_callable_headers(source, compileGuest) 
   const read = async (text) => {
     const guest = await compileGuest(text);
     if (!(guest instanceof Uint8Array) || guest.byteLength < 8 ||
+        guest.byteLength > 16 * 1024 * 1024 ||
         Buffer.from(guest.subarray(0, 8)).toString('hex') !== '0061736d01000000')
-      throw new Error('Compiler did not return a valid guest Wasm header');
+      throw new Error('Compiler did not return a bounded guest Wasm binary with valid header');
+    if (!WebAssembly.validate(guest))
+      throw new Error('Compiler returned an invalid guest Wasm module');
     return Buffer.from(guest);
   };
   const before = await read(source);
