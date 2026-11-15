@@ -4,6 +4,7 @@ use oreslang_format::{format_source, is_formatted};
 fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
     for (input, expected) in [
         ("copy!foo", "copy! foo"),
+        ("copy!eqfoo", "copy! eqfoo"),
         ("copy!   foo", "copy! foo"),
         ("rt copy foo", "copy! foo"),
         ("take!foo", "take! foo"),
@@ -33,6 +34,9 @@ fn does_not_turn_ordinary_comparisons_or_negation_into_ownership_ops() {
     let output = format_source(source).unwrap();
     assert!(output.contains("copy!=foo;"), "{output}");
     assert!(output.contains("copy!eq;"), "{output}");
+    let neq = format_source("fnc f(): bool {\n  return copy!eq foo;\n}\n").unwrap();
+    assert!(neq.contains("copy!eq foo;"), "{neq}");
+    assert!(!neq.contains("copy! eq foo;"), "{neq}");
     assert!(output.contains("return !foo;"), "{output}");
 }
 
