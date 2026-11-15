@@ -15,6 +15,10 @@ fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
         ("borrow! mut foo", "borrow! mut foo"),
         ("borrow!mut foo", "borrow! mut foo"),
         ("borrow! mutfoo", "borrow! mutfoo"),
+        // The complete 'mut' keyword is required; mutfoo stays the name of
+        // an immutable-loan operand even in the compact source form.
+        ("borrow!mutfoo", "borrow! mutfoo"),
+        ("borrow!mut(value)", "borrow! mut (value)"),
         ("mut borrow!foo", "borrow! mut foo"),
         ("mut borrow! foo", "borrow! mut foo"),
         ("rt mut borrow foo", "borrow! mut foo"),
@@ -47,14 +51,20 @@ fn does_not_turn_ordinary_comparisons_or_negation_into_ownership_ops() {
     assert!(unicode_neq.contains("copy!eq é;"), "{unicode_neq}");
     assert!(!unicode_neq.contains("copy! eq é;"), "{unicode_neq}");
     assert!(output.contains("return !foo;"), "{output}");
+    let mutable_comparison = format_source(
+        "fnc f(): bool {\n  return mut borrow!eq foo;\n}\n").unwrap();
+    assert!(mutable_comparison.contains("mut borrow!eq foo;"),
+            "{mutable_comparison}");
+    assert!(!mutable_comparison.contains("borrow! mut eq foo;"),
+            "{mutable_comparison}");
 }
 
 #[test]
 fn never_rewrites_literals_or_comments_or_ownership_like_identifiers() {
-    let source = "fnc f(): void {\n  stdio.println(\"rt take foo, copy!foo\");\n  // rt borrow mut foo, share!bar\n  val copied = 1;\n  val view = rt /* preserved */ copy foo;\n  return;\n}\n";
+    let source = "fnc f(): void {\n  stdio.println(\"rt take foo, copy!foo, mut borrow!foo\");\n  // rt borrow mut foo, mut borrow!bar, share!bar\n  val copied = 1;\n  val view = rt /* preserved */ copy foo;\n  return;\n}\n";
     let output = format_source(source).unwrap();
-    assert!(output.contains("\"rt take foo, copy!foo\""));
-    assert!(output.contains("// rt borrow mut foo, share!bar"));
+    assert!(output.contains("\"rt take foo, copy!foo, mut borrow!foo\""));
+    assert!(output.contains("// rt borrow mut foo, mut borrow!bar, share!bar"));
     assert!(output.contains("val copied = 1;"));
     assert!(output.contains("rt /* preserved */ copy foo;"));
 }
@@ -79,5 +89,14 @@ fn dense_prefixes_format_linearly_without_losing_tokens() {
     let source = format!("fnc f(): int {{\n  return {legacy};\n}}\n");
     let result = format_source(&source).unwrap();
     assert_eq!(result.matches("copy! ").count(), 256);
+    assert_eq!(format_source(&result).unwrap(), result);
+
+    // A long chain of compatibility mutable-loan prefixes must not incur
+    // quadratic suffix rewriting or accidentally duplicate the qualifier.
+    let old = "mut borrow!".repeat(256) + "foo";
+    let source = format!("fnc f(): int {{\n  return {old};\n}}\n");
+    let result = format_source(&source).unwrap();
+    assert_eq!(result.matches("borrow! mut ").count(), 256);
+    assert!(!result.contains("mut borrow!"), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
