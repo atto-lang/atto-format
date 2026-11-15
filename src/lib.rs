@@ -4026,10 +4026,17 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
         }
         i += 1;
     }
-    let mut result = line.to_string();
-    for (start, end, replacement) in rewrites.into_iter().rev() {
-        result.replace_range(start..end, replacement);
+    // Each reverse replace_range would shift an entire suffix. Dense prefix
+    // chains could therefore turn a linear formatting pass into quadratic
+    // work. Emit one monotonic forward stream instead.
+    let mut result = String::with_capacity(line.len() + rewrites.len());
+    let mut cursor = 0usize;
+    for (start, end, replacement) in rewrites {
+        result.push_str(&line[cursor..start]);
+        result.push_str(replacement);
+        cursor = end;
     }
+    result.push_str(&line[cursor..]);
     // Normalize both compact and already-spaced forms to exactly one ASCII
     // space after '!'. The verb and bang must be adjacent. Comments and
     // strings never become candidate words; leave comments after '!' intact.
@@ -4054,10 +4061,15 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
         }
         inserts.push((at, at + spaces));
     }
-    for (start, end) in inserts.into_iter().rev() {
-        result.replace_range(start..end, " ");
+    let mut normalized = String::with_capacity(result.len() + inserts.len());
+    let mut cursor = 0usize;
+    for (start, end) in inserts {
+        normalized.push_str(&result[cursor..start]);
+        normalized.push(' ');
+        cursor = end;
     }
-    result
+    normalized.push_str(&result[cursor..]);
+    normalized
 }
 
 fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError> {
