@@ -4016,7 +4016,8 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                 // A legacy marker with no expression operand must not be
                 // fabricated into a valid operation. The compiler diagnoses it.
                 let tail = line[end..].trim_start();
-                if !tail.is_empty() && !tail.starts_with(';') && !tail.starts_with('}') {
+                if !tail.is_empty() && !tail.starts_with('!')
+                    && !tail.starts_with(';') && !tail.starts_with('}') {
                     rewrites.push((words[i].start, end, replacement));
                     i += consumed;
                     continue;
