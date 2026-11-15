@@ -4016,7 +4016,11 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                 // A legacy marker with no expression operand must not be
                 // fabricated into a valid operation. The compiler diagnoses it.
                 let tail = line[end..].trim_start();
-                if !tail.is_empty() && !tail.starts_with('!')
+                // An adjacent 'rt copy!foo' is a malformed mixed spelling;
+                // do not manufacture copy!!foo. But 'rt copy !foo' is a
+                // legitimate ownership operation on logical negation and
+                // must canonicalize to 'copy! !foo'.
+                if !tail.is_empty() && !line[end..].starts_with('!')
                     && !tail.starts_with(';') && !tail.starts_with('}') {
                     rewrites.push((words[i].start, end, replacement));
                     i += consumed;
