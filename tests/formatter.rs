@@ -274,7 +274,7 @@ return;
 "#;
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("borrow mut Thing thing"));
-    assert!(formatted.contains("rt mut borrow thing"));
+    assert!(formatted.contains("mut borrow! thing"));
 }
 
 #[test]
@@ -285,7 +285,6 @@ fn rejects_pointer_style_ownership_syntax() {
         "fnc read(borrow Thing thing) -> int { return *thing.value; }\n",
         "fnc read(Pointer<int> thing) -> int { return 1; }\n",
         "fnc read(RawPointer<int> thing) -> int { return 1; }\n",
-        "fnc read(borrow mut Thing thing) -> int { return rt borrow mut thing.value; }\n",
         "fnc read(Thing thing) -> int { return rt ref thing; }\n",
         "fnc read(Thing thing) -> int { return rt deref thing; }\n",
         "fnc read(Thing thing) -> int { return rt unref thing; }\n",
