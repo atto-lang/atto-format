@@ -274,7 +274,7 @@ return;
 "#;
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("borrow mut Thing thing"));
-    assert!(formatted.contains("mut borrow! thing"));
+    assert!(formatted.contains("borrow! mut thing"));
 }
 
 #[test]
