@@ -3994,12 +3994,12 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                 && word(i + 1) == "mut" && word(i + 2) == "borrow"
                 && whitespace_only(&line[words[i + 1].end..words[i + 2].start])
             {
-                (words[i + 2].end, Some("mut borrow!"), 3)
+                (words[i + 2].end, Some("borrow! mut"), 3)
             } else if i + 2 < words.len()
                 && word(i + 1) == "borrow" && word(i + 2) == "mut"
                 && whitespace_only(&line[words[i + 1].end..words[i + 2].start])
             {
-                (words[i + 2].end, Some("mut borrow!"), 3)
+                (words[i + 2].end, Some("borrow! mut"), 3)
             } else if verb(word(i + 1)) {
                 let op = match word(i + 1) {
                     "copy" => "copy!",
@@ -4013,6 +4013,15 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                 (0, None, 0)
             };
             if let Some(replacement) = replacement {
+                // The qualifier follows the attached bang. Keep a separating
+                // space when the legacy operand is adjacent (e.g. rt mut borrow(foo)).
+                let replacement = if replacement == "borrow! mut"
+                    && !line[end..].chars().next().is_some_and(char::is_whitespace)
+                {
+                    "borrow! mut "
+                } else {
+                    replacement
+                };
                 // A legacy marker with no expression operand must not be
                 // fabricated into a valid operation. The compiler diagnoses it.
                 let tail = line[end..].trim_start();
@@ -4026,6 +4035,34 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                     i += consumed;
                     continue;
                 }
+            }
+        }
+        // Older mutable-borrow prefix remains accepted but must never survive
+        // canonical formatting. Rewriting requires visible words, whitespace
+        // between mut/borrow, and borrow immediately adjacent to its bang.
+        if word(i) == "mut" && i + 1 < words.len()
+            && word(i + 1) == "borrow"
+            && whitespace_only(&line[words[i].end..words[i + 1].start])
+            && line[words[i + 1].end..].starts_with('!')
+        {
+            let end = words[i + 1].end + 1;
+            let suffix = &line[end..];
+            let tail = suffix.trim_start();
+            let is_eq = suffix.starts_with("eq") &&
+                suffix[2..].chars().next().is_none_or(|c|
+                    !(c.is_alphabetic() || c.is_ascii_digit() || c == '_'));
+            if !tail.is_empty() && !tail.starts_with(';') && !tail.starts_with('}')
+                && !tail.starts_with("//") && !tail.starts_with("/*")
+                && !suffix.starts_with('=') && !is_eq
+            {
+                let replacement = if suffix.chars().next().is_some_and(char::is_whitespace) {
+                    "borrow! mut"
+                } else {
+                    "borrow! mut "
+                };
+                rewrites.push((words[i].start, end, replacement));
+                i += 2;
+                continue;
             }
         }
         i += 1;
