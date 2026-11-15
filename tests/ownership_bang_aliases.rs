@@ -27,10 +27,10 @@ fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
 
 #[test]
 fn does_not_turn_ordinary_comparisons_or_negation_into_ownership_ops() {
-    let source = "fnc f(): bool {\nreturn copy!=foo;\nreturn copy!eqfoo;\nreturn !foo;\n}\n";
+    let source = "fnc f(): bool {\nreturn copy!=foo;\nreturn copy!eq;\nreturn !foo;\n}\n";
     let output = format_source(source).unwrap();
     assert!(output.contains("copy!=foo;"), "{output}");
-    assert!(output.contains("copy!eqfoo;"), "{output}");
+    assert!(output.contains("copy!eq;"), "{output}");
     assert!(output.contains("return !foo;"), "{output}");
 }
 
