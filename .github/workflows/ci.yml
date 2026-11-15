@@ -1,0 +1,27 @@
+name: Callable header formatter conformance
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  header-conformance:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact PR/branch head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout SHA and tree
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+      - name: Run standalone callable-header golden tests
+        run: |
+          node --version
+          node --test tests/callable-headers.test.mjs
