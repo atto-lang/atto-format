@@ -21,7 +21,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           git rev-parse HEAD
           git rev-parse HEAD^{tree}
-      - name: Run standalone callable-header golden tests
+      - name: Run golden, fail-closed and standalone verification tests
         run: |
           node --version
-          node --test tests/callable-headers.test.mjs
+          node --test tests/*.test.mjs
+      - name: Real compiler conformance must not be inferred from JS-only checks
+        run: |
+          echo "Node golden tests are not a real parser/guest ABI proof."
+          echo "Private exact-tree carrier CI must set ATTOC and run actual Rust compiler comparisons."
