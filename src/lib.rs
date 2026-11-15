@@ -4054,7 +4054,12 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
         let at = span.end + 1;
         let suffix = &result[at..];
         if suffix.starts_with('=') || (suffix.starts_with("eq")
-            && suffix[2..].chars().next().is_none_or(|c| !is_ident_char(c))) {
+            // Java accepts BMP Unicode letters in identifiers; an ASCII
+            // word-boundary test would incorrectly treat copy!eqé as !eq.
+            // LLVM's currently ASCII-only identifier admission is tracked
+            // separately in spec S-22; formatting must not corrupt Java ASTs.
+            && suffix[2..].chars().next().is_none_or(|c|
+                !(c.is_alphabetic() || c.is_ascii_digit() || c == '_'))) {
             continue;
         }
         let spaces = suffix.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
