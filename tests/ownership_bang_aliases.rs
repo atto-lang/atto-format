@@ -51,3 +51,18 @@ fn mixed_legacy_and_bang_tokens_never_create_double_bang() {
     assert!(!formatted.contains("copy!!"), "{formatted}");
     assert!(formatted.contains("rt copy! foo;"), "{formatted}");
 }
+
+#[test]
+fn dense_prefixes_format_linearly_without_losing_tokens() {
+    let nested = "copy!".repeat(256) + "foo";
+    let source = format!("fnc f(): int {{\n  return {nested};\n}}\n");
+    let result = format_source(&source).unwrap();
+    assert_eq!(result.matches("copy! ").count(), 256);
+    assert_eq!(format_source(&result).unwrap(), result);
+
+    let legacy = "rt copy ".repeat(256) + "foo";
+    let source = format!("fnc f(): int {{\n  return {legacy};\n}}\n");
+    let result = format_source(&source).unwrap();
+    assert_eq!(result.matches("copy! ").count(), 256);
+    assert_eq!(format_source(&result).unwrap(), result);
+}
