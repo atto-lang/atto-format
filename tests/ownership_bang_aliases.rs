@@ -19,6 +19,7 @@ fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
         // an immutable-loan operand even in the compact source form.
         ("borrow!mutfoo", "borrow! mutfoo"),
         ("borrow!mut(value)", "borrow! mut (value)"),
+        ("borrow! mut(value)", "borrow! mut (value)"),
         ("mut borrow!foo", "borrow! mut foo"),
         ("mut borrow! foo", "borrow! mut foo"),
         ("rt mut borrow foo", "borrow! mut foo"),
