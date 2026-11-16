@@ -950,7 +950,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             + usize::from(
                 multiline_actor_pipeline_binding
                     && !in_callable_header
-                    && starts_word(structural, "pipe"),
+                    && (starts_word(structural, "pipe")
+                        || starts_word(structural, "rpipe")),
             );
         let annotation_line = structural.starts_with('@');
         // A callable whose parameter list is already expanded one-per-line
@@ -2744,7 +2745,10 @@ fn starts_split_actor_pipeline_binding(line: &str) -> bool {
 /// A visible line ending with a binary operator continues onto the next line.
 fn ends_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_end();
-    for op in ["&&", "||", "^^", "|>", "==", "!="] {
+    // Pipeline direction belongs to the token: never reverse operands.
+    // <| is single-value reverse application; pipe/rpipe build continuous
+    // directed graphs (formatter syntax only).
+    for op in ["&&", "||", "^^", "|>", "<|", "==", "!="] {
         if line.ends_with(op) {
             return true;
         }
@@ -2779,13 +2783,13 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
                 .rev()
                 .find(|&(_, c)| !is_ident_char(c))
                 .map_or(0, |(at, c)| at + c.len_utf8());
-            matches!(&line[word_start..], "and" | "or" | "pipe")
+            matches!(&line[word_start..], "and" | "or" | "pipe" | "rpipe")
         }
     }
 }
 
-/// Distinguish contextual operator words from a local named `pipe`,
-/// `and` or `or` being assigned or called as an ordinary identifier.
+/// Distinguish contextual operator words from local names such as `rpipe`,
+/// `pipe`, `and` or `or` being assigned or called as identifiers.
 /// Allow a standalone operator word followed by its operand on another line.
 fn starts_word_operator_continuation(line: &str, operator: &str) -> bool {
     if !starts_word(line, operator) {
@@ -2806,10 +2810,11 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || line.starts_with("||")
         || line.starts_with("^^")
         || line.starts_with("|>")
+        || line.starts_with("<|")
         || line.starts_with("<<")
         || line.starts_with(">>")
         || (line.starts_with('.') && !line.starts_with(".."))
-        || ["and", "or", "pipe"]
+        || ["and", "or", "pipe", "rpipe"]
             .into_iter()
             .any(|word| starts_word_operator_continuation(line, word))
 }
