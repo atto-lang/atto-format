@@ -34,3 +34,65 @@ Likewise, << and >> single-endpoint I/O and actor-to-stream pipe are only format
 ## Evidence and merge gate
 
 A successful formatter test only proves lexical formatting and fixed-point output, not Java/LLVM/.NET acceptance or native-AOT execution. Require real, nonempty exact-head Rust/CLI test and Clippy jobs before promoting the PR. Do not copy private Git trees to another GitHub organization without an approved security transfer.
+
+## ADT, structural-pattern, callable and suspension audit extension
+
+Additional upstream sources merged between November 11 and November 16:
+
+| PR | Formatter responsibility |
+| --- | --- |
+| [Java #2824](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/2824) | Preserve nested Option/Result/Option sum tags and numeric comparison syntax. |
+| [Java #2715](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/2715), [#2727](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/2727) | Preserve old tilde records and default-match forms without unsafe collection-constructor migration. |
+| [.NET enum #469](https://github.com/ores-truffle-oreslang/oreslang-source.net/pull/469), [#472](https://github.com/ores-truffle-oreslang/oreslang-source.net/pull/472) | Keep nominal enum owner/variant spelling and exhaustive match arms. Limited opt-in compiler, not general ADT parity. |
+| [Rust/Wasm #56](https://github.com/atto-lang/atto-source.rs/pull/56), [#63](https://github.com/atto-lang/atto-source.rs/pull/63) | Preserve exhaustive Result/Option and nested Option<Result> tag patterns and non-exhaustive negative fixtures. |
+| [Rust/Wasm #191](https://github.com/atto-lang/atto-source.rs/pull/191) | Retain exact-value match arms, binding guards, return-match and fallback spellings. |
+| [Atto spec #16](https://github.com/atto-lang/atto-spec/pull/16) | Preserve List/Tuple rest wildcards and explicit bindings, but do not claim compiler implementation. |
+| [Atto spec #19](https://github.com/atto-lang/atto-spec/pull/19) | Keep out-of-line mtd receiver syntax separate from method formals, and distinguish brace bodies from comma/end bodies. |
+| [Atto spec #37](https://github.com/atto-lang/atto-spec/pull/37) | Recognize susp, suspends, suspend without rewriting legacy code into unsupported backend spelling. |
+| [LLVM #1647](https://github.com/ores-truffle-oreslang/oreslang-source.llvm/pull/1647) | Structural patterns have compiler-negative gating, not actual LLVM guest pattern execution. |
+
+### Exact-source ADT fixture provenance
+
+These 15 fixture files were copied from merged upstream compiler trees into
+tests/fixtures/adt-merge-window. The Git blob SHAs were checked against the
+source (and are visible in GitHub). They are tested for formatting only.
+The original compiled-guest or compiler-negative classifications are preserved.
+
+| Fixture basename | Original Git blob SHA |
+| --- | --- |
+| java-numeric-sum-equality | c9e68a0c4df5f25ebc217361fd67557558a3b2bc |
+| net-nullary-enum | 619408dc388499cbcb53e1509e05aacea8074044 |
+| net-enum-function | e2b6c2d0b6060a55e328c3310deea44d607f0e9e |
+| rs-result-ok | 6ffc3d2d799938b9e7d4f1856e0c191c9ac71ee6 |
+| rs-result-err | d4455d4edac14eb17094d9a87076a2edc5ad8061 |
+| rs-option-some | 84141b497c58ce6e4df4f75da368004899828d8d |
+| rs-option-none | 40d65be39d67de284cf68054a6a31f6038d86498 |
+| rs-nested-option-result-ok | ecde4abd6420862d7c0c1975350241b78e88181d |
+| rs-nested-option-result-err | c5a12acda9c71a4a600ef8c18635967fb18ba272 |
+| rs-nested-option-result-none | 5e078f8601d9de859111a6cbbec6a9d6279ab1ed |
+| rs-nested-option-result-arguments | 9e3440f2e1883ee304b8b69f48e27ffb59ef0d0f |
+| rs-fail-option-wrong-variant | f3d56507736efd512a4cfbadde08f8d9407ff8f8 |
+| rs-fail-result-duplicate-arm | 7409c2b63cbd8d41a493ce89291305155e1231e5 |
+| rs-fail-nested-nonexhaustive | 5252768fe8ff766169a0e4ec7e35172b1cc4a24a |
+| rs-fail-adt-identity-equality | 0adbb57cfc4e4fe15ff52dd8af7996223aa18833 |
+
+### Fixes and deliberate non-claims
+
+- A structural ADT pattern brace followed by a binder or guard is not the
+  executable match-arm brace. The normalizer now scans for the next arm arrow.
+- mtd declarations have two parameter groups. Only the method arguments are
+  subject to ordinary parameter reordering; explicit mutable self stays mutable.
+  Equivalent named receivers normalize consistently, and compact comma/end
+  bodies retain their implicit tail instead of acquiring a return or semicolon.
+- Colon-typed brace bodies with the second arrow must not be rewritten into an
+  invalid double-arrow return type.
+- Historical tilde aggregate constructor syntax is not automatically rewritten
+  into modern Map.of, Tuple.of and Array.of builders without ownership proof.
+- Actor-supervisor ADT messages, typed structural patterns, sequence-rest
+  matching, single-caret return, and many mtd receiver spellings still require
+  actual backend parser, typecheck and guest-execution evidence. Formatting
+  is not an implementation of their runtime semantics.
+
+New regression modules: tests/adt_merge_window.rs,
+tests/modern_callable_receivers.rs and src/match_switch.rs local unit tests;
+the two CLI binaries also replay representative upstream ADT sources.
