@@ -31,6 +31,9 @@ fn both_cli_names_match_the_library_and_reach_a_fixed_point() {
         "fnc answer() => int {\nreturn 42;\n}\n",
         "fnc verify(int value) -> int {\nif value < 0; do return -1; fi\nreturn 2;\n}\n",
         include_str!("fixtures/multiline-actor-io-return.atto"),
+        include_str!("fixtures/adt-merge-window/net-nullary-enum.atto"),
+        include_str!("fixtures/adt-merge-window/rs-nested-option-result-ok.atto"),
+        include_str!("fixtures/adt-merge-window/rs-fail-result-duplicate-arm.atto"),
         "define class Cache as\n  final Map<int, int> frozen = new Map<int, int>();\nend\n",
     ];
 
