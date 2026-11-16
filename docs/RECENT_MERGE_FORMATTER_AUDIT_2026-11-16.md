@@ -122,3 +122,47 @@ These are formatting/idempotence checks only. The PR does not infer edge
 roles, reject mixed pipe/rpipe source at typecheck time, create PipeHandles
 or execute live graph/stream/actor guests. A genuine acceptance claim
 requires compiled and run source tests on the backend's exact head.
+
+## Four-repository directional compiler convergence — authored, NOT EXECUTED
+
+Related source compiler change requests:
+
+- [Java #3150](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/3150):
+  reverse single-value application lowered to checked Java source-call AST;
+  continuous rpipe denied until port/mailbox implementation.
+- [LLVM #1870](https://github.com/ores-truffle-oreslang/oreslang-source.llvm/pull/1870):
+  native reverse application into checked Call AST; newly registered
+  Clang O0/O2 source guest tests; continuous rpipe fail closed.
+- [.NET #556](https://github.com/ores-truffle-oreslang/oreslang-source.net/pull/556):
+  bounded static helper application in checked structured CFG/CIL;
+  minimal scalar compiler rejects named pipelines, rpipe graphs denied.
+- [Formatter #145](https://github.com/ores-truffle-oreslang/oreslang-format/pull/145):
+  both CLI aliases replay the same canonical source snapshots.
+
+### Five byte-identical Atto source fixtures
+
+| Source filename under tests/fixtures/directional-parity | Git blob SHA |
+| --- | --- |
+| directional-value-forward-v1.atto | 6db28251c678aee754ca519225117e5a50381f4c |
+| directional-value-reverse-v1.atto | 3e8809b58309e99b937e41e1f438effcdfbf8269 |
+| directional-value-mixed-reject.atto | 66e948f943025aa9f54bc326fba87806a49c9d2a |
+| directional-actor-rpipe-reject.atto | 4f09ecf39e1295d1c5e4cb0d9b52c584feabed75 |
+| directional-rpipe-contextual-name.atto | 1578e15eecd769f07a9c9737b04cbf6e49421bad |
+
+Expected: executable forward/reverse scalar sources both return 42;
+unparenthesized mixed functional directions reject with
+E_VALUE_PIPE_DIRECTION; unsupported continuous source rpipe rejects
+E_ACTOR_PIPE_BACKEND_UNSUPPORTED instead of silently emulating a graph.
+Contextual rpipe remains a valid scalar identifier.
+
+### Evidence limitation
+
+The source organization Java, LLVM and .NET Actions attempts failed
+before any steps executed. The formatter exact-head jobs were queued.
+A fixture or an authored CTest is not a passing guest or Native AOT
+proof. Actual compiled, executed, stepful SHA-pinned receipts for
+JDK/Graal, LLVM/Clang and full .NET Native AOT are still outstanding.
+Draft [Atto spec #45](https://github.com/atto-lang/atto-spec/pull/45)
+describes continuous reverse stream/actor flow but does not establish
+typed edges, ownership, bounded backpressure, EOF, cancellation, or
+supervisor DATA/CONTROL runtime parity.
