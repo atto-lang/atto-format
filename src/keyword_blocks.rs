@@ -474,8 +474,10 @@ fn terminate_simple_returns(source: &str) -> String {
             && tokens
                 .first()
                 .is_some_and(|token| matches!(token.text, "return" | "^"))
-            // The merged logical-XOR token is ^^, not two return prefixes.
+            // The merged logical-XOR token is ^^; spaced ^ ^ is also
+            // rejected source, not a return statement to auto-terminate.
             && !code.starts_with("^^")
+            && !tokens.get(1).is_some_and(|token| token.text == "^")
             && !code.ends_with(';');
         let bare_return = is_return && tokens.len() == 1;
         let simple_expression_return = is_return
@@ -733,6 +735,7 @@ mod tests {
         }
         assert_eq!(normalize("\"^ 42\" // ^ 3"), "\"^ 42\" // ^ 3");
         assert_eq!(normalize("^^ value"), "^^ value");
+        assert_eq!(normalize("^ ^ value"), "^ ^ value");
         assert_eq!(normalize("^ 42 ^^ 1"), "^ 42 ^^ 1;");
     }
 
