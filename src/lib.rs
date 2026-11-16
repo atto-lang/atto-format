@@ -924,12 +924,16 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             && !assignment_lambda_continuation
             && lambda_expr_continuation.is_none()
             && (operator_continuation || starts_with_continuation_operator(structural));
+        let actor_pipeline_root_indent = pending_actor_pipeline_binding
+            && starts_word(structural, "spawn")
+            && !operator_indent;
         let current_indent = indent
             + usize::from(lambda_expr_continuation.is_some())
             + usize::from(assignment_lambda_continuation)
             + usize::from(pending_callable_parameter_depth > 0 && !closes_multiline_callable)
             + paren_continuation
             + usize::from(operator_indent)
+            + usize::from(actor_pipeline_root_indent)
             + usize::from(
                 multiline_actor_pipeline_binding
                     && !in_callable_header
@@ -2629,8 +2633,11 @@ fn code_with_literal_placeholders(line: &str, initial: LexState) -> String {
 /// the `pipe` keyword use the existing generic continuation rule.
 fn starts_split_actor_pipeline_binding(line: &str) -> bool {
     let line = line.trim();
+    let Some(prefix) = line.strip_suffix('=') else {
+        return false;
+    };
     (starts_word(line, "val") || starts_word(line, "let") || starts_word(line, "const"))
-        && line.ends_with('=')
+        && !matches!(prefix.chars().last(), Some('=' | '!' | '<' | '>'))
 }
 
 /// A visible line ending with a binary operator continues onto the next line.
