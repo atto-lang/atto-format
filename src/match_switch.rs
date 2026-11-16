@@ -89,14 +89,27 @@ pub(crate) fn normalize(source: &str) -> String {
                     "[" => brackets += 1,
                     "]" => brackets = brackets.saturating_sub(1),
                     "{" if parens == 0 && brackets == 0 => {
-                        // The first brace in 'on Foo as {v} -> { ... }'
-                        // is a *record pattern*, not an executable block.
-                        // Only skip a balanced shape if '->' follows it.
+                        // ADT/structural field patterns can themselves
+                        // contain braces. Their arrow may follow a binding
+                        // and/or guard: on ~{x?: 10, y: _} as val p when ok(p)
+                        // -> { ... }. The first brace is a pattern, not a
+                        // statement body. Scan only the arm header; do not
+                        // consume an arrow from a subsequent arm or body.
                         if let Some(shape_end) = matching_brace(&lexed, body) {
-                            if shape_end + 2 < close
-                                && lexed[shape_end + 1].text == "-"
-                                && lexed[shape_end + 2].text == ">"
-                            {
+                            let mut candidate = shape_end + 1;
+                            let mut is_pattern = false;
+                            while candidate + 1 < close {
+                                let current = lexed[candidate].text;
+                                if matches!(current, "{" | "}" | "on" | "case" | "default") {
+                                    break;
+                                }
+                                if current == "-" && lexed[candidate + 1].text == ">" {
+                                    is_pattern = true;
+                                    break;
+                                }
+                                candidate += 1;
+                            }
+                            if is_pattern {
                                 body = shape_end + 1;
                                 continue;
                             }
@@ -223,6 +236,41 @@ match msg over {
         assert!(output.contains("default {"), "{output}");
         assert!(!output.contains("on default"), "{output}");
         assert!(output.contains("on _ as"), "{output}");
+        assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn structural_pattern_braces_with_guard_and_binding_are_not_arm_bodies() {
+        let source = r#"match value over {
+  on ~{ x?: 10, y: _ } as val point when is_ready(point) -> { process(point); },
+  on ~{ x: 11 } when has_tag(value) -> { process(value); };
+  on _ -> { fallback(); }
+}
+"#;
+        let output = normalize(source);
+        assert!(output.contains("on ~{ x?: 10, y: _ } as val point when is_ready(point) -> {"), "{output}");
+        assert!(output.contains("on ~{ x: 11 } when has_tag(value) -> {"), "{output}");
+        assert!(output.contains("on _ -> {"), "{output}");
+        assert!(!output.contains("on ~{\n"), "pattern was split as a body: {output}");
+        assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn nested_adt_record_patterns_never_steal_braced_arm_body() {
+        let source = r#"match value over {
+  on Some(~{ x: 10, y: _ }) when ok -> { accept(); },
+  on Err(message) -> { fail(message); };
+  on None -> { skip(); }
+}
+"#;
+        let output = normalize(source);
+        for needle in [
+            "on Some(~{ x: 10, y: _ }) when ok -> {",
+            "on Err(message) -> {",
+            "on None -> {",
+        ] {
+            assert!(output.contains(needle), "{needle}: {output}");
+        }
         assert_eq!(normalize(&output), output);
     }
 
