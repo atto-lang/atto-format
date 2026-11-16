@@ -1341,7 +1341,7 @@ fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     let lexed = select::tokens(line);
     let mut index = 0usize;
     match lexed.first()?.text {
-        "return" | "do" => index = 1,
+        "return" | "^" | "do" => index = 1,
         "nb" | "try" | "match" | "switch" | "select" => {}
         _ => {
             // Source declaration or assignment: only a direct RHS dispatch
