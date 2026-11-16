@@ -2643,10 +2643,10 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
     }
     // Do not misread nested generic type closers such as Map<T, List<U>>
     // as a trailing channel read/write operator.
-    if ["<<", ">>"]
-        .iter()
-        .any(|op| line.strip_suffix(op).is_some_and(|left| left.ends_with(char::is_whitespace)))
-    {
+    if ["<<", ">>"].into_iter().any(|op| {
+        line.strip_suffix(op)
+            .is_some_and(|left| left.ends_with(char::is_whitespace))
+    }) {
         return true;
     }
     if line.ends_with("->") || line.ends_with("=>") || line.ends_with("++") || line.ends_with("--")
