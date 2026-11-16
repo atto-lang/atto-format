@@ -163,16 +163,17 @@ return pure + borrow;
 }
 
 #[test]
-fn mixed_name_first_and_type_first_formals_keep_their_names() {
-    // .NET #525 permits a mixed required scalar formal list in its
-    // experimental frontend; formatter stays syntax-only.
+fn mixed_name_first_and_type_first_formals_keep_canonical_type_first_output() {
+    // .NET #525 now admits both source forms. The formatter already
+    // canonicalizes unambiguous required name-first parameters to type-first;
+    // do not silently change the established formatter contract.
     let source = r#"fnc sum(x: int, int y) -> int {
 return x + y;
 }
 "#;
     let output = fixed_point(source);
-    assert!(output.contains("sum(x: int, int y)"), "{output}");
-    assert!(!output.contains("sum(int x, int y)"), "{output}");
+    assert!(output.contains("sum(int x, int y)"), "{output}");
+    assert!(!output.contains("sum(x: int, int y)"), "{output}");
 }
 
 #[test]
