@@ -296,6 +296,23 @@ These are **lexical formatting contracts only**. Acceptance, typechecking,
 I/O effects, pipe interoperation and guest execution require backend-specific
 compiler/runtime conformance tests; successful formatting does not prove them.
 
+### Merged-grammar compatibility and security
+
+The formatter also preserves multiline `^^` logical-XOR stages without
+confusing them with the proposed single-`^` return form. The **current
+merged Java and LLVM grammars still reject single `^`**, so return-shorthand
+formatting is a forward-looking syntax contract, not executable language
+support. This incompatibility needs a spec and backend-parser decision.
+
+Source preflight rejects a 129th nested `/* ... */` comment (spec chapter 16,
+Java/LLVM/.NET admission), raw ESC/DEL controls, and source-spoofing bidi
+characters, including those embedded in comments or literals. Ordinary Unicode
+and CRLF normalization remain supported.
+
+See [the November 11–16 merged-PR audit](docs/RECENT_MERGE_FORMATTER_AUDIT_2026-11-16.md)
+for upstream PRs, the identical Java `^^` source fixture and the additional
+regression gates.
+
 ## CLI
 
 ```bash
