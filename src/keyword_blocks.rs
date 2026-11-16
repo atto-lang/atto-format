@@ -308,11 +308,12 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
             .iter()
             .any(|prefix| next.starts_with(prefix))
         || next.starts_with("/*")
-        || [
-            "on", "when", "case", "default", "as", "is", "with", "over", "and", "or", "pipe",
-        ]
-        .iter()
-        .any(|word| crate::starts_word(next, word))
+        || ["on", "when", "case", "default", "as", "is", "with", "over"]
+            .iter()
+            .any(|word| crate::starts_word(next, word))
+        || ["and", "or", "pipe"]
+            .into_iter()
+            .any(|word| crate::starts_word_operator_continuation(next, word))
 }
 
 fn split_keyword_blocks(source: &str) -> String {
@@ -699,6 +700,21 @@ mod tests {
     #[test]
     fn caret_return_in_compact_keyword_if_splits_before_fi() {
         assert_eq!(normalize("if ready then ^ 42 fi"), "if ready then\n ^ 42;\nfi");
+    }
+
+    #[test]
+    fn contextual_operator_identifier_after_return_is_a_new_statement() {
+        for op in ["pipe", "and", "or"] {
+            for keyword in ["return", "^"] {
+                let source = format!("{keyword} result\n{op} = 3;");
+                let expected = format!("{keyword} result;\n{op} = 3;");
+                assert_eq!(normalize(&source), expected, "{source}");
+            }
+        }
+        assert_eq!(
+            normalize("return source\npipe spawn Consumer();"),
+            "return source\npipe spawn Consumer();"
+        );
     }
 
     #[test]
