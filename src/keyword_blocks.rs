@@ -304,14 +304,14 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
                     | "or"
             )
         )
-        || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "^^", "|>", "<<", ">>"]
+        || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "^^", "|>", "<|", "<<", ">>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
         || next.starts_with("/*")
         || ["on", "when", "case", "default", "as", "is", "with", "over"]
             .iter()
             .any(|word| crate::starts_word(next, word))
-        || ["and", "or", "pipe"]
+        || ["and", "or", "pipe", "rpipe"]
             .into_iter()
             .any(|word| crate::starts_word_operator_continuation(next, word))
 }
@@ -726,6 +726,9 @@ mod tests {
             "^ future\n|> transform;",
             "^ source\n>> val result;",
             "^ sink\n<< payload;",
+            "^ pending\n<| transform_result;",
+            "return sink\nrpipe source;",
+            "return future\n|> transform\n<| finalizer;",
         ] {
             let output = normalize(source);
             assert!(
