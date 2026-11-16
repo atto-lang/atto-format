@@ -2767,6 +2767,21 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
     }
 }
 
+/// Distinguish contextual operator words from a local named `pipe`,
+/// `and` or `or` being assigned or called as an ordinary identifier.
+/// Allow a standalone operator word followed by its operand on another line.
+fn starts_word_operator_continuation(line: &str, operator: &str) -> bool {
+    if !starts_word(line, operator) {
+        return false;
+    }
+    let rest = &line[operator.len()..];
+    let tail = rest.trim_start();
+    if rest.starts_with('(') || rest.starts_with('.') || rest.starts_with('[') {
+        return false; // callable/member/indexed identifier use
+    }
+    !tail.starts_with('=') && !tail.starts_with(':') && !tail.starts_with(";")
+}
+
 /// A visible line beginning with a binary operator continues the previous one.
 fn starts_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_start();
@@ -2777,9 +2792,9 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || line.starts_with("<<")
         || line.starts_with(">>")
         || (line.starts_with('.') && !line.starts_with(".."))
-        || starts_word(line, "and")
-        || starts_word(line, "or")
-        || starts_word(line, "pipe")
+        || ["and", "or", "pipe"]
+            .into_iter()
+            .any(|word| starts_word_operator_continuation(line, word))
 }
 
 fn set_once(value: &mut bool) -> bool {
