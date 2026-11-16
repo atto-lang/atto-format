@@ -304,12 +304,12 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
                     | "or"
             )
         )
-        || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>"]
+        || [".", "?.", "(", "[", "+", "-", "*", "/", "&&", "||", "|>", "<<", ">>"]
             .iter()
             .any(|prefix| next.starts_with(prefix))
         || next.starts_with("/*")
         || [
-            "on", "when", "case", "default", "as", "is", "with", "over", "and", "or",
+            "on", "when", "case", "default", "as", "is", "with", "over", "and", "or", "pipe",
         ]
         .iter()
         .any(|word| crate::starts_word(next, word))
@@ -463,13 +463,16 @@ fn terminate_simple_returns(source: &str) -> String {
         let code_end = scanned.line_comment.unwrap_or(line.len());
         let code = line[..code_end].trim_end();
 
-        // Add a terminator only when the return is definitely complete on
-        // this line. Bare returns are always complete. Expression returns
+        // Add a terminator only when the return or its ^ shorthand is
+        // definitely complete on this line. Bare returns are complete.
+        // Expression returns
         // fail closed around multiline/block syntax so formatting cannot
         // silently terminate a future match/select/continuation early.
         let is_return = initial.block_comment == 0
             && !scanned.block_comment_seen
-            && tokens.first().is_some_and(|token| token.text == "return")
+            && tokens
+                .first()
+                .is_some_and(|token| matches!(token.text, "return" | "^"))
             && !code.ends_with(';');
         let bare_return = is_return && tokens.len() == 1;
         let simple_expression_return = is_return
@@ -685,6 +688,27 @@ mod tests {
     fn canonicalizes_bare_return_and_preserves_line_comment() {
         assert_eq!(normalize("return"), "return;");
         assert_eq!(normalize("return // done"), "return; // done");
+        assert_eq!(normalize("^"), "^;");
+        assert_eq!(normalize("^ // done"), "^; // done");
+        assert_eq!(normalize("^ 42"), "^ 42;");
+        assert_eq!(normalize("^ value // done"), "^ value; // done");
+    }
+
+    #[test]
+    fn caret_return_keeps_multiline_directional_and_actor_pipelines_open() {
+        for source in [
+            "^ spawn Producer()\npipe spawn Consumer();",
+            "^ future\n|> transform;",
+            "^ source\n>> val result;",
+            "^ sink\n<< payload;",
+        ] {
+            let output = normalize(source);
+            assert!(
+                !output.lines().next().unwrap().ends_with(';'),
+                "shorthand return was terminated before the next operator: {output}"
+            );
+        }
+        assert_eq!(normalize("\"^ 42\" // ^ 3"), "\"^ 42\" // ^ 3");
     }
 
     #[test]
