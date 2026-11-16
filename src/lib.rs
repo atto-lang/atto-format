@@ -884,7 +884,6 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             // Mtd headers were normalized using their second parameter
             // list; never apply a generic rewrite to the receiver group.
             // Generator return spelling is backend-specific, as above.
-            // the backend-specific header spelling.
         } else if callable_body
             && !end_delimited_callable
             && (actor_member
@@ -3056,9 +3055,8 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     {
         return false;
     }
-    let Some(close) = callable_parameter_close(
-        method_line, method_line.len(), LexState::default()
-    ) else {
+    let close = callable_parameter_close(method_line, method_line.len(), LexState::default());
+    let Some(close) = close else {
         return false;
     };
     let header_tail = method_line[close + 1..].trim();
