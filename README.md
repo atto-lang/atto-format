@@ -313,6 +313,70 @@ See [the November 11–16 merged-PR audit](docs/RECENT_MERGE_FORMATTER_AUDIT_202
 for upstream PRs, the identical Java `^^` source fixture and the additional
 regression gates.
 
+## Directional continuous pipelines and functional application
+
+The formatter preserves four separate operators, with no implicit reversal,
+canonical substitution, or conversion to one-shot I/O:
+
+| Syntax | Meaning |
+| --- | --- |
+| `A pipe B` | One continuous directed connection from A to B |
+| `A rpipe B` | One continuous directed connection from B to A |
+| `value |> f` | One application of f to value |
+| `f <| value` | The same one-value application, written in reverse order |
+
+The two continuous chains below describe the same **dataflow direction**,
+but the formatter retains their exact author-written stage order:
+
+```atto
+val forward =
+  spawn Producer()
+    pipe spawn Transformer()
+    pipe spawn Consumer();
+
+val reverse =
+  spawn Consumer()
+    rpipe spawn Transformer()
+    rpipe spawn Producer();
+
+readable pipe transform pipe writable;
+writable rpipe transform rpipe readable;
+```
+
+For functional application, `value |> f` and `f <| value` do **not**
+create or activate continuous stream/actor graphs. Both symbolic application
+operators may end a physical line or begin a continuation line; comments,
+quoted punctuation, generic closers and contextual method/variable names stay
+untouched.
+
+An inline buffered stream capture stage is preserved as an expression
+inside its own parentheses, not converted to a disconnected assignment:
+
+```atto
+readable
+  pipe transform
+  pipe (let results: Stream<Output> = Stream.buffered<Output>(64));
+
+(let results: Stream<Output> = Stream.buffered<Output>(64))
+  rpipe transform
+  rpipe readable;
+```
+
+The separate one-read/one-write operators `<<` and `>>` remain unchanged.
+Unparenthesized `pipe`/`rpipe` mixing is disallowed by the proposed
+compiler contract; formatting preserves such invalid source for diagnostics
+rather than silently reversing or fixing it.
+
+**Status:** [Atto spec PR #45](https://github.com/atto-lang/atto-spec/pull/45)
+is a draft candidate, not a merged compiler/runtime capability. In particular,
+this formatter does not prove typed endpoint roles, Stream ownership, atomic
+activation, backpressure, graph lifecycle, or guest execution. These require
+their own compiler-backed conformance tests.
+
+See `tests/directional_pipe_rpipe_application.rs` for fixed-point
+continuation tests and `tests/fixtures/directional-pipelines-v1.atto` for
+the CLI parity corpus.
+
 ## ADT and modern callable syntax compatibility
 
 The formatter also round-trips merged Java, .NET and Rust/Wasm ADT guest
