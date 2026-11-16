@@ -634,6 +634,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let mut expr_paren_balance = 0usize;
     let mut expr_paren_levels: Vec<usize> = Vec::new();
     let mut operator_continuation = false;
+    // A split binding whose right-hand side begins with an actor spawn keeps
+    // its following leading `pipe` stages one level deeper than the first
+    // spawned actor. This is presentation-only: no pipe tokens are inserted.
+    let mut pending_actor_pipeline_binding = false;
+    let mut multiline_actor_pipeline_binding = false;
 
     for (line_index, raw_line) in normalized.lines().enumerate() {
         let line_no = line_index + 1;
@@ -924,7 +929,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             + usize::from(assignment_lambda_continuation)
             + usize::from(pending_callable_parameter_depth > 0 && !closes_multiline_callable)
             + paren_continuation
-            + usize::from(operator_indent);
+            + usize::from(operator_indent)
+            + usize::from(
+                multiline_actor_pipeline_binding
+                    && !in_callable_header
+                    && starts_word(structural, "pipe"),
+            );
         let annotation_line = structural.starts_with('@');
         // A callable whose parameter list is already expanded one-per-line
         // begins with `name(`; it must receive the same separation as the
@@ -1144,6 +1154,23 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         pending_assignment_continuation = structural.trim_end().ends_with('=');
+
+        // An assignment line followed by `spawn` starts an actor pipeline.
+        // Keep the state across blank/comment-only lines, and release it at
+        // the statement terminator so later unrelated pipes are unaffected.
+        if starts_split_actor_pipeline_binding(structural) {
+            pending_actor_pipeline_binding = true;
+            multiline_actor_pipeline_binding = false;
+        } else if !structural.trim().is_empty() {
+            if pending_actor_pipeline_binding {
+                multiline_actor_pipeline_binding = starts_word(structural, "spawn");
+                pending_actor_pipeline_binding = false;
+            }
+            if ends_statement(structural) || is_closer_line(structural) {
+                pending_actor_pipeline_binding = false;
+                multiline_actor_pipeline_binding = false;
+            }
+        }
 
         if !structural.trim().is_empty() {
             operator_continuation =
@@ -2597,6 +2624,15 @@ fn code_with_literal_placeholders(line: &str, initial: LexState) -> String {
     out
 }
 
+/// Only a binding whose right-hand side is split off may establish the
+/// additional actor-pipeline indentation context; ordinary expressions with
+/// the `pipe` keyword use the existing generic continuation rule.
+fn starts_split_actor_pipeline_binding(line: &str) -> bool {
+    let line = line.trim();
+    (starts_word(line, "val") || starts_word(line, "let") || starts_word(line, "const"))
+        && line.ends_with('=')
+}
+
 /// A visible line ending with a binary operator continues onto the next line.
 fn ends_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_end();
@@ -2604,6 +2640,14 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
         if line.ends_with(op) {
             return true;
         }
+    }
+    // Do not misread nested generic type closers such as Map<T, List<U>>
+    // as a trailing channel read/write operator.
+    if ["<<", ">>"]
+        .iter()
+        .any(|op| line.strip_suffix(op).is_some_and(|left| left.ends_with(char::is_whitespace)))
+    {
+        return true;
     }
     if line.ends_with("->") || line.ends_with("=>") || line.ends_with("++") || line.ends_with("--")
     {
@@ -2638,6 +2682,8 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
     line.starts_with("&&")
         || line.starts_with("||")
         || line.starts_with("|>")
+        || line.starts_with("<<")
+        || line.starts_with(">>")
         || (line.starts_with('.') && !line.starts_with(".."))
         || starts_word(line, "and")
         || starts_word(line, "or")
