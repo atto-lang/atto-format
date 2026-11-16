@@ -33,7 +33,7 @@ return 42;
         "  val reverse =\n    spawn Consumer()\n      rpipe spawn Transformer()\n      rpipe spawn Producer();"
     ), "{output}");
     assert_eq!(output.matches("rpipe spawn").count(), 2, "{output}");
-    assert_eq!(output.matches("pipe spawn").count(), 4, "{output}");
+    assert_eq!(output.matches("      pipe spawn").count(), 2, "{output}");
 }
 
 #[test]
@@ -221,4 +221,60 @@ fn quoted_text_comments_generics_and_mixed_direction_are_not_rewritten() {
     assert_eq!(output.matches("rpipe sink").count(), 1, "{output}");
     // Mixed direction is rejected by the proposed compiler contract,
     // not made valid by a source-only formatter.
+}
+
+#[test]
+fn reversed_actor_chain_preserves_all_stages_at_2_3_and_16() {
+    // The proposed directed-graph contract supports arbitrary checked
+    // stages; formatting must keep every written stage exactly once.
+    for count in [2_usize, 3, 16] {
+        let mut input = String::from("fnc reversed(): int {\nval connection =\nspawn Sink0()\n");
+        for n in 1..count {
+            let stop = if n + 1 == count { ";" } else { "" };
+            input.push_str(&format!("rpipe spawn Stage{n}(){stop}\n"));
+        }
+        input.push_str("return 42;\n}\n");
+
+        let output = fixed_point(&input);
+        assert!(output.contains("    spawn Sink0()\n"), "{count}: {output}");
+        for n in 1..count {
+            assert!(
+                output.contains(&format!("      rpipe spawn Stage{n}()")),
+                "{count}: missing stage {n}: {output}"
+            );
+        }
+        assert_eq!(output.matches("rpipe spawn Stage").count(), count - 1);
+        assert!(output.contains("  return 42;\n"), "{count}: {output}");
+    }
+}
+
+#[test]
+fn literal_or_comment_operator_text_must_not_continue_a_return() {
+    let source = r#"fnc explanation(): string {
+  return "literal <| rpipe |>";
+  // rpipe source <| transformed
+  return "finished";
+}
+"#;
+    let output = fixed_point(source);
+    assert!(output.contains("  return \"literal <| rpipe |>\";"), "{output}");
+    assert!(output.contains("  // rpipe source <| transformed"), "{output}");
+    assert!(output.contains("  return \"finished\";"), "{output}");
+}
+
+#[test]
+fn pipe_and_rpipe_contextual_calls_remain_callable_identifiers() {
+    let source = r#"fnc names(): int {
+pipe(1);
+rpipe(2);
+val pipe = 3;
+val rpipe = 4;
+return pipe + rpipe;
+}
+"#;
+    let output = fixed_point(source);
+    assert!(output.contains("  pipe(1);"), "{output}");
+    assert!(output.contains("  rpipe(2);"), "{output}");
+    assert!(output.contains("  val pipe = 3;"), "{output}");
+    assert!(output.contains("  val rpipe = 4;"), "{output}");
 }
