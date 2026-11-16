@@ -196,3 +196,26 @@ bar;
     assert!(output.contains("  val ready = foo ^^\n    bar;"), "{output}");
     assert!(output.contains("  ^ 42;"), "{output}");
 }
+
+#[test]
+fn exact_merged_java_boolean_punctuation_corpus_formats_idempotently() {
+    // Byte-for-byte Java #3009 main source contract:
+    // Git blob f7e1e082572a0d63483acca44ee7b61a9e6e9032.
+    // The formatter is not a substitute for Java/LLVM guest execution.
+    let source = include_str!("fixtures/merged-java-logical-punctuation-v1.atto");
+    let output = fixed_point(source);
+    assert!(output.contains("(false ^^ true) == true"), "{output}");
+    assert!(output.contains("(true ^^ true ^^ true) == true"), "{output}");
+    assert!(output.contains("(false || true ^^ true && false) == true"), "{output}");
+    assert!(!output.contains("^ ^"), "{output}");
+}
+
+#[test]
+fn optional_parameter_question_marker_never_becomes_required_type_first() {
+    // The .NET parser accepts the spelling but currently rejects optional
+    // helper ABI lowering. Formatting may not erase the optional marker.
+    let source = "fnc probe(x?: int) -> int {\nreturn 42;\n}\n";
+    let output = fixed_point(source);
+    assert!(output.contains("probe(x?: int)"), "{output}");
+    assert!(!output.contains("probe(int x)"), "{output}");
+}
