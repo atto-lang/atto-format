@@ -6,6 +6,9 @@ Scope: targeted review of merged grammar, source-lexer, CLI, and source-safety P
 | --- | --- |
 | [format #141](https://github.com/ores-truffle-oreslang/oreslang-format/pull/141), Nov 13 | Retain .atto and legacy .ores discovery, guarded end-delimited callable bodies. |
 | [format #142](https://github.com/ores-truffle-oreslang/oreslang-format/pull/142), Nov 13 | Preserve actor pipe, symbolic actor pipe, and functional pipeline punctuation as distinct source. |
+| [LLVM #1776](https://github.com/ores-truffle-oreslang/oreslang-source.llvm/pull/1776), Nov 15 | Keep 2–16-stage actor pipelines ordered. LLVM's merged admission model is not full compiled source pipeline execution. |
+| [.NET #510](https://github.com/ores-truffle-oreslang/oreslang-source.net/pull/510), Nov 14 | Preserve bounded typed actor-pipe graph source forms, without claiming .NET actor guest/runtime parity. |
+| [Java #2798](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/2798), Nov 14 | Keep inline functional lambda pipeline stages on the |> operator; do not conflate them with actor pipe. |
 | [spec #52](https://github.com/ores-truffle-oreslang/attolang-language-spec.md/pull/52), Nov 14 | Recognize boolean ^^ continuations and avoid mistaking XOR for a single-caret return. |
 | [Java #3009](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/3009), Nov 14 | Pin the actual XOR truth-table source: Git blob f7e1e082572a0d63483acca44ee7b61a9e6e9032. |
 | [LLVM #1728](https://github.com/ores-truffle-oreslang/oreslang-source.llvm/pull/1728), Nov 16 | Preserve &&, ^^, || operator precedence spelling, not word aliases. |
@@ -17,7 +20,7 @@ Scope: targeted review of merged grammar, source-lexer, CLI, and source-safety P
 ## Coverage added
 
 - tests/multiline_actor_io_return.rs — split actor pipelines, directional I/O, caret returns and state isolation.
-- tests/recent_merge_compatibility_20261116.rs — XOR multiline formatting, comment depth boundary conditions, source-control preflight, contextual names, mixed parameters and actual merged Java fixture.
+- tests/recent_merge_compatibility_20261116.rs — XOR multiline formatting, comment depth boundary conditions, source-control preflight, contextual operator names, 2–16 actor stages, inline functional lambda stages, mixed parameters and actual merged Java fixture.
 - tests/cli_alias_parity.rs — both binaries reject malicious inputs without emitting partial stdout.
 - tests/fixtures/merged-java-logical-punctuation-v1.atto — exact bytes of the merged Java #3009 file, verified by matching SHA.
 
