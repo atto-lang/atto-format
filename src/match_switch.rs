@@ -98,14 +98,30 @@ pub(crate) fn normalize(source: &str) -> String {
                         if let Some(shape_end) = matching_brace(&lexed, body) {
                             let mut candidate = shape_end + 1;
                             let mut is_pattern = false;
+                            let mut guard_parens = 0usize;
+                            let mut guard_brackets = 0usize;
                             while candidate + 1 < close {
                                 let current = lexed[candidate].text;
-                                if matches!(current, "{" | "}" | "on" | "case" | "default") {
-                                    break;
-                                }
-                                if current == "-" && lexed[candidate + 1].text == ">" {
-                                    is_pattern = true;
-                                    break;
+                                match current {
+                                    "(" => guard_parens += 1,
+                                    ")" => guard_parens = guard_parens.saturating_sub(1),
+                                    "[" => guard_brackets += 1,
+                                    "]" => guard_brackets = guard_brackets.saturating_sub(1),
+                                    "{" if guard_parens == 0 && guard_brackets == 0 => break,
+                                    "}" if guard_parens == 0 && guard_brackets == 0 => break,
+                                    "on" | "case" | "default"
+                                        if guard_parens == 0 && guard_brackets == 0 =>
+                                    {
+                                        break;
+                                    }
+                                    "-" if guard_parens == 0
+                                        && guard_brackets == 0
+                                        && lexed[candidate + 1].text == ">" =>
+                                    {
+                                        is_pattern = true;
+                                        break;
+                                    }
+                                    _ => {}
                                 }
                                 candidate += 1;
                             }
@@ -252,6 +268,19 @@ match msg over {
         assert!(output.contains("on ~{ x: 11 } when has_tag(value) -> {"), "{output}");
         assert!(output.contains("on _ -> {"), "{output}");
         assert!(!output.contains("on ~{\n"), "pattern was split as a body: {output}");
+        assert_eq!(normalize(&output), output);
+    }
+
+    #[test]
+    fn guard_call_with_nested_record_argument_does_not_end_pattern_early() {
+        let source = r#"match value over {
+  on ~{foo: "dog"} when accepts(record{allowed: true}) -> { process(value); },
+  on _ -> { fallback(); }
+}
+"#;
+        let output = normalize(source);
+        assert!(output.contains("on ~{foo: \"dog\"} when accepts(record{allowed: true}) -> {"), "{output}");
+        assert!(output.contains("on _ -> {"), "{output}");
         assert_eq!(normalize(&output), output);
     }
 
