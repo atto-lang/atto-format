@@ -580,6 +580,7 @@ pub fn format_source_with_mtd(source: &str) -> Result<String, FormatError> {
 fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatError> {
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
+    reject_comment_nesting_limit(source)?;
     let normalized = source.replace("\r\n", "\n");
     // A bare CR is not normalized: the conformance spec (import-v1) ends a
     // `//` comment at CR, while the Java and LLVM lexers keep scanning to LF.
@@ -2628,6 +2629,62 @@ fn code_with_literal_placeholders(line: &str, initial: LexState) -> String {
     out
 }
 
+/// The source-lexer contract (spec ch.16) caps nested block comments at 128.
+/// Reject before any rewriting instead of producing deceptively formatted
+/// source the Java, LLVM and .NET frontends must reject. Track strings and
+/// line comments so delimiter-like text in literals is never counted.
+fn reject_comment_nesting_limit(source: &str) -> Result<(), FormatError> {
+    const MAX_DEPTH: u32 = 128;
+    let mut depth = 0_u32;
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+
+    for (line_index, line) in source.lines().enumerate() {
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            let next = chars.peek().copied();
+            if depth > 0 {
+                if ch == '/' && next == Some('*') {
+                    depth += 1;
+                    if depth > MAX_DEPTH {
+                        return Err(FormatError::new(
+                            line_index + 1,
+                            "block comment nesting exceeds 128",
+                        ));
+                    }
+                    chars.next();
+                } else if ch == '*' && next == Some('/') {
+                    depth -= 1;
+                    chars.next();
+                }
+                continue;
+            }
+            if let Some(delimiter) = quote {
+                if escape {
+                    escape = false;
+                } else if ch == '\\' {
+                    escape = true;
+                } else if ch == delimiter {
+                    quote = None;
+                }
+                continue;
+            }
+            if ch == '/' && next == Some('/') {
+                break;
+            }
+            if ch == '/' && next == Some('*') {
+                depth = 1;
+                chars.next();
+                continue;
+            }
+            if matches!(ch, '"' | '\'' | '`') {
+                quote = Some(ch);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Only a binding whose right-hand side is split off may establish the
 /// additional actor-pipeline indentation context; ordinary expressions with
 /// the `pipe` keyword use the existing generic continuation rule.
@@ -2643,7 +2700,7 @@ fn starts_split_actor_pipeline_binding(line: &str) -> bool {
 /// A visible line ending with a binary operator continues onto the next line.
 fn ends_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_end();
-    for op in ["&&", "||", "|>", "==", "!="] {
+    for op in ["&&", "||", "^^", "|>", "==", "!="] {
         if line.ends_with(op) {
             return true;
         }
@@ -2688,6 +2745,7 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_start();
     line.starts_with("&&")
         || line.starts_with("||")
+        || line.starts_with("^^")
         || line.starts_with("|>")
         || line.starts_with("<<")
         || line.starts_with(">>")
