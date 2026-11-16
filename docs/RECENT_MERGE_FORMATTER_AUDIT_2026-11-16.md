@@ -96,3 +96,29 @@ The original compiled-guest or compiler-negative classifications are preserved.
 New regression modules: tests/adt_merge_window.rs,
 tests/modern_callable_receivers.rs and src/match_switch.rs local unit tests;
 the two CLI binaries also replay representative upstream ADT sources.
+
+## Follow-on directional pipeline proposal: rpipe and reverse value application
+
+[atto-spec PR #45](https://github.com/atto-lang/atto-spec/pull/45) remains an
+**unmerged draft candidate**. Its directional invariant is lexical:
+`A pipe B` connects A → B; `A rpipe B` connects B → A. Written
+reverse-stage order does **not** invert the actual transform or runtime
+dataflow. `value |> f` and `f <| value` are single-value functional
+application, never a continuous graph or stream pump.
+
+The formatter now recognizes `rpipe` alongside `pipe` in both leading
+and trailing line-continuation positions; recognizes both `|>` and `<|`
+symbolic continuations; and indents split actor bindings consistently.
+The code preserves contextual identifiers named `rpipe` and `pipe`,
+literal/comment text, and nested generic type closers without rewriting
+operator spelling. The proposed inline `(let result: Stream<T> =
+Stream.buffered<T>(capacity))` graph endpoint remains a parenthesized
+capture and is not converted into a single-value `<<`/`>>` operation.
+
+Source tests: `tests/directional_pipe_rpipe_application.rs` (13 cases),
+`tests/fixtures/directional-pipelines-v1.atto`, and
+`tests/cli_alias_parity.rs` (both binaries, --check and stdout parity).
+These are formatting/idempotence checks only. The PR does not infer edge
+roles, reject mixed pipe/rpipe source at typecheck time, create PipeHandles
+or execute live graph/stream/actor guests. A genuine acceptance claim
+requires compiled and run source tests on the backend's exact head.
