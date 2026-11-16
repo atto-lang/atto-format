@@ -219,3 +219,70 @@ fn optional_parameter_question_marker_never_becomes_required_type_first() {
     assert!(output.contains("probe(x?: int)"), "{output}");
     assert!(!output.contains("probe(int x)"), "{output}");
 }
+
+#[test]
+fn contextual_operator_names_are_not_indented_as_pipeline_stages() {
+    // The word operator spellings remain contextual identifiers in Java,
+    // LLVM and the .NET source frontends.
+    let source = r#"fnc named_operators() -> int {
+and = 1;
+or = 2;
+pipe = 3;
+xor = 4;
+pipe(3);
+return pipe;
+}
+"#;
+    let output = fixed_point(source);
+    for line in [
+        "  and = 1;\n",
+        "  or = 2;\n",
+        "  pipe = 3;\n",
+        "  xor = 4;\n",
+        "  pipe(3);\n",
+        "  return pipe;\n",
+    ] {
+        assert!(output.contains(line), "misindented {line:?}: {output}");
+    }
+}
+
+#[test]
+fn bounded_actor_pipe_stage_counts_remain_in_order_for_2_3_and_16() {
+    // LLVM #1776 and .NET #510 have bounded *admission models* for
+    // 2..16 stages. This test is a formatter-only ordering/fixed-point gate.
+    for stages in [2_usize, 3, 16] {
+        let mut source = String::from("fnc build() -> int {\nval chain =\nspawn Stage0()\n");
+        for index in 1..stages {
+            let suffix = if index + 1 == stages { ";" } else { "" };
+            source.push_str(&format!("pipe spawn Stage{index}(){suffix}\n"));
+        }
+        source.push_str("^ 42;\n}\n");
+        let output = fixed_point(&source);
+        assert!(output.contains("    spawn Stage0()\n"), "{stages}: {output}");
+        for index in 1..stages {
+            assert!(
+                output.contains(&format!("      pipe spawn Stage{index}()")),
+                "lost stage {index}/{stages}: {output}"
+            );
+        }
+        assert_eq!(output.matches("pipe spawn Stage").count(), stages - 1);
+        assert!(output.contains("  ^ 42;"), "{stages}: {output}");
+    }
+}
+
+#[test]
+fn functional_inline_lambda_stages_keep_pipe_greater_distinct_from_actor_pipe() {
+    // Java #2798 adds direct inferred lambda stages to value pipelines.
+    // The formatter must not turn a function stage into an actor connection.
+    let source = r#"fnc compute_result() -> int {
+val result = compute()
+|> |v| -> v + 1
+|> |x| -> x * 2;
+return result;
+}
+"#;
+    let output = fixed_point(source);
+    assert!(output.contains("|> |v| -> v + 1"), "{output}");
+    assert!(output.contains("|> |x| -> x * 2;"), "{output}");
+    assert!(!output.contains("pipe |v|"), "{output}");
+}
