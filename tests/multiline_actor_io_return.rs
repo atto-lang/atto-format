@@ -107,3 +107,29 @@ fn actor_pipeline_state_does_not_leak_into_other_statements() {
     assert!(output.contains("    spawn A()\n      pipe spawn B();"), "{output}");
     assert!(output.contains("  source\n    pipe transform;"), "{output}");
 }
+
+#[test]
+fn comments_between_binding_and_actor_spawn_keep_continuation_indentation() {
+    let source = r#"fnc with_comment() -> int {
+val connection =
+  // creation can be delayed
+spawn Producer()
+pipe spawn Consumer();
+^ 0
+}
+"#;
+    let output = fixed_point(source);
+    assert!(
+        output.contains(
+            "  val connection =\n    // creation can be delayed\n    spawn Producer()\n      pipe spawn Consumer();"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
+fn caret_return_in_keyword_conditional_is_not_dropped_or_duplicated() {
+    let output = fixed_point("fnc evaluate() -> int {\nif ready then ^ 42 fi\n^ 0\n}\n");
+    assert!(output.contains("  if ready then\n    ^ 42;\n  fi"), "{output}");
+    assert!(output.contains("  ^ 0;\n"), "{output}");
+}
