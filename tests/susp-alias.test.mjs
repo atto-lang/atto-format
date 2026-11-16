@@ -21,6 +21,14 @@ const cases = [
     'pub fnc suspends_data(): int { return 42; }'],
   ['do not rewrite unrelated words', 'let value = suspends + fnc_name;',
     'let value = suspends + fnc_name;'],
+  ['suspending generator retains generator marker', 'pub suspends fnc *gen values(): Generator<int> { yield 42; }',
+    'pub susp fnc *gen values(): Generator<int> { yield 42; }'],
+  ['comment trivia between effect and fnc', 'pub suspends /* keep this */ fnc value(): int { return 42; }',
+    'pub susp /* keep this */ fnc value(): int { return 42; }'],
+  ['symbol marker does not become an effect', 'const stage = #ready; pub suspends fnc value(): int { return 42; }',
+    'const stage = #ready; pub susp fnc value(): int { return 42; }'],
+  ['invalid hash-lambda remains untouched', 'const cb = # |v| -> v;',
+    'const cb = # |v| -> v;'],
   ['already canonical', 'pub susp fnc age(): int { return 42; }',
     'pub susp fnc age(): int { return 42; }']
 ];
