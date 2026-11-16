@@ -313,6 +313,29 @@ See [the November 11–16 merged-PR audit](docs/RECENT_MERGE_FORMATTER_AUDIT_202
 for upstream PRs, the identical Java `^^` source fixture and the additional
 regression gates.
 
+## ADT and modern callable syntax compatibility
+
+The formatter also round-trips merged Java, .NET and Rust/Wasm ADT guest
+fixtures for nominal enums, exhaustively matched Option/Result values,
+nested Option<Result> values and the original negative compiler fixtures.
+A formatter fixed point **does not** prove that an unsupported ADT variant,
+actor payload, structural pattern or enum ABI executes in every backend.
+
+For structural matches, the formatter distinguishes a brace-delimited record
+pattern from its arm body, even when the pattern is followed by an explicit
+binder and guard. It preserves rest wildcards and exact-value payload patterns.
+
+For accepted out-of-line method syntax, the receiver in
+`mtd (self: Type) method(args)` is not a method argument. Equivalent receiver
+spellings normalize without dropping `mut self`; both brace bodies and
+comma/end bodies retain their distinct delimiters and tail semantics.
+The merged spec prefers `susp`, but legacy effect spellings are retained
+until each compiler can accept the canonical form.
+
+See [the detailed merged-PR ADT and callable audit](docs/RECENT_MERGE_FORMATTER_AUDIT_2026-11-16.md)
+and the source regression suites `tests/adt_merge_window.rs` and
+`tests/modern_callable_receivers.rs`.
+
 ## CLI
 
 ```bash
