@@ -1,0 +1,9 @@
+pub fnc connect() -> int {
+  val connection =
+    spawn Producer()
+      pipe spawn Transformer()
+      pipe spawn Consumer();
+  stdio.out << "ready";
+  stdio.in >> val pending_line;
+  ^ 42;
+}
