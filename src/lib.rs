@@ -691,6 +691,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         let mut content = trimmed_end.trim_start().to_string();
+        content = canonicalize_out_of_line_mtd_header(&content, lex);
         content = canonicalize_conditional_line(&content, lex);
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
@@ -862,7 +863,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             || (closes_multiline_callable
                 && signature_context
                 && structural.trim_end().ends_with(';'));
-        if (callable_body || callable_signature) && !generator_header {
+        let mtd_header = mtd_method_start(&content, lex).is_some();
+        if (callable_body || callable_signature) && !generator_header && !mtd_header {
             content = canonicalize_callable_parameter_order(&content, lex);
         }
         // LLVM's actor-callable parser requires `:` before the return type,
@@ -870,8 +872,10 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         // actor-callable spelling both production compilers accept.
         let actor_member =
             keyword_stack.is_empty() && in_direct_actor_container(&define_stack, &brace_stack);
-        if generator_header {
-            // See the generator note above: the return separator is part of
+        if generator_header || mtd_header {
+            // Mtd headers were normalized using their second parameter
+            // list; never apply a generic rewrite to the receiver group.
+            // Generator return spelling is backend-specific, as above.
             // the backend-specific header spelling.
         } else if callable_body
             && !end_delimited_callable
@@ -896,7 +900,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
         // Normalize either typed pipe-lambda parameter order before layout.
         content = canonicalize_pipe_lambda_parameter_order(&content, lex);
-        let callable_parameter_layout = if callable_body || callable_signature {
+        let callable_parameter_layout = if (callable_body || callable_signature) && !mtd_header {
             wrap_callable_parameter_list(&content, lex)
         } else {
             None
@@ -3210,10 +3214,10 @@ fn canonicalize_out_of_line_mtd_header(line: &str, initial: LexState) -> String 
     }
     let parts = receiver.split_whitespace().collect::<Vec<_>>();
     let canonical_receiver = match parts.as_slice() {
-        [ty, &"self"] if !ty.contains(':') && *ty != "mut" => {
+        [ty, name] if *name == "self" && !ty.contains(':') && *ty != "mut" => {
             format!("self: {ty}")
         }
-        [ty, &"_"] if !ty.contains(':') => (*ty).to_owned(),
+        [ty, name] if *name == "_" && !ty.contains(':') => (*ty).to_owned(),
         _ => receiver.to_string(),
     };
 
