@@ -199,3 +199,79 @@ end
     assert!(output.contains("on Ok(value)"), "{output}");
     assert!(output.contains("on Err(error)"), "{output}");
 }
+
+const MERGED_NEGATIVE_ADT_FIXTURES: &[(&str, &str)] = &[
+    ("wrong-sum-family", include_str!("fixtures/adt-merge-window/rs-fail-option-wrong-variant.atto")),
+    ("duplicate-variant", include_str!("fixtures/adt-merge-window/rs-fail-result-duplicate-arm.atto")),
+    ("nonexhaustive", include_str!("fixtures/adt-merge-window/rs-fail-nested-nonexhaustive.atto")),
+    ("identity-unsupported", include_str!("fixtures/adt-merge-window/rs-fail-adt-identity-equality.atto")),
+];
+
+#[test]
+fn merged_semantically_invalid_adt_sources_remain_invalid_not_silently_fixed() {
+    // These source files are deliberately rejected by the Rust/Wasm
+    // compiler. Formatting is purely lexical; it may not repair a wrong
+    // tag, create a missing arm, or rewrite a duplicate to another variant.
+    for &(name, source) in MERGED_NEGATIVE_ADT_FIXTURES {
+        let output = fixed_point(source);
+        assert!(output.contains("// expect-error:"), "{name}: {output}");
+        if name == "duplicate-variant" {
+            assert_eq!(output.matches("on Ok(").count(), 2, "{output}");
+        }
+        if name == "wrong-sum-family" {
+            assert!(output.contains("on Ok(n)"), "{output}");
+            assert!(!output.contains("on Some(n)"), "{output}");
+        }
+        if name == "nonexhaustive" {
+            assert_eq!(output.matches("on Some(").count(), 1, "{output}");
+            assert!(!output.contains("on None"), "{output}");
+        }
+    }
+}
+
+#[test]
+fn canonical_collection_builders_are_not_regressed_to_legacy_tilde_constructors() {
+    // Older merged Java tilde-aggregate PRs predate the new constructor
+    // direction. This test asserts that canonical constructors stay intact.
+    let source = r#"fnc construct() -> void {
+  val items = Array.of(1, 2);
+  val pair = Tuple.of("dog", 3);
+  val flags = Map.of();
+  val nested = Option.Some(Result.Ok(42));
+  return;
+}
+"#;
+    let output = fixed_point(source);
+    for token in ["Array.of(", "Tuple.of(", "Map.of(", "Option.Some(Result.Ok(42))"] {
+        assert!(output.contains(token), "lost canonical constructor: {output}");
+    }
+    assert!(!output.contains("~array("), "{output}");
+    assert!(!output.contains("~tuple("), "{output}");
+    assert!(!output.contains("~map("), "{output}");
+}
+
+#[test]
+fn nested_adt_messages_between_actor_supervisor_and_stream_preserve_types() {
+    // A deliberately syntax-only actor contract: supervisor CONTROL and
+    // application DATA paths must not be conflated by formatter rewriting.
+    let source = r#"declare actor Worker receives Result<int, Error> sends Option<Result<int, Error>> emits Result<int, Error>;
+define actor Worker receives Result<int, Error> sends Option<Result<int, Error>> emits Result<int, Error> as
+  receive(Result<int, Error> message): void {
+    match message over
+      on Ok(value) -> { self.send(Some(Ok(value))); }
+      on Err(problem) -> { self.send(Some(Err(problem))); }
+    end
+  }
+end
+"#;
+    let output = fixed_point(source);
+    for token in [
+        "declare actor Worker receives Result<int, Error>",
+        "sends Option<Result<int, Error>>",
+        "emits Result<int, Error>",
+        "on Ok(value)", "on Err(problem)",
+        "Some(Ok(value))", "Some(Err(problem))",
+    ] {
+        assert!(output.contains(token), "lost message contract: {output}");
+    }
+}
