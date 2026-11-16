@@ -1,0 +1,17 @@
+pub fnc connect(): int {
+val forward =
+spawn Producer()
+pipe spawn Transformer()
+pipe spawn Consumer();
+val reverse =
+spawn Consumer()
+rpipe spawn Transformer()
+rpipe spawn Producer();
+val value_forward = pending
+|> transform_result;
+val value_reverse = transform_result <|
+pending;
+readable pipe transform pipe writable;
+writable rpipe transform rpipe readable;
+^ 42;
+}
