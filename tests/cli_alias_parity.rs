@@ -109,3 +109,24 @@ fn cli_usage_errors_remain_distinct_from_source_rejection() {
         assert!(!invalid_source.stderr.is_empty());
     }
 }
+
+#[test]
+fn both_cli_names_reject_oversized_comments_and_source_spoofing_without_stdout() {
+    let comment = format!("{}{}", "/*".repeat(129), "*/".repeat(129));
+    let inputs = [
+        format!("fnc f() -> int {{\n{comment}\nreturn 42;\n}}\n"),
+        "fnc f() -> int {\n// spoof \u{202e}token\nreturn 42;\n}\n".to_string(),
+        "fnc f() -> int {\n// control \u{1b}raw\nreturn 42;\n}\n".to_string(),
+    ];
+    for source in &inputs {
+        assert!(format_source(source).is_err(), "SDK must reject input");
+        for binary in BINARIES {
+            for args in [&["-"][..], &["--check", "-"][..]] {
+                let output = run_stdin(binary, args, source);
+                assert_eq!(output.status.code(), Some(1), "{binary}: {args:?}");
+                assert!(output.stdout.is_empty(), "{binary}: emitted rejected input");
+                assert!(!output.stderr.is_empty(), "{binary}: missing source diagnostic");
+            }
+        }
+    }
+}
