@@ -451,16 +451,24 @@ fn expand_compact_end_delimited_callables(source: &str) -> Result<String, Format
         let forbidden = words
             .iter()
             .any(|span| matches!(word(*span), "actor" | "isoactor" | "static" | "abstract"));
+        let mtd_start = mtd_method_start(line, initial);
         if forbidden
-            || !words
-                .iter()
-                .any(|span| matches!(word(*span), "fnc" | "routine"))
+            || (mtd_start.is_none()
+                && !words
+                    .iter()
+                    .any(|span| matches!(word(*span), "fnc" | "routine")))
         {
             output.push_str(line);
             continue;
         }
 
-        let Some(close) = callable_parameter_close(line, line.len(), initial) else {
+        let close = if let Some(start) = mtd_start {
+            callable_parameter_close(&line[start..], line.len() - start, LexState::default())
+                .map(|relative| start + relative)
+        } else {
+            callable_parameter_close(line, line.len(), initial)
+        };
+        let Some(close) = close else {
             output.push_str(line);
             continue;
         };
@@ -3036,19 +3044,24 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     {
         return false;
     }
-    let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
-    // Bare class and actor methods have no 'fnc' introducer. Requiring an
-    // explicit '::' avoids misclassifying a field, call or incomplete header.
-    if !line.contains('(')
+    let mtd_start = mtd_method_start(line, LexState::default());
+    let method_line = mtd_start.map(|start| &line[start..]).unwrap_or(line);
+    let standalone = contains_word(line, "fnc")
+        || contains_word(line, "routine")
+        || mtd_start.is_some();
+    // Bare class and actor methods without 'fnc' still require ::.
+    if !method_line.contains('(')
         || (!standalone && !instance_member)
         || (instance_member && !line.ends_with("::"))
     {
         return false;
     }
-    let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+    let Some(close) = callable_parameter_close(
+        method_line, method_line.len(), LexState::default()
+    ) else {
         return false;
     };
-    let header_tail = line[close + 1..].trim();
+    let header_tail = method_line[close + 1..].trim();
     if !header_tail.starts_with("->") {
         return false;
     }
