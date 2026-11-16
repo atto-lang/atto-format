@@ -2093,6 +2093,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
                 | "async"
                 | "suspends"
                 | "suspend"
+                | "susp"
                 | "critical"
                 | "structural"
                 | "abstract"
@@ -2126,7 +2127,10 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     // without manufacturing plausible-looking source.
     if !plain_word_prefix(line, &words[..=prefix_len])
         || (modifiers.contains(&"pub") && modifiers.contains(&"private"))
-        || (modifiers.contains(&"suspend") && modifiers.contains(&"suspends"))
+        || ["suspend", "suspends", "susp"]
+            .iter()
+            .filter(|&&effect| modifiers.contains(&effect))
+            .count() > 1
     {
         return None;
     }
@@ -2143,6 +2147,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         "async",
         "suspend",
         "suspends",
+        "susp",
         "critical",
         "structural",
         "abstract",
@@ -2428,6 +2433,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
                 | "async"
                 | "suspend"
                 | "suspends"
+                | "susp"
                 | "generator"
                 | "nlex"
                 | "pure"
@@ -2470,9 +2476,9 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
     let mut is_static = false;
     let mut is_async = false;
     let mut is_suspends = false;
-    // `suspend` aliases `suspends` in the Java grammar, but LLVM admits a
-    // top-level `suspend fnc` as a distinct cooperative-loop form and rejects
-    // `suspends fnc`. Keep the author's spelling; reorder only.
+    // Atto spec #37 calls `susp` canonical, but deployed compiler versions
+    // disagree about the three effect spellings. Recognize `susp` without
+    // rewriting `suspend` / `suspends` into potentially rejected code.
     let mut suspends_word = "suspends";
     let mut is_generator = false;
     let mut is_nlex = false;
@@ -2496,7 +2502,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
             }
             "static" => set_once(&mut is_static),
             "async" => set_once(&mut is_async),
-            "suspend" | "suspends" => {
+            "suspend" | "suspends" | "susp" => {
                 suspends_word = word;
                 set_once(&mut is_suspends)
             }
@@ -3831,6 +3837,7 @@ fn is_generator_declaration_header(line: &str, initial: LexState) -> bool {
                 | "async"
                 | "suspend"
                 | "suspends"
+                | "susp"
                 | "generator"
                 | "gen"
                 | "nlex"
