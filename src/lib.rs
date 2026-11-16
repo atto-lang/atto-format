@@ -110,6 +110,79 @@ struct LexState {
     escape: bool,
 }
 
+/// Normalize only visible `typeof(identifier)` binding queries. The
+/// existing `typeof fnc(...)` callable signature is never rewritten.
+fn canonicalize_typeof_queries(source: &str) -> Result<String, FormatError> {
+    let mut out = String::with_capacity(source.len());
+    let mut state = LexState::default();
+    for (line_idx, line) in source.split_inclusive('\n').enumerate() {
+        let visible = scan_visible(line, &mut state);
+        let chars: Vec<char> = visible;
+        let offsets: Vec<usize> = line.char_indices()
+            .map(|(index, _)| index).chain(std::iter::once(line.len())).collect();
+        if chars.len() + 1 != offsets.len() {
+            return Err(FormatError::new(line_idx + 1, "invalid typeof lexical span"));
+        }
+        let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+        let mut i = 0usize;
+        while i + 6 <= chars.len() {
+            let token = ['t', 'y', 'p', 'e', 'o', 'f'];
+            if chars[i..i+6] != token
+                || (i > 0 && (chars[i-1].is_ascii_alphanumeric() || chars[i-1] == '_'))
+                || (i + 6 < chars.len() && (chars[i+6].is_ascii_alphanumeric() || chars[i+6] == '_')) {
+                i += 1;
+                continue;
+            }
+            let mut j = i + 6;
+            while j < chars.len() && chars[j].is_whitespace() { j += 1; }
+            if j < chars.len() && chars[j] == '!' {
+                return Err(FormatError::new(line_idx + 1,
+                    "typeof! is not a type query; use 'typeof name'"));
+            }
+            if j >= chars.len() || chars[j] != '(' {
+                i += 6;
+                continue;
+            }
+            let mut k = j + 1;
+            while k < chars.len() && chars[k].is_whitespace() { k += 1; }
+            let start_name = k;
+            if k >= chars.len() || !(chars[k].is_ascii_alphabetic() || chars[k] == '_') {
+                i += 6;
+                continue;
+            }
+            while k < chars.len() && (chars[k].is_ascii_alphanumeric() || chars[k] == '_') { k += 1; }
+            let end_name = k;
+            while k < chars.len() && chars[k].is_whitespace() { k += 1; }
+            if k >= chars.len() || chars[k] != ')' {
+                i += 6;
+                continue;
+            }
+            // Never delete comment/literal payload masquerading as whitespace.
+            if !line[offsets[i+6]..offsets[j]].chars().all(char::is_whitespace)
+                || !line[offsets[j+1]..offsets[start_name]].chars().all(char::is_whitespace)
+                || !line[offsets[end_name]..offsets[k]].chars().all(char::is_whitespace) {
+                i += 6;
+                continue;
+            }
+            let name = &line[offsets[start_name]..offsets[end_name]];
+            if name == "fnc" {
+                i += 6;
+                continue;
+            }
+            replacements.push((offsets[i], offsets[k+1], format!("typeof {name}")));
+            i = k + 1;
+        }
+        let mut previous = 0usize;
+        for (start, end, replacement) in replacements {
+            out.push_str(&line[previous..start]);
+            out.push_str(&replacement);
+            previous = end;
+        }
+        out.push_str(&line[previous..]);
+    }
+    Ok(out)
+}
+
 fn normalize_header_type_source(text: &str) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -312,7 +385,16 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             } else if chunks[*index].starts_with("fnc(") {
                 *index += 1;
             } else {
-                return false;
+                // Canonical bare binding query: `typeof identifier`.
+                let candidate = chunks[*index];
+                if candidate.is_empty()
+                    || !candidate.chars().next().unwrap().is_ascii_alphabetic()
+                        && !candidate.starts_with('_')
+                    || !candidate.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    return false;
+                }
+                *index += 1;
+                return true;
             }
             if *index >= chunks.len() || chunks[*index] != "=>" {
                 return false;
@@ -592,6 +674,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             "bare CR line terminator is ambiguous (comment boundaries differ between the compilers and the spec); convert the file to LF or CRLF first",
         ));
     }
+    let normalized = canonicalize_typeof_queries(&normalized)?;
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
     // Legacy/hand-formatted explicit callable headers may already split their
     // parameter list across physical lines. Reassemble only that narrow header
@@ -5030,4 +5113,29 @@ end
         let invalid = "initialize(int id) -> void as return;";
         assert!(canonicalize_initialize_header(invalid, LexState::default(), 1).is_err());
     }
+    #[test]
+    fn typeof_binding_query_uses_bare_canonical_spelling() {
+        let source = "type T = typeof(value);\nfnc id(int x): typeof(x) { return x; }\n";
+        let formatted = format_source(source).expect("canonical formatter");
+        assert!(formatted.contains("typeof value"), "{formatted}");
+        assert!(formatted.contains("typeof x"), "{formatted}");
+        assert!(!formatted.contains("typeof("), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn typeof_query_is_literal_and_comment_safe() {
+        let source = "// typeof(x) stays\nfnc show(): string { return \"typeof(x)\"; }\n";
+        let formatted = format_source(source).unwrap();
+        assert!(formatted.contains("// typeof(x)"), "{formatted}");
+        assert!(formatted.contains("\"typeof(x)\""), "{formatted}");
+    }
+
+    #[test]
+    fn typeof_bang_is_rejected_without_affecting_callable_signature() {
+        assert!(format_source("fnc bad(int x): typeof! x { return x; }\n").is_err());
+        assert!(format_source("fnc bad(int x): typeof !x { return x; }\n").is_err());
+        assert!(format_source("type F = typeof fnc(int) => int;\n").is_ok());
+    }
+
 }
