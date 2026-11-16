@@ -278,3 +278,27 @@ return pipe + rpipe;
     assert!(output.contains("  val pipe = 3;"), "{output}");
     assert!(output.contains("  val rpipe = 4;"), "{output}");
 }
+
+#[test]
+fn four_repository_sha_identical_directional_sources_round_trip_without_rewrite() {
+    // Same exact original .atto byte blobs committed to Java, LLVM, .NET,
+    // and formatter. Failing compiler sources must remain failing sources.
+    let source_set = [
+        ("forward", include_str!("fixtures/directional-parity/directional-value-forward-v1.atto")),
+        ("reverse", include_str!("fixtures/directional-parity/directional-value-reverse-v1.atto")),
+        ("mixed", include_str!("fixtures/directional-parity/directional-value-mixed-reject.atto")),
+        ("rpipe", include_str!("fixtures/directional-parity/directional-actor-rpipe-reject.atto")),
+        ("identifier", include_str!("fixtures/directional-parity/directional-rpipe-contextual-name.atto")),
+    ];
+    for (name, original) in source_set {
+        let formatted = fixed_point(original);
+        match name {
+            "forward" => assert!(formatted.contains("20 |> increment |> twice"), "{formatted}"),
+            "reverse" => assert!(formatted.contains("twice <| increment <| 20"), "{formatted}"),
+            "mixed" => assert!(formatted.contains("20 |> increment <| twice"), "{formatted}"),
+            "rpipe" => assert!(formatted.contains("4 rpipe 2"), "{formatted}"),
+            "identifier" => assert!(formatted.contains("val int rpipe = 42"), "{formatted}"),
+            _ => unreachable!(),
+        }
+    }
+}
