@@ -581,6 +581,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     reject_comment_nesting_limit(source)?;
+    reject_disallowed_source_controls(source)?;
     let normalized = source.replace("\r\n", "\n");
     // A bare CR is not normalized: the conformance spec (import-v1) ends a
     // `//` comment at CR, while the Java and LLVM lexers keep scanning to LF.
@@ -2627,6 +2628,32 @@ fn code_with_literal_placeholders(line: &str, initial: LexState) -> String {
         i += 1;
     }
     out
+}
+
+/// Frontend security admission on LLVM/.NET rejects raw terminal controls,
+/// and LLVM also rejects bidi source-spoofing controls before tokenization.
+/// Formatting must not launder these characters, even inside comments or
+/// literals, into output that appears clean in a terminal or review diff.
+fn reject_disallowed_source_controls(source: &str) -> Result<(), FormatError> {
+    for (byte, ch) in source.char_indices() {
+        let terminal = matches!(ch, '\u{1b}' | '\u{7f}');
+        let bidi = matches!(
+            ch,
+            '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+        );
+        if terminal || bidi {
+            let line = source[..byte].bytes().filter(|&b| b == b'\n').count() + 1;
+            return Err(FormatError::new(
+                line,
+                if terminal {
+                    "raw ESC/DEL control is not allowed in source"
+                } else {
+                    "bidirectional source-control character is not allowed"
+                },
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The source-lexer contract (spec ch.16) caps nested block comments at 128.
