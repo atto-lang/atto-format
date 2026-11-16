@@ -263,6 +263,39 @@ The long-term goal is compiler-derived import-effect certification from both
 backends, at which point the formatter can comment certified unused imports
 without manual assertions.
 
+## Multiline actor pipelines, directional I/O and return shorthand
+
+`oresfmt` and `oreslang-format` use the same formatter rules for `.atto`
+source. A binding split after `=` can begin with `spawn`; continuation
+stages introduced by `pipe` are indented one additional level:
+
+```atto
+pub fnc connect() -> int {
+  val connection =
+    spawn Producer()
+      pipe spawn Transformer()
+      pipe spawn Consumer();
+  stdio.out << "ready";
+  stdio.in >> val pending_line;
+  ^ 42;
+}
+```
+
+- `pipe` is the actor/stream/channel connection keyword. Formatting must
+  preserve it, not rewrite it into `|>`, `<<`, or `>>`.
+- `<<` and `>>` remain single operations on writable/readable endpoints.
+  They can continue on the next physical line but do not create an
+  ongoing `pipe` connection.
+- `^` begins a return statement; like `return`, a safe complete expression
+  without a semicolon receives one. Multiline operator continuations do
+  **not** receive a premature terminator.
+- Strings, nested generics, and comments containing these tokens remain
+  opaque. Formatting is idempotent: `oresfmt --check` accepts its output.
+
+These are **lexical formatting contracts only**. Acceptance, typechecking,
+I/O effects, pipe interoperation and guest execution require backend-specific
+compiler/runtime conformance tests; successful formatting does not prove them.
+
 ## CLI
 
 ```bash
