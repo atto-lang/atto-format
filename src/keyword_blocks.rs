@@ -277,7 +277,7 @@ fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
     let statement = &tokens[start..index];
     statement
         .first()
-        .is_some_and(|token| token.text == "return")
+        .is_some_and(|token| matches!(token.text, "return" | "^"))
         && statement.len() >= 2
 }
 
@@ -692,6 +692,11 @@ mod tests {
         assert_eq!(normalize("^ // done"), "^; // done");
         assert_eq!(normalize("^ 42"), "^ 42;");
         assert_eq!(normalize("^ value // done"), "^ value; // done");
+    }
+
+    #[test]
+    fn caret_return_in_compact_keyword_if_splits_before_fi() {
+        assert_eq!(normalize("if ready then ^ 42 fi"), "if ready then\n ^ 42;\nfi");
     }
 
     #[test]
