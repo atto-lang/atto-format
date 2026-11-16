@@ -3131,6 +3131,11 @@ fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> 
         .unwrap_or(line.len());
     let tail = &line[close_paren + 1..body_at];
     let trimmed = tail.trim_start();
+    // A colon-typed return followed by a body-arrow and brace is already
+    // canonical braced syntax. Rewriting only the first colon is unsafe.
+    if trimmed.starts_with(':') && trimmed.trim_end().ends_with("->") {
+        return line.to_string();
+    }
     let leading_ws = tail.len() - trimmed.len();
     let sep_len = if trimmed.starts_with("=>") || trimmed.starts_with("->") {
         2
@@ -3158,6 +3163,90 @@ fn canonicalize_callable_arrow(line: &str, desired: &str, initial: LexState) -> 
     }
     let after = line[absolute + sep_len..].trim_start();
     format!("{before}{desired} {after}")
+}
+
+/// Out-of-line methods have a receiver group before the actual argument
+/// group: mtd (self: T) method(x: int) -> int. Never run ordinary parameter
+/// canonicalization over the receiver, or self-binding semantics change.
+/// Only recognize an actual named method and its second parenthesis, not
+/// calls or comments containing the spelling.
+fn mtd_method_start(line: &str, initial: LexState) -> Option<usize> {
+    let trimmed = line.trim_start();
+    if !starts_word(trimmed, "mtd") {
+        return None;
+    }
+    let (_, receiver_close) = callable_parameter_bounds(line, line.len(), initial)?;
+    let suffix = &line[receiver_close + 1..];
+    let method_offset = suffix.len() - suffix.trim_start().len();
+    let start = receiver_close + 1 + method_offset;
+    let method = &line[start..];
+    let name_len = method
+        .char_indices()
+        .take_while(|(_, ch)| is_ident_char(*ch))
+        .last()
+        .map(|(i, ch)| i + ch.len_utf8())?;
+    let first = method.chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_')
+        || !method[name_len..].starts_with('(')
+    {
+        return None;
+    }
+    Some(start)
+}
+
+/// Keep receiver binding in nominal notation, and format only the method's
+/// own parameter list. Type self becomes self: Type, while Type _ becomes
+/// Type. Mutable self is never inferred, removed, or rewritten.
+fn canonicalize_out_of_line_mtd_header(line: &str, initial: LexState) -> String {
+    let Some(method_start) = mtd_method_start(line, initial) else {
+        return line.to_string();
+    };
+    let Some((open, close)) = callable_parameter_bounds(line, line.len(), initial) else {
+        return line.to_string();
+    };
+    let receiver = &line[open + 1..close];
+    if contains_visible_comment(receiver, LexState::default()) {
+        return line.to_string();
+    }
+    let parts = receiver.split_whitespace().collect::<Vec<_>>();
+    let canonical_receiver = match parts.as_slice() {
+        [ty, &"self"] if !ty.contains(':') && *ty != "mut" => {
+            format!("self: {ty}")
+        }
+        [ty, &"_"] if !ty.contains(':') => (*ty).to_owned(),
+        _ => receiver.to_string(),
+    };
+
+    let original_method = &line[method_start..];
+    let method = canonicalize_callable_parameter_order(original_method, LexState::default());
+    // ': T -> {' is a distinct accepted braced callable-body spelling.
+    // Replacing only the first ':' would manufacture '-> T -> {'.
+    let method = if mtd_has_braced_body_arrow(&method) {
+        method
+    } else {
+        canonicalize_callable_arrow(&method, "->", LexState::default())
+    };
+
+    format!(
+        "{}{}{}{}",
+        &line[..open + 1],
+        canonical_receiver,
+        &line[close..method_start],
+        method
+    )
+}
+
+/// The second arrow after a colon-typed return opens a C-style body.
+fn mtd_has_braced_body_arrow(method: &str) -> bool {
+    let Some(close) = callable_parameter_close(method, method.len(), LexState::default()) else {
+        return false;
+    };
+    let tail = &method[close + 1..];
+    let Some(body) = first_visible_char_index(tail, '{', LexState::default()) else {
+        return false;
+    };
+    let return_head = tail[..body].trim();
+    return_head.starts_with(':') && return_head.ends_with("->")
 }
 
 fn canonicalize_callable_parameter_order(line: &str, initial: LexState) -> String {
