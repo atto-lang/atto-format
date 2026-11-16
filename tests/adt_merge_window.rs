@@ -33,7 +33,7 @@ fn merged_java_net_and_rust_wasm_adt_fixtures_all_round_trip() {
         // payload types from independently compiled input.
         for marker in ["Option<Result<int", "Some(", "Err(", "on None", "on Light."]
             .into_iter()
-            .filter(|marker| source.contains(**marker))
+            .filter(|marker| source.contains(*marker))
         {
             assert!(result.contains(marker), "{name}: lost {marker:?}:\n{result}");
         }
