@@ -89,7 +89,7 @@ fn comments_strings_and_generic_type_closers_are_opaque() {
     ] {
         assert!(output.contains(expected), "missing {expected:?}: {output}");
     }
-    assert!(output.contains(r#"" >> << ^ pipe spawn Fake()""#.trim_start()), "{output}");
+    assert!(output.contains(r#"">> << ^ pipe spawn Fake()""#), "{output}");
 }
 
 #[test]
