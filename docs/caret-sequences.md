@@ -20,6 +20,21 @@ end
 
 Do not turn one form into the other by replacing commas with semicolons. The comma body's implicit return, early exits, ownership and effects must be checked with a language version and explicit migration policy before any conversion.
 
+## Contextual last-value return
+
+The syntax `return ^ (first(), second(), last())` returns the last expression after evaluating earlier expressions once, using the same checked lexical sequence lowering as `seq` and `(> ... )`. It differs from `return (first(), second(), last())`, which constructs a tuple, and from a leading standalone `^ (a, b)`, which returns a tuple. `return ^ ()` is invalid (`E_EMPTY_SEQUENCE`).
+
+This formatter only inserts spacing in proven lexical contexts:
+
+```atto
+// Before
+pub fnc main(): int { return^(40,42); }
+// After
+pub fnc main(): int { return ^ (40,42); }
+```
+
+It does **not** rewrite tuple commas into sequence commas or make `return x, y;` an alias. Formatter verification must use a compiler that actually implements this contextual form; an older compiler must reject rather than silently canonicalize it. Tuple-valued guest execution and backend parity are separate unfinished gates.
+
 ## What the opt-in formatter changes
 
 ```atto
