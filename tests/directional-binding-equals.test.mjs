@@ -62,8 +62,11 @@ test('unterminated comments/strings and oversized source fail closed', () => {
 });
 const magic = [0, 97, 115, 109, 1, 0, 0, 0];
 function mockEquivalentGuest(text) {
+  // Produce a VALID Wasm module with a deterministic custom section. Tests
+  // exercise the verification gate, not the Atto source compiler semantics.
   const digest = createHash('sha256').update(format(text)).digest();
-  return Uint8Array.from([...magic, ...digest]);
+  // Section id=0, length=33: name length=0 followed by 32-byte payload.
+  return Uint8Array.from([...magic, 0, 33, 0, ...digest]);
 }
 test('verified wrapper requires identical guest bytes and checks twice for a changed source', async () => {
   const src='nb stdio.in >> = Future<int> x |> |f| -> await f >> = val int y;';
@@ -80,9 +83,13 @@ test('verified wrapper requires identical guest bytes and checks twice for a cha
 test('verified wrapper refuses incompatible Wasm, fake Wasm, and unsupported compiler', async () => {
   const src = 'inbox >> = val x;';
   let calls = 0;
+  await assert.rejects(verify(src, async text =>
+    mockEquivalentGuest(text + String(calls++))), /guest Wasm changed/);
+  await assert.rejects(verify(src, async () => new Uint8Array(8)), /valid.*guest Wasm/);
+  // Magic bytes alone do not make a valid guest module. A mocked compiler
+  // cannot make an invalid blob pass just by repeating the same payload.
   await assert.rejects(verify(src, async () =>
-    Uint8Array.from([...magic, calls++])), /guest Wasm changed/);
-  await assert.rejects(verify(src, async () => new Uint8Array(8)), /valid guest Wasm/);
+    Uint8Array.from([...magic, ...new Uint8Array(32)])), /valid.*guest Wasm/);
   await assert.rejects(verify(src, async () => { throw new Error('E_UNSUPPORTED'); }), /E_UNSUPPORTED/);
   await assert.rejects(verify(src, null), TypeError);
 });
