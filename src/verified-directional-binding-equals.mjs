@@ -17,8 +17,9 @@ export async function normalize_verified_directional_binding_equals(source, comp
   async function readGuest(text) {
     const bytes = await compileGuest(text);
     if (!(bytes instanceof Uint8Array) || bytes.byteLength < 8 ||
-        Buffer.from(bytes.subarray(0, 8)).toString('hex') !== '0061736d01000000')
-      throw new Error('Compiler must produce a valid guest Wasm header');
+        Buffer.from(bytes.subarray(0, 8)).toString('hex') !== '0061736d01000000' ||
+        !WebAssembly.validate(bytes))
+      throw new Error('Compiler must produce a valid, structurally verified guest Wasm module');
     return Buffer.from(bytes);
   }
   const before = await readGuest(source);
