@@ -5,6 +5,20 @@ import {normalize_verified_caret_sequences} from '../src/verified-caret-sequence
 
 const canonical=[
   ['caret scalar', 'pub fnc main(): int { ^42; }', 'pub fnc main(): int { ^ 42; }'],
+  ['contextual return no spaces', 'pub fnc main(): int { return^(40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual return missing post-caret space', 'pub fnc main(): int { return ^(40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual return missing keyword space', 'pub fnc main(): int { return^ (40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual empty stays invalid', 'pub fnc main(): int { return ^ (); }',
+   'pub fnc main(): int { return ^ (); }'],
+  ['tuple return unchanged', 'pub fnc main(): (int,int) { return (1,2); }',
+   'pub fnc main(): (int,int) { return (1,2); }'],
+  ['standalone caret tuple unchanged', 'pub fnc main(): (int,int) { ^ (1,2); }',
+   'pub fnc main(): (int,int) { ^ (1,2); }'],
+  ['caret sequence with comment unchanged', 'pub fnc main(): int { return ^ /* c */ (1,42); }',
+   'pub fnc main(): int { return ^ /* c */ (1,42); }'],
   ['caret parenthesized expression', 'pub fnc main(): int { ^(40+2); }', 'pub fnc main(): int { ^ (40+2); }'],
   ['caret seq', 'pub fnc main(): int { ^seq let a = 5, a + 3; }', 'pub fnc main(): int { ^ seq let a = 5, a + 3; }'],
   ['nested paren sequences', 'pub fnc main(): int { ^(>let x=5,(>let y=x+3,y)); }',
@@ -88,6 +102,7 @@ test('real compiler output identical for caret and nested sequence formatting',
   {skip:!attoc},async()=>{
     for(const src of [
       'pub fnc main(): int { ^42; }',
+      'pub fnc main(): int { return^(40,42); }',
       'pub fnc main(): int { ^seq let x=5, x+37; }',
       'pub fnc main(): int { ^(>let x=5,(>let y=x+3,y+34)); }',
       'pub fnc main() -> int :: const x: int = 40, x+2 end',
