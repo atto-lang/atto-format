@@ -38,6 +38,10 @@ export function normalize_directional_binding_equals(source) {
       if (depth) throw new Error('Unterminated block comment');
       continue;
     }
+    // Backtick templates may contain interpolation and nested source-like
+    // text. Until the formatter has a real template scanner, reject them
+    // rather than rewriting anything inside a template literal.
+    if (ch === '`') throw new Error('Template literals require a full Atto lexer');
     if (ch === '"' || ch === "'") {
       const quote = ch;
       ++i;
