@@ -5,6 +5,13 @@ import {normalize_verified_caret_sequences} from '../src/verified-caret-sequence
 
 const canonical=[
   ['caret scalar', 'pub fnc main(): int { ^42; }', 'pub fnc main(): int { ^ 42; }'],
+  ['bare return commas preserve semantics', 'pub fnc main(): int { return 1, 42; }',
+   'pub fnc main(): int { return 1, 42; }'],
+  ['bare caret return commas preserve semantics', 'pub fnc main(): int { ^ 1, 42; }',
+   'pub fnc main(): int { ^ 1, 42; }'],
+  ['bare return nested call commas preserve semantics',
+   'pub fnc main(): int { return add(10,20), add(20,22); }',
+   'pub fnc main(): int { return add(10,20), add(20,22); }'],
   ['contextual return no spaces', 'pub fnc main(): int { return^(40,42); }',
    'pub fnc main(): int { return ^ (40,42); }'],
   ['contextual return missing post-caret space', 'pub fnc main(): int { return ^(40,42); }',
@@ -103,6 +110,7 @@ test('real compiler output identical for caret and nested sequence formatting',
     for(const src of [
       'pub fnc main(): int { ^42; }',
       'pub fnc main(): int { return^(40,42); }',
+      'pub fnc main(): int { return 1, 42; }',
       'pub fnc main(): int { ^seq let x=5, x+37; }',
       'pub fnc main(): int { ^(>let x=5,(>let y=x+3,y+34)); }',
       'pub fnc main() -> int :: const x: int = 40, x+2 end',
