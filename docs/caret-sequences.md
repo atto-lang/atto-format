@@ -33,7 +33,7 @@ pub fnc main(): int { return^(40,42); }
 pub fnc main(): int { return ^ (40,42); }
 ```
 
-It does **not** rewrite tuple commas into sequence commas or make `return x, y;` an alias. Formatter verification must use a compiler that actually implements this contextual form; an older compiler must reject rather than silently canonicalize it. Tuple-valued guest execution and backend parity are separate unfinished gates.
+It preserves `return x, y;` and `^ x, y;` as valid top-level last-value return sequences; their final value is `y`. It does **not** rewrite either form into a tuple, `seq`, or `return ^ (...)`, and it does not promote commas inside `f(a, b)` or `(a, b)` to return separators. In `::` comma-delimited bodies, commas retain their body-separator role. Formatter verification must use a compiler that actually implements these forms; an older compiler must reject rather than silently canonicalize it. Tuple-valued guest execution and backend parity are separate unfinished gates.
 
 ## What the opt-in formatter changes
 
