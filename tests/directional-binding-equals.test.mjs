@@ -58,6 +58,7 @@ for (const [name, input, expected] of cases) {
 test('unterminated comments/strings and oversized source fail closed', () => {
   assert.throws(() => format('inbox >> = val x; /*'), /Unterminated/);
   assert.throws(() => format('inbox >> = val x; "'), /Unterminated/);
+  assert.throws(() => format('val text = `inbox >> = val x;`;'), /Template literals/);
   assert.throws(() => format('x'.repeat(1024 * 1024 + 1)), RangeError);
 });
 const magic = [0, 97, 115, 109, 1, 0, 0, 0];
