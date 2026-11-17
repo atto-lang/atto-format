@@ -94,7 +94,7 @@ export function normalize_directional_binding_equals(source) {
     const right = source.slice(eq.end, binder.start);
     if (!/^\s+$/u.test(left) || !/^\s*$/u.test(right)) continue;
     const preceding = toks[i - 1];
-    if (!isIdentifier(preceding) && ![')', ']'].includes(preceding?.s)) continue;
+    if (!isIdentifier(preceding) && ![')', ']', '?'].includes(preceding?.s)) continue;
 
     if (binder.s === 'Future') {
       if (toks[i + 3]?.s !== '<') continue;
