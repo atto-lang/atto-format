@@ -56,12 +56,15 @@ The canonical target removes both redundant markers while preserving
 `Result`, `Option`, ownership, suspension and evaluation order.
 Contiguous `>>=`, arithmetic operations, comments, string literals,
 nested-generic `>>` closers, and nonbinding assignment are not rewritten.
+Backtick templates are rejected until a full interpolation-aware lexer exists
+rather than risking an edit inside embedded source-like text.
 This lexical pass is not a compiler or a static capability proof.
 
 `src/verified-directional-binding-equals.mjs` exports
 `normalize_verified_directional_binding_equals(source, compileGuest)`.
 It returns a usable result **only if a real compiler returns identical
-valid guest Wasm bytes for the original and canonical sources**. Syntax-only
+structurally valid guest Wasm bytes for the original and canonical sources**,
+using `WebAssembly.validate` instead of trusting the magic header alone. Syntax-only
 stdin/Future continuations are not yet guest-executable and therefore must
 fail this admission gate until the ABI is implemented. The included
 Node-only golden tests do not replace this compiler gate.
