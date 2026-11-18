@@ -11,6 +11,19 @@ fn formats_all_four_return_first_function_spellings_with_two_spaces() {
 }
 
 #[test]
+fn all_twelve_return_first_header_terminator_pairs_are_idempotent() {
+    for header in ["int <- foo()", "int• foo()", "fnc int <- foo()", "fnc int• foo()"] {
+        for closer in ["end", "end.", "end;"] {
+            let input = format!("{header}\nbegin\n    return 42;\n{closer}\n");
+            let once = format_source(&input).expect(&input);
+            assert!(once.contains(&format!("{header}\nbegin\n  return 42;\n{closer}")), "{once}");
+            assert!(is_formatted(&once).expect("formatter self-check"));
+            assert_eq!(format_source(&once).unwrap(), once);
+        }
+    }
+}
+
+#[test]
 fn canonicalizes_instance_fnc_to_mtd_without_changing_free_or_static_fnc() {
     let input = r#"fnc int <- top()
 begin
