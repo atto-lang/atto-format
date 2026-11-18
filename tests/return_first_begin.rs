@@ -156,3 +156,29 @@ end
     assert!(formatted.contains("  mtd int <- use(int n = compute(1, 2)) raises(Error)\n  begin\n    return n;\n  end;"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn optional_mtd_migration_handles_bare_and_existing_return_first_methods() {
+    let source = r#"define class C as
+int <- bare()
+begin
+  return 42;
+end
+mtd int• explicit()
+begin
+  return 42;
+end;
+end
+"#;
+    let default = format_source(source).unwrap();
+    assert!(default.contains("  int <- bare()\n  begin"), "{default}");
+    assert!(default.contains("  mtd int• explicit()\n  begin"), "{default}");
+    let migrated = oreslang_format::format_source_with_mtd(source).unwrap();
+    assert!(migrated.contains("  mtd int <- bare()\n  begin"), "{migrated}");
+    assert!(migrated.contains("  mtd int• explicit()\n  begin"), "{migrated}");
+    assert!(!migrated.contains("mtd mtd"), "{migrated}");
+    assert_eq!(
+        oreslang_format::format_source_with_mtd(&migrated).unwrap(),
+        migrated
+    );
+}
