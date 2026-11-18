@@ -87,3 +87,42 @@ test('CLI refuses invalid code, and --check/--write preserve the executable mean
       assert.equal(await readFile(file,'utf8'),'define class C as mtd (C self) x() -> int :: 5 end');
     }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('callable formatter CLI checks exact version and never silently migrates ::',
+  {skip:!attoc},async()=>{
+    const dir=await mkdtemp(join(tmpdir(),'atto-receiver-edition-'));
+    const tool=new URL('../tools/atto-format-callable.mjs',import.meta.url).pathname;
+    const env={...process.env,ATTOC:attoc};
+    try {
+      const unmarked=await readFile(new URL('fixtures/immutable-class-mtd.atto',import.meta.url),'utf8');
+      const legacy=join(dir,'legacy.atto');
+      await writeFile(legacy,unmarked);
+      const strict=spawnSync(process.execPath,[tool,'--write','--language-version=2',legacy],
+        {encoding:'utf8',env});
+      assert.notEqual(strict.status,0,'strict v2 must not rewrite a legacy-only receiver');
+      assert.equal(await readFile(legacy,'utf8'),unmarked,'source must remain unchanged');
+      const allowed=spawnSync(process.execPath,[tool,'--write','--language-version=1',legacy],
+        {encoding:'utf8',env});
+      assert.equal(allowed.status,0,allowed.stderr);
+      const migrated=await readFile(legacy,'utf8');
+      assert.ok(!migrated.includes('-> int ::\n  let int x = self.seed,\n  x + 2\nend') ||
+        migrated.includes('-> int ::'),
+        'receiver formatter may normalize headers but not body mode');
+      assert.equal(migrated.includes('-> int\n  let int x = self.seed,'),true,
+        'legacy implicit comma-body must retain exact syntax');
+      const shared=await readFile(new URL('fixtures/inline-legacy-prefixes.atto',import.meta.url),'utf8');
+      const valid=join(dir,'shared.atto');
+      await writeFile(valid,shared);
+      const v2=spawnSync(process.execPath,[tool,'--write','--language-version=2',valid],
+        {encoding:'utf8',env});
+      assert.equal(v2.status,0,v2.stderr);
+      const check=spawnSync(process.execPath,[tool,'--check','--language-version=2',valid],
+        {encoding:'utf8',env});
+      assert.equal(check.status,0,check.stderr);
+      for(const badVersion of ['0','3','foo']) {
+        const bad=spawnSync(process.execPath,[tool,'--write','--language-version='+badVersion,valid],
+          {encoding:'utf8',env});
+        assert.equal(bad.status,2,'unknown edition should be rejected before compiling');
+      }
+    } finally { await rm(dir,{recursive:true,force:true}); }
+});
