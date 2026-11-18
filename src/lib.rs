@@ -621,6 +621,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     // changing the structural brace/keyword nesting used by the language.
     let mut lambda_expr_continuation: Option<usize> = None;
     let mut pending_assignment_continuation = false;
+    // A return-type-first header is followed by its own begin/end body.
+    // The frame opens at begin (not at the header) to retain its indentation.
+    let mut pending_return_first_begin = false;
     // Parenthesized callable parameters can span lines. Preserve one
     // continuation indent without treating their declarations as statements.
     // Explicit fnc/routine headers also carry enough state to recognize
@@ -730,8 +733,23 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             .into_iter()
             .collect();
         let structural = structural_content.trim_start();
+        let return_first_header = !pending_return_first_begin
+            && end_delimited_callable_allowed(&define_stack, &brace_stack)
+            && is_return_first_callable_header(structural,
+                in_direct_instance_container(&define_stack, &brace_stack));
+        let begins_return_first = pending_return_first_begin && structural.trim() == "begin";
+        if pending_return_first_begin
+            && !begins_return_first
+            && !structural.trim().is_empty()
+        {
+            return Err(FormatError::new(
+                line_no, "return-type-first callable requires a standalone 'begin' line"
+            ));
+        }
 
-        let starts_end = starts_block_keyword(structural, "end");
+        let starts_end = starts_block_keyword(structural, "end")
+            || (structural.trim() == "end."
+                && define_stack.last().is_some_and(|frame| frame.kind == DefineKind::Callable));
         // Brace-form conditionals still close with `fi` (Java parseIf:
         // "every if closes with fi"); the idiomatic spelling is `} fi`.
         let brace_fi = {
@@ -942,7 +960,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                     && !structural.contains('.')));
         let desired_blanks = if out.is_empty() || is_closer_line(structural) {
             0
-        } else if (callable_body || annotation_line || starts_multiline_callable_header)
+        } else if (callable_body || return_first_header || annotation_line || starts_multiline_callable_header)
             && matches!(prev_event, PrevEvent::CallableEnd(i) if i == current_indent)
         {
             // Members of a named container remain adjacent unless the author
@@ -1081,7 +1099,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             }
         }
 
-        if end_delimited_callable {
+        if end_delimited_callable || begins_return_first {
             next_order += 1;
             define_stack.push(DefineFrame {
                 kind: DefineKind::Callable,
@@ -1090,6 +1108,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 keyword_depth: keyword_stack.len(),
             });
             indent += 1;
+        }
+        if begins_return_first {
+            pending_return_first_begin = false;
+        } else if return_first_header {
+            pending_return_first_begin = true;
         }
 
         // Switch subjects may end with an optional semicolon, but the block
@@ -1200,6 +1223,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
     }
 
+    if pending_return_first_begin {
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            "return-type-first callable is missing its 'begin' body",
+        ));
+    }
     if pending_callable_parameter_depth != 0 {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
@@ -1381,6 +1410,7 @@ fn leading_closing_braces(line: &str) -> usize {
 fn is_closer_line(line: &str) -> bool {
     line.starts_with('}')
         || starts_block_keyword(line, "end")
+        || line.trim() == "end."
         || starts_block_keyword(line, "fi")
         || starts_block_keyword(line, "done")
 }
@@ -2049,7 +2079,7 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
 }
 
 // Legacy "fnc name(...)" inside a class or actor is an instance method,
-// not a static, reifiable function. Drop only that declaration marker.
+// not a static, reifiable function. Canonicalize its introducer to mtd.
 // In particular never touch static fnc, comments, strings or nested callables.
 fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_modifier = |word: &str| {
@@ -2099,7 +2129,10 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     }
     let name = &words[prefix_len];
     let suffix = line[name.end..].trim_start();
-    if !(suffix.starts_with('(') || suffix.starts_with('<')) {
+    // Return-type-first instance methods put the name after '<-' or '•'.
+    // Do not mistake a declaration prefix's return type for a function name.
+    if !(suffix.starts_with('(') || suffix.starts_with('<')
+        || suffix.starts_with("<-") || suffix.starts_with('•')) {
         return None;
     }
 
@@ -2124,6 +2157,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         out.push_str(&canonical.join(" "));
         out.push(' ');
     }
+    out.push_str("mtd ");
     out.push_str(&line[name.start..]);
     Some(out)
 }
@@ -2860,6 +2894,55 @@ fn canonicalize_initialize_header(
         return Ok(format!("{canonical} ::"));
     }
     Ok(canonical)
+}
+
+/// Return-type-first callables use a standalone begin/end block rather than
+/// the legacy arrow/:: header. Restrict recognition to a complete header;
+/// expressions, assignment/field declarations and quoted punctuation must not
+/// open a formatting frame.
+fn is_return_first_callable_header(structural: &str, instance_member: bool) -> bool {
+    let line = structural.trim();
+    if line.is_empty() || line.ends_with(';') || line.contains('=')
+        || line.contains('{') || line.contains('}')
+        || contains_word(line, "static") || contains_word(line, "abstract")
+        || contains_word(line, "actor") || contains_word(line, "isoactor")
+        || starts_word(line, "return") || starts_word(line, "const")
+        || starts_word(line, "let") || starts_word(line, "val")
+        || starts_word(line, "define")
+    {
+        return false;
+    }
+    let Some((at, len)) = line.find("<-").map(|index| (index, 2usize))
+        .or_else(|| line.find('•').map(|index| (index, '•'.len_utf8())))
+    else {
+        return false;
+    };
+    let prefix = line[..at].trim();
+    let after = line[at + len..].trim();
+    let Some((name, args)) = after.split_once('(') else {
+        return false;
+    };
+    let name = name.trim();
+    if name.is_empty() || !name.chars().all(is_ident_char) || !args.ends_with(')')
+        || args[..args.len()-1].contains("=>")
+    {
+        return false;
+    }
+    let words: Vec<&str> = prefix.split_whitespace().collect();
+    if words.is_empty() || words.iter().any(|word| {
+        matches!(*word, "return" | "if" | "for" | "while" | "match"
+            | "switch" | "select" | "else" | "begin")
+    }) {
+        return false;
+    }
+    if !instance_member && words.iter().any(|word| matches!(*word, "mtd" | "method")) {
+        return false;
+    }
+    let type_words: Vec<&str> = words.iter().copied().filter(|word| !matches!(*word,
+        "fnc" | "mtd" | "method" | "pub" | "private" | "async" | "suspend"
+        | "suspends" | "structural" | "critical")).collect();
+    !type_words.is_empty() && type_words[0].chars().next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
