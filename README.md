@@ -37,3 +37,25 @@ This README records the intended role of this repository; it is not a claim of f
 AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
 
 **Acceptance:** name the exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Ownership operation normalization (staged v1)
+
+The limited src/ownership-operations.mjs pass preserves distinct ownership
+spellings such as copy!! versus copy! !value, borrow! mut, freeze!, weak!,
+pin! and drop!. It canonicalizes a recognized lifetime! binder to lt!
+without touching quoted text, templates, comments or ambiguous member
+syntax. It is **not** a full AttoLang parser/formatter.
+
+The verified wrapper accepts a caller-provided *real guest compiler* and
+refuses a rewrite unless both input variants generate identical WebAssembly.
+Source-only tests of a stub compiler callback are contract tests, not real
+guest-language evidence.
+
+Run locally:
+    node --test tests/ownership-operations.test.mjs
+
+The exact committed JS source and test blobs were run on Node 22:
+**9 tests passed, 0 failed**. This does not establish JVM/LLVM/.NET
+guest compiler parity or automatic formatting of unsupported grammar.
+Related source and language PRs: atto-source.rs#344, atto-spec#92,
+atto-borrow-checker.rs#43 and atto-platform-conformance#76.

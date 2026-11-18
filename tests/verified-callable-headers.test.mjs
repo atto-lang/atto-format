@@ -39,6 +39,12 @@ test('header verifier validates the entire bounded guest and explicit version',a
   assert.deepEqual(seen,[2,2]);
   assert.equal(result.language_version,2);
 });
+test('version-aware callable verifier bounds compiler guest size',async()=>{
+  await assert.rejects(()=>normalize_verified_callable_headers(
+    sample,async()=>new Uint8Array(16*1024*1024+1)),
+    /bounded valid guest Wasm module/);
+});
+
 const attoc=process.env.ATTOC?resolve(process.env.ATTOC):null;
 async function compileGuest(source) {
   const dir=await mkdtemp(join(tmpdir(),'atto-format-integration-'));
