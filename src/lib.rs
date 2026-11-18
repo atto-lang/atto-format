@@ -1869,7 +1869,14 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
     }
     let suffix = line[words[index].end..].trim_start();
     if !suffix.starts_with('(') && !generic_method_parameter_list(suffix) {
-        return line.to_string();
+        // The optional migration must recognize Type <- name(...) and
+        // Type• name(...) too. Existing explicit mtd/method introducers
+        // are not themselves type names; never double-prefix them.
+        if !is_return_first_callable_header(line, true)
+            || matches!(word(index), "mtd" | "method")
+        {
+            return line.to_string();
+        }
     }
     // A default parameter may contain '='; don't mistake that for an
     // assignment outside a method. The direct class/actor scope, plain
