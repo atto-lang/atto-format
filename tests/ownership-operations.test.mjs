@@ -80,7 +80,8 @@ test('verified wrapper requires real caller compiler output, not empty bytes', a
 test('test fixture: deterministic compiler output permits matching normalization', async () => {
   // A stand-in callback tests the wrapper contract ONLY. It is not real guest
   // parity evidence; production must supply the Atto compiler.
-  const wasm = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, 42);
+  const wasm = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
+  assert.ok(WebAssembly.validate(wasm));
   const result = await verified('fnc f<lifetime! a>() {}', async () => wasm);
   assert.equal(result.changed, true);
   assert.equal(result.formatted, 'fnc f<lt! a>() {}');
@@ -91,7 +92,24 @@ test('verified wrapper fails if source rewriting changes guest binary', async ()
   let n = 0;
   await assert.rejects(
     () => verified('fnc f<lifetime! a>() {}', async () =>
-      Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, ++n)),
+      n++ === 0
+        ? Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0)
+        : Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, 0, 1, 0)),
     /changed emitted guest semantics/,
+  );
+});
+
+test('guest proof rejects malformed post-header sections and oversized binary results', async () => {
+  const source = 'fnc f<lifetime! a>() {}';
+  const validHeader = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
+  assert.ok(WebAssembly.validate(validHeader));
+  assert.equal(WebAssembly.validate(Uint8Array.of(...validHeader, 42)), false);
+  await assert.rejects(
+    () => verified(source, async () => Uint8Array.of(...validHeader, 42)),
+    /structurally valid WebAssembly/,
+  );
+  await assert.rejects(
+    () => verified(source, async () => new Uint8Array(16 * 1024 * 1024 + 1)),
+    /bounded, structurally valid WebAssembly/,
   );
 });
