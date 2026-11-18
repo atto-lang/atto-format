@@ -2902,7 +2902,7 @@ fn canonicalize_initialize_header(
 /// open a formatting frame.
 fn is_return_first_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
-    if line.is_empty() || line.ends_with(';') || line.contains('=')
+    if line.is_empty() || line.ends_with(';')
         || line.contains('{') || line.contains('}')
         || contains_word(line, "static") || contains_word(line, "abstract")
         || contains_word(line, "actor") || contains_word(line, "isoactor")
@@ -2923,8 +2923,18 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
         return false;
     };
     let name = name.trim();
-    if name.is_empty() || !name.chars().all(is_ident_char) || !args.ends_with(')')
-        || args[..args.len()-1].contains("=>")
+    // Generic callable names are still names (e.g., choose<T>(T value)).
+    let plain_name = if let Some((plain, generics)) = name.split_once('<') {
+        if !generics.ends_with('>') || generics.len() <= 1 {
+            return false;
+        }
+        plain.trim()
+    } else {
+        name
+    };
+    if plain_name.is_empty() || !plain_name.chars().all(is_ident_char)
+        || !plain_name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        || !args.ends_with(')')
     {
         return false;
     }
