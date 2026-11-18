@@ -866,7 +866,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         let end_delimited_callable = end_delimited_callable_allowed(&define_stack, &brace_stack)
             && (is_end_delimited_callable_header(structural, direct_instance_member)
                 || multiline_end_delimited_callable);
-        let callable_body = is_callable_body_header(structural, signature_context)
+        let callable_body = (!return_first_header
+                && is_callable_body_header(structural, signature_context))
             || end_delimited_callable
             || (closes_multiline_callable && structural.contains('{'));
         let callable_signature = is_callable_signature(structural, signature_context)
@@ -2131,8 +2132,10 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     let suffix = line[name.end..].trim_start();
     // Return-type-first instance methods put the name after '<-' or '•'.
     // Do not mistake a declaration prefix's return type for a function name.
-    if !(suffix.starts_with('(') || suffix.starts_with('<')
-        || suffix.starts_with("<-") || suffix.starts_with('•')) {
+    if !(suffix.starts_with('(')
+        || suffix.starts_with('<')
+        || suffix.starts_with('•')
+        || is_return_first_callable_header(line, true)) {
         return None;
     }
 
@@ -2903,7 +2906,6 @@ fn canonicalize_initialize_header(
 fn is_return_first_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
     if line.is_empty() || line.ends_with(';')
-        || line.contains('{') || line.contains('}')
         || contains_word(line, "abstract")
         || contains_word(line, "actor") || contains_word(line, "isoactor")
         || starts_word(line, "return") || starts_word(line, "const")
@@ -2919,6 +2921,15 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
     };
     let prefix = line[..at].trim();
     let after = line[at + len..].trim();
+    // Braces inside a structural/record return type are NOT executable body
+    // delimiters. They must be balanced entirely before the marker.
+    if prefix.chars().filter(|&ch| ch == '{').count()
+        != prefix.chars().filter(|&ch| ch == '}').count()
+        || after.contains('{')
+        || after.contains('}')
+    {
+        return false;
+    }
     let Some((name, args)) = after.split_once('(') else {
         return false;
     };
