@@ -6,20 +6,38 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {normalize_verified_callable_headers} from '../src/verified-callable-headers.mjs';
 const sample='mtd (Calculator self) foo() -> int :: 5 end';
-const guest=new Uint8Array([0,97,115,109,1,0,0,0,77]);
+const guest=new Uint8Array([0,97,115,109,1,0,0,0]);
+const differentGuest=new Uint8Array([0,97,115,109,1,0,0,0,0,1,0]);
+assert.ok(WebAssembly.validate(guest));
+assert.ok(WebAssembly.validate(differentGuest));
 test('host verifier admits only binary-identical compilable rewrites',async()=>{
   const checked=await normalize_verified_callable_headers(sample,async()=>guest);
   assert.equal(checked.formatted,'mtd (self: Calculator) foo() -> int :: 5 end');
   assert.equal(checked.changed,true);
   assert.equal(checked.guest_sha256_same,true);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async text=>
-    text===sample?guest:new Uint8Array([0,97,115,109,1,0,0,0,78])),/guest binary changed/);
+    text===sample?guest:differentGuest),/guest binary changed/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>
     {throw new Error('E_UNSUPPORTED');}),/E_UNSUPPORTED/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>
-    new Uint8Array([1,2,3])),/valid guest Wasm header/);
+    new Uint8Array([1,2,3])),/valid guest Wasm module/);
   await assert.rejects(()=>normalize_verified_callable_headers('x'.repeat(1024*1024+1),async()=>guest),/limit/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,null),/required/);
+});
+test('header verifier validates the entire bounded guest and explicit version',async()=>{
+  await assert.rejects(()=>normalize_verified_callable_headers(
+    sample,async()=>new Uint8Array([0,97,115,109,1,0,0,0,77])),/valid guest Wasm module/);
+  await assert.rejects(()=>normalize_verified_callable_headers(
+    sample,async()=>guest,{language_version:2}),/version-aware compiler callback/);
+  for(const edition of [0,3,'2',null]) {
+    await assert.rejects(()=>normalize_verified_callable_headers(
+      sample,async()=>guest,{language_version:edition}),/Unsupported Atto language_version/);
+  }
+  const seen=[];
+  const result=await normalize_verified_callable_headers(sample,
+    async (_source,version)=>{seen.push(version);return guest;},{language_version:2});
+  assert.deepEqual(seen,[2,2]);
+  assert.equal(result.language_version,2);
 });
 const attoc=process.env.ATTOC?resolve(process.env.ATTOC):null;
 async function compileGuest(source) {
