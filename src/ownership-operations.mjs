@@ -61,17 +61,29 @@ export function normalize_ownership_operations(source) {
     // Do not normalize a comment-separated binder, operator, method member,
     // or unknown grammar. A real compiler must verify all other rewrites.
     if (!isStart(source[next])) continue;
-    const before = source.slice(0, start);
-    const lastNonspace = before.trimEnd().at(-1);
-    const atNewline = /\n[ \t]*$/.test(before);
+    // Inspect only the whitespace before this token. Rebuilding the entire
+    // prefix for every lifetime binder caused quadratic cost for dense files.
+    let prev = start - 1;
+    while (prev >= 0 && WS(source[prev])) --prev;
+    const lastNonspace = prev >= 0 ? source[prev] : undefined;
+    // A forward indexOf('\n') is also quadratic when there are no newlines.
+    let atNewline = false;
+    for (let j = prev + 1; j < start; ++j) {
+      if (source[j] === '\n') atNewline = true;
+    }
     if (!(start === 0 || atNewline || '<,({;'.includes(lastNonspace))) continue;
     edits.push({ start, end: i, replacement: 'lt' });
   }
-  let result = source;
-  for (const edit of edits.reverse()) {
-    result = result.slice(0, edit.start) + edit.replacement + result.slice(edit.end);
+  // Build the output once, in source order; repeated prefix/suffix copies
+  // caused quadratic allocations even after the lexical scan was fixed.
+  let end = 0;
+  const parts = [];
+  for (const edit of edits) {
+    parts.push(source.slice(end, edit.start), edit.replacement);
+    end = edit.end;
   }
-  return result;
+  parts.push(source.slice(end));
+  return parts.join('');
 }
 
 /**
