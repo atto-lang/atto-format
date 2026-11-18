@@ -101,3 +101,38 @@ fn static_return_first_remains_fnc_not_mtd() {
     assert!(!formatted.contains("static mtd"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn structural_return_type_braces_do_not_open_a_fake_function_body() {
+    let input = r#"fnc struct {value: int} <- shape()
+begin // keep opener
+return value;
+end. // keep closer
+
+define class Shapes as
+fnc record {value: int}• current()
+begin
+return value;
+end;
+end
+"#;
+    let got = format_source(input).unwrap();
+    assert!(got.contains("fnc struct {value: int} <- shape()\nbegin // keep opener\n  return value;\nend. // keep closer"), "{got}");
+    assert!(got.contains("  mtd record {value: int}• current()\n  begin\n    return value;\n  end;"), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
+
+#[test]
+fn begin_must_stay_a_distinct_line_and_existing_arrows_keep_their_meaning() {
+    for malformed in [
+        "int <- foo()\nbegin return 42;\nend",
+        "int <- foo()\nbegin;\n  return 42;\nend",
+        "int <- foo()\nbegin\n  return 42;",
+    ] {
+        assert!(format_source(malformed).is_err(), "{malformed}");
+    }
+    let comparison = "fnc compare() -> bool {\nreturn 1<-2;\n}\n";
+    let got = format_source(comparison).unwrap();
+    assert!(got.contains("return 1<-2;"), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
