@@ -88,8 +88,8 @@ end.
 end
 "#;
     let got = format_source(input).unwrap();
-    assert!(got.contains("fnc Result<int, string> <- wrap<T>(T value)\\nbegin\\n  return Ok(42);\\nend"), "{got}");
-    assert!(got.contains("  mtd int <- choose<T>(T value, int fallback = 2)\\n  begin\\n    return fallback;\\n  end."), "{got}");
+    assert!(got.contains("fnc Result<int, string> <- wrap<T>(T value)\nbegin\n  return Ok(42);\nend"), "{got}");
+    assert!(got.contains("  mtd int <- choose<T>(T value, int fallback = 2)\n  begin\n    return fallback;\n  end."), "{got}");
     assert_eq!(format_source(&got).unwrap(), got);
 }
 
@@ -97,7 +97,7 @@ end
 fn static_return_first_remains_fnc_not_mtd() {
     let input = "define class Helpers as\nstatic fnc int <- utility()\nbegin\nreturn 42;\nend;\nend\n";
     let formatted = format_source(input).unwrap();
-    assert!(formatted.contains("  static fnc int <- utility()\\n  begin\\n    return 42;\\n  end;"), "{formatted}");
+    assert!(formatted.contains("  static fnc int <- utility()\n  begin\n    return 42;\n  end;"), "{formatted}");
     assert!(!formatted.contains("static mtd"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
