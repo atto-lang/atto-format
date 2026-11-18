@@ -129,6 +129,7 @@ fn every_prefix_formats_or_rejects_without_panicking() {
 // `const`, `final` and `mut` are deliberately absent: they must never change.
 const REWRITABLE: &[&str] = &[
     "fnc",
+    "mtd",
     "routine",
     "do",
     "then",
