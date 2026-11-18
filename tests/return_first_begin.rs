@@ -136,3 +136,23 @@ fn begin_must_stay_a_distinct_line_and_existing_arrows_keep_their_meaning() {
     assert!(got.contains("return 1<-2;"), "{got}");
     assert_eq!(format_source(&got).unwrap(), got);
 }
+
+#[test]
+fn checked_effects_and_nested_parenthesized_arguments_do_not_confuse_header() {
+    let src = r#"fnc int <- run(int n) throws Error
+begin
+  return n;
+end
+
+define class C as
+fnc int <- use(int n = compute(1, 2)) raises(Error)
+begin
+  return n;
+end;
+end
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("fnc int <- run(int n) throws Error\nbegin\n  return n;\nend"), "{formatted}");
+    assert!(formatted.contains("  mtd int <- use(int n = compute(1, 2)) raises(Error)\n  begin\n    return n;\n  end;"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
