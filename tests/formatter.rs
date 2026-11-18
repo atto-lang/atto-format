@@ -1290,11 +1290,11 @@ end
 fnc standalone(): int { return 4; }
 "#;
     let out = format_source(input).unwrap();
-    assert!(out.contains("suspend join_room("), "{out}");
-    assert!(out.contains("  leave_room(ActorGroup group) {"), "{out}");
+    assert!(out.contains("suspend mtd join_room("), "{out}");
+    assert!(out.contains("  mtd leave_room(ActorGroup group) {"), "{out}");
     assert!(out.contains("suspend method explicit_join("), "{out}");
     assert!(out.contains("static fnc static_send("), "{out}");
-    assert!(out.contains("  legacy() -> int {"), "{out}");
+    assert!(out.contains("  mtd legacy() -> int {"), "{out}");
     assert!(out.contains("  method explicit() -> int {"), "{out}");
     assert!(out.contains("  static fnc helper() -> int {"), "{out}");
     assert!(out.contains("fnc standalone() -> int {"), "{out}");
@@ -1315,7 +1315,7 @@ static fnc direct(): int { return 42; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("call(): String {"));
+    assert!(out.contains("mtd call(): String {"));
     assert!(out.contains("// fnc marker() is a comment"));
     assert!(out.contains("\"fnc name()\""));
     assert!(out.contains("static fnc direct()"));
@@ -1334,14 +1334,14 @@ method method(): int { return 6; }
 end
 "#;
     let once = format_source(src).unwrap();
-    assert!(once.contains("  pub legacy() -> int {"), "{once}");
-    assert!(once.contains("  pub suspend deferred() -> int {"), "{once}");
-    assert!(once.contains("  pub async compute() -> int {"), "{once}");
+    assert!(once.contains("  pub mtd legacy() -> int {"), "{once}");
+    assert!(once.contains("  pub suspend mtd deferred() -> int {"), "{once}");
+    assert!(once.contains("  pub async mtd compute() -> int {"), "{once}");
     assert!(
         once.contains("  pub static fnc reusable() -> int {"),
         "{once}"
     );
-    assert!(once.contains("  method_name() -> int {"), "{once}");
+    assert!(once.contains("  mtd method_name() -> int {"), "{once}");
     assert!(once.contains("  method method() -> int {"), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
 }
@@ -1359,7 +1359,7 @@ end
     let formatted = format_source(src).unwrap();
     assert!(formatted.contains("// fnc ignored(): int"));
     assert!(formatted.contains("  static fnc keep() -> int"));
-    assert!(formatted.contains("  ordinary() -> String"));
+    assert!(formatted.contains("  mtd ordinary() -> String"));
     assert!(formatted.contains("\"fnc literal\""));
     assert_eq!(formatted, format_source(&formatted).unwrap());
 }
@@ -1373,7 +1373,7 @@ static fnc helper(): int { return 3; }
 end
 "#;
     let out = format_source(src).unwrap();
-    assert!(out.contains("  handle(): int {"), "{out}");
+    assert!(out.contains("  mtd handle(): int {"), "{out}");
     assert!(out.contains("  method explicit(): int {"), "{out}");
     assert!(out.contains("  static fnc helper(): int {"), "{out}");
     assert_eq!(out, format_source(&out).unwrap());
@@ -1398,13 +1398,13 @@ end
     let expected = r#"define actor ConnectionActor as
   final rooms: Map<RoomId, ActorGroup>
 
-  suspend join_room(
+  suspend mtd join_room(
     group: ActorGroup,
     permit: ActorGroupJoinCapability
   ) {
     group.join(permit)
   }
-  leave_room(ActorGroup group) {
+  mtd leave_room(ActorGroup group) {
     group.leave()
   }
 end
@@ -1422,7 +1422,7 @@ static fnc utility(): int { return 9; }
 end
 "#;
     let result = format_source(source).unwrap();
-    assert!(result.contains("  handle(): int {"), "{result}");
+    assert!(result.contains("  mtd handle(): int {"), "{result}");
     assert!(result.contains("  static fnc utility(): int {"), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
