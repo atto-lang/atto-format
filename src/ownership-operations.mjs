@@ -85,9 +85,11 @@ export async function normalize_verified_ownership_operations(source, compileGue
   const formatted = normalize_ownership_operations(source);
   const compile = async text => {
     const binary = await compileGuest(text);
-    if (!(binary instanceof Uint8Array) || binary.length < 8 ||
-        Buffer.from(binary.subarray(0, 8)).toString('hex') !== '0061736d01000000')
-      throw new Error('Guest compiler did not return valid WebAssembly');
+    if (!(binary instanceof Uint8Array) || binary.byteLength < 8 ||
+        binary.byteLength > 16 * 1024 * 1024 ||
+        Buffer.from(binary.subarray(0, 8)).toString('hex') !== '0061736d01000000' ||
+        !WebAssembly.validate(binary))
+      throw new Error('Guest compiler did not return bounded, structurally valid WebAssembly');
     return Buffer.from(binary);
   };
   const original = await compile(source);
