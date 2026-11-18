@@ -627,6 +627,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     // end-delimited callables when the return/body suffix is on the closing line.
     let mut pending_callable_parameter_depth = 0usize;
     let mut pending_explicit_callable_parameters = false;
+    // A type-first signature (T <- name() / T• name()) defers ownership
+    // of its end-delimited body until the next visible line. When that line
+    // is 'begin', the marker stays aligned with the signature; otherwise
+    // the first statement opens the same checked indentation frame.
+    let mut pending_type_first_callable = false;
     // Expression continuation: unclosed `(`/`[` across lines and trailing
     // binary operators indent the following lines one level. This is purely
     // presentational and is derived only from visible (non-literal,
@@ -697,7 +702,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_export_line(&content);
         let instance_member =
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
-        if !generator_header {
+        let type_first_header = is_type_first_callable_header(&content, lex);
+        if type_first_header && instance_member {
+            // Canonical new-style instance methods use 'mtd', not 'fnc'.
+            // Never change a top-level function or static fnc in this pass.
+            content = canonicalize_type_first_instance_method(&content, lex);
+        } else if !generator_header && !type_first_header {
             content = canonicalize_declaration_line(
                 &content,
                 lex,
@@ -731,7 +741,30 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             .collect();
         let structural = structural_content.trim_start();
 
-        let starts_end = starts_block_keyword(structural, "end");
+        let type_first_callable_header = is_type_first_callable_header(structural, LexState::default())
+            && end_delimited_callable_allowed(&define_stack, &brace_stack);
+        let begin_opener = pending_type_first_callable && structural.trim() == "begin";
+        if pending_type_first_callable && !structural.trim().is_empty() {
+            pending_type_first_callable = false;
+            if !begin_opener {
+                // No explicit begin: this first statement belongs to the
+                // preceding callable and must indent before it is rendered.
+                next_order += 1;
+                define_stack.push(DefineFrame {
+                    kind: DefineKind::Callable,
+                    order: next_order,
+                    brace_depth: brace_stack.len(),
+                    keyword_depth: keyword_stack.len(),
+                });
+                indent += 1;
+            }
+        }
+
+        // The generic block-keyword detector excludes 'end.' because
+        // 'object.end()' must not look like a closer. Here an exact 'end.'
+        // line is expressly a callable or container closer.
+        let starts_end = starts_block_keyword(structural, "end")
+            || structural.trim() == "end.";
         // Brace-form conditionals still close with `fi` (Java parseIf:
         // "every if closes with fi"); the idiomatic spelling is `} fi`.
         let brace_fi = {
@@ -1081,7 +1114,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             }
         }
 
-        if end_delimited_callable {
+        if end_delimited_callable || begin_opener {
             next_order += 1;
             define_stack.push(DefineFrame {
                 kind: DefineKind::Callable,
@@ -1090,6 +1123,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 keyword_depth: keyword_stack.len(),
             });
             indent += 1;
+        }
+        if type_first_callable_header {
+            pending_type_first_callable = true;
         }
 
         // Switch subjects may end with an optional semicolon, but the block
@@ -1200,6 +1236,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
     }
 
+    if pending_type_first_callable {
+        return Err(FormatError::new(
+            normalized.lines().count().max(1),
+            "type-first callable header has no body (expected 'begin' or a statement and 'end')",
+        ));
+    }
     if pending_callable_parameter_depth != 0 {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
@@ -1381,6 +1423,7 @@ fn leading_closing_braces(line: &str) -> usize {
 fn is_closer_line(line: &str) -> bool {
     line.starts_with('}')
         || starts_block_keyword(line, "end")
+        || line.trim() == "end."
         || starts_block_keyword(line, "fi")
         || starts_block_keyword(line, "done")
 }
@@ -2046,6 +2089,73 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
     }
     canonical.extend(["type", "alias"]);
     Some(rewrite_word_prefix(line, prefix, &canonical))
+}
+
+
+// Only declarations ending at their parameter list qualify. Preserve
+// expression 'x<-1', member calls, comments/strings, and unrelated fnc/mtd
+// forms. The delimiter has to be exactly U+2022 or contiguous ASCII '<-'.
+fn is_type_first_callable_header(line: &str, initial: LexState) -> bool {
+    let mut state = initial;
+    let visible: String = scan_visible(line, &mut state).into_iter().collect();
+    let source = visible.trim();
+    if !source.ends_with(')') || source.contains('{') || source.contains(';')
+        || source.contains('=') || source.starts_with("return ")
+    {
+        return false;
+    }
+    let Some(open) = source.rfind('(') else { return false; };
+    if open == 0 || !source[open..].ends_with(')') {
+        return false;
+    }
+    let prefix = source[..open].trim_end();
+    let delim = if let Some(i) = prefix.find('•') {
+        (i, "•")
+    } else if let Some(i) = prefix.find("<-") {
+        (i, "<-")
+    } else {
+        return false;
+    };
+    let result_type = prefix[..delim.0].trim();
+    let function_name = prefix[delim.0 + delim.1.len()..].trim();
+    if result_type.is_empty() || function_name.is_empty()
+        || !function_name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        || !function_name.chars().all(is_ident_char)
+    {
+        return false;
+    }
+    let first = result_type.split_whitespace().next().unwrap_or("");
+    if matches!(first, "if" | "while" | "for" | "return" | "val" | "let" | "const"
+        | "new" | "else" | "match" | "switch" | "select")
+    {
+        return false;
+    }
+    // Literal '< -' or '< /*comment*/ -' are not valid return delimiters.
+    // Requiring the contiguous '<-' string prevents this false positive.
+    true
+}
+
+// Scoped canonicalization: only direct class/actor instance members with
+// a type-first return delimiter. Existing legacy bare-method formatting,
+// static fnc, and top-level fnc retain their established behavior.
+fn canonicalize_type_first_instance_method(line: &str, initial: LexState) -> String {
+    let spans = visible_word_spans(line, initial);
+    let word = |span: WordSpan| &line[span.start..span.end];
+    if spans.iter().take(3).any(|span| word(*span) == "static") {
+        return line.to_owned();
+    }
+    let Some(index) = spans.iter().position(|span| word(*span) == "fnc") else {
+        return line.to_owned();
+    };
+    if index > 1
+        || (index == 1 && !matches!(word(spans[0]), "pub" | "private"))
+        || !is_type_first_callable_header(line, initial)
+    {
+        return line.to_owned();
+    }
+    let mut formatted = line.to_owned();
+    formatted.replace_range(spans[index].start..spans[index].end, "mtd");
+    formatted
 }
 
 // Legacy "fnc name(...)" inside a class or actor is an instance method,

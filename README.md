@@ -490,3 +490,29 @@ into another group/session can escape and are **not guaranteed contained**.
 On Windows, the direct child alone is terminated; a job-object implementation
 is still required for descendant cleanup. Do not use untrusted compiler
 binaries or rely on this adapter as an OS sandbox. Analysis failures produce nonzero status and no source rewrites.
+
+## Type-first callable `begin/end` formatting (draft)
+
+The formatter supports return-type-first callables with either the contiguous
+ASCII `<-` delimiter or the Unicode U+2022 `•` delimiter:
+
+```atto
+fnc int <- answer()
+begin
+  if ready then
+    return 42;
+  else
+    return 0;
+  fi
+end.
+```
+
+Unbraced `end` bodies work with or without `begin`. `end`, `end.`, and
+`end;` are preserved. Indentation is **two spaces per block**, and comments,
+strings, plus `then/fi` and nested `match/end` structures remain distinct.
+
+For this **new type-first style only**, a directly contained class/actor
+instance method written with `fnc` is emitted with `mtd`.
+Existing legacy method formatting remains unchanged; top-level functions and
+`static fnc` are never changed to `mtd`. The compiler must admit the syntax
+before these formatter transformations can be considered language-wide parity.
