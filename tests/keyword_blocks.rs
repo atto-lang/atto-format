@@ -10,7 +10,7 @@ fn compact_keyword_if_expands_inside_a_callable() {
 end
 "#;
     let expected = r#"define class Builder as
-  pub build() -> Result {
+  pub mtd build() -> Result {
     if self.built then
       return Err("builder already consumed");
     fi
