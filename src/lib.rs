@@ -747,9 +747,18 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             ));
         }
 
-        let starts_end = starts_block_keyword(structural, "end")
-            || (structural.trim() == "end."
-                && define_stack.last().is_some_and(|frame| frame.kind == DefineKind::Callable));
+        let end_text = structural.trim();
+        let starts_end = matches!(end_text, "end" | "end;" | "end.")
+            && (end_text != "end."
+                || define_stack.last().is_some_and(|frame| frame.kind == DefineKind::Callable));
+        if starts_block_keyword(structural, "end")
+            && !starts_end
+            || end_text.starts_with("end.") && end_text != "end."
+        {
+            return Err(FormatError::new(
+                line_no, "unexpected tokens after 'end' (only end, end. or end; are valid)"
+            ));
+        }
         // Brace-form conditionals still close with `fi` (Java parseIf:
         // "every if closes with fi"); the idiomatic spelling is `} fi`.
         let brace_fi = {
