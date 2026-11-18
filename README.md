@@ -54,8 +54,21 @@ guest-language evidence.
 Run locally:
     node --test tests/ownership-operations.test.mjs
 
-The exact committed JS source and test blobs were run on Node 22:
-**9 tests passed, 0 failed**. This does not establish JVM/LLVM/.NET
+Audit follow-up atto-format#14 fixes a previously quadratic formatter
+path on 60,000 repeated lifetime binders and adds six stress tests. Both
+the lexical context scan and output edit assembly now use bounded linear
+work; the 1 MiB source admission cap is unchanged.
+
+Locally verified implementation Git blob:
+bb98ca440b418521b38fcb835020d51c105fcf63
+
+Locally verified new stress-test blob:
+5bde556210c2ec790f038cd55881aada1d229a89
+
+The Node 22 ownership suite passed **16 tests, 0 failed** locally using
+the exact implementation and stress-test blobs; the existing baseline test
+fixtures also exercised source/guest binary equivalence. A CI failure before
+test execution is **not** a passed runner receipt. This does not establish JVM/LLVM/.NET
 guest compiler parity or automatic formatting of unsupported grammar.
 Related source and language PRs: atto-source.rs#344, atto-spec#92,
 atto-borrow-checker.rs#43 and atto-platform-conformance#76.
