@@ -68,6 +68,8 @@ fn rejects_missing_begin_and_unmatched_ends() {
         "int• f()",
         "int <- f()\nbegin\nreturn 1;",
         "int <- f()\nbegin\nreturn 1;\nend.\nend",
+        "int <- f()\nbegin\nreturn 1;\nend..",
+        "int <- f()\nbegin\nreturn 1;\nend;. junk",
     ] {
         assert!(format_source(input).is_err(), "{input}");
     }
