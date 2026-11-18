@@ -8,6 +8,44 @@ There is deliberately **one format and no style configuration**. The same Rust
 library powers the CLI, so editor integrations, CI, and local development use
 identical behavior.
 
+## Return-type-first callable declarations (draft)
+
+Both `<-` and `•` introduce a named callable with its return type first.
+The following forms parse as ordinary functions, and preserve the author's
+chosen separator; `fnc` is optional at free/module scope.
+
+```atto
+int <- foo()
+begin
+  return 42;
+end.
+
+int• bar()
+begin
+  return 42;
+end.
+
+fnc int <- baz()
+begin
+  return 42;
+end;
+
+fnc int• qux()
+begin
+  return 42;
+end
+```
+
+The `begin` opener is a separate line at the declaration's indentation level;
+its body receives one two-space indentation level. `end`, `end.`, and `end;`
+are accepted closers. In a class or actor, prefer `mtd` instead of `fnc`
+for an explicit method marker: `fnc int <- read()` formats as
+`mtd int <- read()`. Bare instance methods stay bare. Free/module functions
+and `static fnc` retain their existing introducer.
+
+This is a draft syntax proposal pending compiler-backend conformance and
+exact-head CI; formatter acceptance alone is not backend implementation proof.
+
 ## Canonical concrete field syntax (pre-1.0)
 
 In direct class member declarations, use `final` to seal
@@ -64,13 +102,14 @@ the full field contract.
   bodies are never rewritten;
 - at most one ordinary blank line;
 - **two blank lines between sibling executable function/routine/method declarations**;
-- in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
-  explicit `method name(...)` remains explicit, and `static fnc` is preserved;
-  instance methods require an explicit lambda to be used as callbacks;
+- in class/actor bodies, legacy `fnc name(...)` formats as `mtd name(...)`;
+  explicit `method name(...)` remains explicit, bare methods remain bare,
+  and `static fnc` is preserved; instance methods require an explicit lambda
+  to be used as callbacks;
 - executable declarations and method implementations use the slim arrow `->`,
   except actor callables and top-level legacy `suspend fnc` declarations, which
   use `:` because LLVM requires it there (Java accepts both);
-- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; `::` may separate the complete return type from the body and permit compact same-line source; callable-body `as` is rejected; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; `::` may separate the complete return type from the body and permit compact same-line source; callable-body `as` is rejected; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; new return-type-first forms instead use a separate `begin` followed by an `end` closer at either free-function or class/actor instance-method scope; other supported class methods and actor callables retain their existing brace or double-colon body syntax;
 - interface, contract, and trait callable signatures use the type-level fat arrow `=>` (Java's interface parser accepts only `=>`/`:` and LLVM requires `=>` for contracts);
 - conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line; brace-form conditionals (`if c { ... } elif d { ... } else { ... } fi`) are also accepted, keep their author's line layout, and still require `fi`, which may share a line with the closing brace (`} fi`);
 - `/* ... */` block comments nest, as in the Java and LLVM lexers;
