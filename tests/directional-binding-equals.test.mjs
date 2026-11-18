@@ -100,3 +100,12 @@ test('verified wrapper does not recompile an unchanged source', async () => {
   assert.equal(calls, 1);
   assert.equal(result.changed, false);
 });
+
+test('verified directional binding gate rejects oversized compiler outputs', async () => {
+  const oversized = new Uint8Array(16 * 1024 * 1024 + 1);
+  oversized.set(magic);
+  await assert.rejects(
+    verify('inbox >> = val x;', async () => oversized),
+    /valid.*guest Wasm/,
+  );
+});

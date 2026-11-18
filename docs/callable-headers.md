@@ -25,7 +25,7 @@ The `src/verified-callable-headers.mjs` adapter accepts a compiler callback that
 returns the **actual executable guest Wasm** for an AttoLang program. It compiles
 the original and normalized source and accepts a changed header **only if both
 compiler outputs are byte-identical**. Invalid programs, unsupported constructs,
-truncated outputs and semantic changes fail closed.
+truncated outputs, malformed Wasm modules (including valid magic with invalid sections), oversized outputs above 16 MiB, and semantic changes fail closed. This validates Wasm structure but does not assert an allowed-imports or execution policy; backend admission remains separate.
 
 `tools/atto-format-callable.mjs` is an opt-in host CLI:
 
