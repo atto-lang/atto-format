@@ -50,15 +50,51 @@ export function normalize_callable_headers(source) {
     }
     return -1;
   }
+  // Skip a syntactically balanced type reference, including qualified
+  // nested generics. This is deliberately lexical: verified formatting still
+  // requires the real compiler to accept both source and normalized source.
+  function skipType(i) {
+    if (!ident(i)) return -1;
+    let j = i + 1;
+    if (is(i, 'fnc') && is(j, '(')) {
+      j = skipPaired(j, '(', ')');
+      if (j < 0 || !is(j, '->')) return -1;
+      j = skipType(j + 1);
+      if (j < 0) return -1;
+    } else {
+      while (true) {
+        if (is(j, '<')) {
+          j = skipPaired(j, '<', '>');
+          if (j < 0) return -1;
+        }
+        if ((is(j, '.') || is(j, '::')) && ident(j + 1)) {
+          j += 2;
+          continue;
+        }
+        break;
+      }
+    }
+    while (is(j, '?') || (is(j, '[') && is(j + 1, ']'))) {
+      j += is(j, '?') ? 1 : 2;
+    }
+    return j;
+  }
   function scanMethod(name) {
-    if (!ident(name) || !is(name + 1, '(')) return -1;
-    let j = skipPaired(name + 1, '(', ')');
+    if (!ident(name)) return -1;
+    let j = name + 1;
+    // Generic parameters are part of the method header, before '('.
+    // Never confuse an unclosed '<' with a callable body or class 'end'.
+    if (is(j, '<')) {
+      j = skipPaired(j, '<', '>');
+      if (j < 0) return -1;
+    }
+    if (!is(j, '(')) return -1;
+    j = skipPaired(j, '(', ')');
     if (j < 0) return -1;
     let arrowType = is(j, '->'), colonType = is(j, ':');
     if (arrowType || colonType) {
-      ++j;
-      if (!ident(j)) return -1;
-      ++j;
+      j = skipType(j + 1);
+      if (j < 0) return -1;
     }
     if (colonType && is(j, '->')) ++j;
     if (is(j, '{')) return skipPaired(j, '{', '}');
@@ -92,7 +128,7 @@ export function normalize_callable_headers(source) {
         if (finish < 0) break;
         j = finish; continue;
       }
-      if (ident(j) && is(j + 1, '(')) {
+      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<'))) {
         const finish = scanMethod(j);
         if (finish < 0) break;
         j = finish; continue;
