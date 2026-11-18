@@ -21,7 +21,12 @@ fn four_type_first_begin_bodies_use_two_space_indentation_and_three_closers() {
 
 #[test]
 fn without_begin_body_is_still_checked_and_indented() {
-    for header in ["int <- foo()", "int• foo()", "fnc int <- foo()", "fnc int• foo()"] {
+    for header in [
+        "int <- foo()",
+        "int• foo()",
+        "fnc int <- foo()",
+        "fnc int• foo()",
+    ] {
         for closer in ["end", "end.", "end;"] {
             let input = format!("{header}\nreturn 42;\n{closer}\n");
             let expected = format!("{header}\n  return 42;\n{closer}\n");
@@ -40,26 +45,47 @@ fn only_type_first_class_and_actor_instance_fnc_becomes_mtd() {
              static fnc int {delim} static_answer()\nbegin\nreturn 43;\nend;\nend\n"
         );
         let output = format_source(&input).unwrap_or_else(|e| panic!("{input}: {e}"));
-        assert!(output.contains(&format!("  pub mtd int {delim} answer()\n  begin\n    return 42;\n  end.")), "{output}");
-        assert!(output.contains(&format!("  static fnc int {delim} static_answer()\n  begin\n    return 43;\n  end;")), "{output}");
+        assert!(
+            output.contains(&format!(
+                "  pub mtd int {delim} answer()\n  begin\n    return 42;\n  end."
+            )),
+            "{output}"
+        );
+        assert!(
+            output.contains(&format!(
+                "  static fnc int {delim} static_answer()\n  begin\n    return 43;\n  end;"
+            )),
+            "{output}"
+        );
         assert_eq!(format_source(&output).unwrap(), output);
 
         let actor = format!(
             "define actor Worker as\nfnc int {delim} count()\nbegin\nreturn 5;\nend.\nend\n"
         );
         let actor_out = format_source(&actor).unwrap_or_else(|e| panic!("{actor}: {e}"));
-        assert!(actor_out.contains(&format!("  mtd int {delim} count()\n  begin\n    return 5;\n  end.")), "{actor_out}");
+        assert!(
+            actor_out.contains(&format!(
+                "  mtd int {delim} count()\n  begin\n    return 5;\n  end."
+            )),
+            "{actor_out}"
+        );
     }
 }
 
 #[test]
 fn top_level_fnc_and_explicit_mtd_are_preserved() {
     let src = "fnc int <- foo()\nbegin\nreturn 42;\nend.\n";
-    assert_eq!(format_source(src).unwrap(), "fnc int <- foo()\nbegin\n  return 42;\nend.\n");
+    assert_eq!(
+        format_source(src).unwrap(),
+        "fnc int <- foo()\nbegin\n  return 42;\nend.\n"
+    );
 
     let src = "define class C as\nmtd int• foo()\nbegin\nreturn 42;\nend.\nend\n";
     let result = format_source(src).unwrap();
-    assert!(result.contains("  mtd int• foo()\n  begin\n    return 42;\n  end."), "{result}");
+    assert!(
+        result.contains("  mtd int• foo()\n  begin\n    return 42;\n  end."),
+        "{result}"
+    );
     assert_eq!(format_source(&result).unwrap(), result);
 }
 

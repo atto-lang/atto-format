@@ -741,8 +741,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             .collect();
         let structural = structural_content.trim_start();
 
-        let type_first_callable_header = is_type_first_callable_header(structural, LexState::default())
-            && end_delimited_callable_allowed(&define_stack, &brace_stack);
+        let type_first_callable_header =
+            is_type_first_callable_header(structural, LexState::default())
+                && end_delimited_callable_allowed(&define_stack, &brace_stack);
         let begin_opener = pending_type_first_callable && structural.trim() == "begin";
         if pending_type_first_callable && !structural.trim().is_empty() {
             pending_type_first_callable = false;
@@ -763,8 +764,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         // The generic block-keyword detector excludes 'end.' because
         // 'object.end()' must not look like a closer. Here an exact 'end.'
         // line is expressly a callable or container closer.
-        let starts_end = starts_block_keyword(structural, "end")
-            || structural.trim() == "end.";
+        let starts_end = starts_block_keyword(structural, "end") || structural.trim() == "end.";
         // Brace-form conditionals still close with `fi` (Java parseIf:
         // "every if closes with fi"); the idiomatic spelling is `} fi`.
         let brace_fi = {
@@ -2091,7 +2091,6 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
-
 // Only declarations ending at their parameter list qualify. Preserve
 // expression 'x<-1', member calls, comments/strings, and unrelated fnc/mtd
 // forms. The delimiter has to be exactly U+2022 or contiguous ASCII '<-'.
@@ -2099,12 +2098,17 @@ fn is_type_first_callable_header(line: &str, initial: LexState) -> bool {
     let mut state = initial;
     let visible: String = scan_visible(line, &mut state).into_iter().collect();
     let source = visible.trim();
-    if !source.ends_with(')') || source.contains('{') || source.contains(';')
-        || source.contains('=') || source.starts_with("return ")
+    if !source.ends_with(')')
+        || source.contains('{')
+        || source.contains(';')
+        || source.contains('=')
+        || source.starts_with("return ")
     {
         return false;
     }
-    let Some(open) = source.rfind('(') else { return false; };
+    let Some(open) = source.rfind('(') else {
+        return false;
+    };
     if open == 0 || !source[open..].ends_with(')') {
         return false;
     }
@@ -2118,16 +2122,31 @@ fn is_type_first_callable_header(line: &str, initial: LexState) -> bool {
     };
     let result_type = prefix[..delim.0].trim();
     let function_name = prefix[delim.0 + delim.1.len()..].trim();
-    if result_type.is_empty() || function_name.is_empty()
-        || !function_name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    if result_type.is_empty()
+        || function_name.is_empty()
+        || !function_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         || !function_name.chars().all(is_ident_char)
     {
         return false;
     }
     let first = result_type.split_whitespace().next().unwrap_or("");
-    if matches!(first, "if" | "while" | "for" | "return" | "val" | "let" | "const"
-        | "new" | "else" | "match" | "switch" | "select")
-    {
+    if matches!(
+        first,
+        "if" | "while"
+            | "for"
+            | "return"
+            | "val"
+            | "let"
+            | "const"
+            | "new"
+            | "else"
+            | "match"
+            | "switch"
+            | "select"
+    ) {
         return false;
     }
     // Literal '< -' or '< /*comment*/ -' are not valid return delimiters.
