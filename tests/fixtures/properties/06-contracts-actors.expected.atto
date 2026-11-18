@@ -4,7 +4,7 @@ define contract MathApi as
 end
 define actor Counter as
   let int total = 0;
-  pub on_message(int n): int {
+  pub mtd on_message(int n): int {
     self.total = self.total + n;
     return self.total;
   }
