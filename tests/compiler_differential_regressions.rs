@@ -67,7 +67,7 @@ fn generator_headers_are_preserved() {
 fn actor_callables_use_colon_return_separator() {
     let src = "define actor Worker as {\n  let total: int = 0;\n  pub fnc on_message(int n) -> int {\n    return n;\n  }\n}\n";
     let out = fmt(src);
-    assert!(out.contains("  pub on_message(int n): int {"), "{out}");
+    assert!(out.contains("  pub mtd on_message(int n): int {"), "{out}");
 }
 
 // LLVM treats a top-level `suspend fnc` as a cooperative loop (requiring `:`)
