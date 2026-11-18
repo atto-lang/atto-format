@@ -72,3 +72,23 @@ fn rejects_missing_begin_and_unmatched_ends() {
         assert!(format_source(input).is_err(), "{input}");
     }
 }
+
+#[test]
+fn return_first_generic_method_and_default_argument_are_recognized() {
+    let input = r#"fnc Result<int, string> <- wrap<T>(T value)
+begin
+  return Ok(42);
+end
+
+define class Generic as
+fnc int <- choose<T>(T value, int fallback = 2)
+begin
+return fallback;
+end.
+end
+"#;
+    let got = format_source(input).unwrap();
+    assert!(got.contains("fnc Result<int, string> <- wrap<T>(T value)\\nbegin\\n  return Ok(42);\\nend"), "{got}");
+    assert!(got.contains("  mtd int <- choose<T>(T value, int fallback = 2)\\n  begin\\n    return fallback;\\n  end."), "{got}");
+    assert_eq!(format_source(&got).unwrap(), got);
+}
