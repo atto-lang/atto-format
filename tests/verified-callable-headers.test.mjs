@@ -105,9 +105,6 @@ test('callable formatter CLI checks exact version and never silently migrates ::
         {encoding:'utf8',env});
       assert.equal(allowed.status,0,allowed.stderr);
       const migrated=await readFile(legacy,'utf8');
-      assert.ok(!migrated.includes('-> int ::\n  let int x = self.seed,\n  x + 2\nend') ||
-        migrated.includes('-> int ::'),
-        'receiver formatter may normalize headers but not body mode');
       assert.equal(migrated.includes('-> int\n  let int x = self.seed,'),true,
         'legacy implicit comma-body must retain exact syntax');
       const shared=await readFile(new URL('fixtures/inline-legacy-prefixes.atto',import.meta.url),'utf8');
