@@ -2930,11 +2930,26 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
     {
         return false;
     }
-    let Some((name, args)) = after.split_once('(') else {
+    // Find the callable parameter list after the optional generic name,
+    // not an inner function-type generic default. Checked effect clauses
+    // may follow the closing ')', e.g. 'throws Error'.
+    let mut angle = 0usize;
+    let mut open = None;
+    for (offset, ch) in after.char_indices() {
+        match ch {
+            '<' => angle += 1,
+            '>' if angle > 0 => angle -= 1,
+            '(' if angle == 0 => {
+                open = Some(offset);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(open) = open else {
         return false;
     };
-    let name = name.trim();
-    // Generic callable names are still names (e.g., choose<T>(T value)).
+    let name = after[..open].trim();
     let plain_name = if let Some((plain, generics)) = name.split_once('<') {
         if !generics.ends_with('>') || generics.len() <= 1 {
             return false;
@@ -2945,7 +2960,32 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
     };
     if plain_name.is_empty() || !plain_name.chars().all(is_ident_char)
         || !plain_name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        || !args.ends_with(')')
+    {
+        return false;
+    }
+    let mut depth = 1usize;
+    let mut close = None;
+    for (offset, ch) in after[open + 1..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(open + 1 + offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return false;
+    };
+    let tail = after[close + 1..].trim();
+    if !tail.is_empty()
+        && !["throws", "raises", "panics"]
+            .iter()
+            .any(|effect| starts_word(tail, effect) && tail.len() > effect.len())
     {
         return false;
     }
