@@ -81,19 +81,22 @@ fn has_multiline_block_comment(source: &str) -> bool {
 fn layout_noise_does_not_change_canonical_output() {
     for (name, source, expected) in fixtures() {
         if !has_multiline_block_comment(&source) {
-            let flat: String = source
-                .lines()
-                .map(|l| format!("{}\n", l.trim_start()))
-                .collect();
+            let mut flat = String::with_capacity(source.len());
+            for line in source.lines() {
+                flat.push_str(line.trim_start());
+                flat.push('\n');
+            }
             assert_eq!(fmt(&name, &flat), expected, "{name}: re-indent");
-            let tabs: String = source
-                .lines()
-                .map(|l| {
-                    let body = l.trim_start_matches(' ');
-                    let depth = (l.len() - body.len()).div_ceil(2);
-                    format!("{}{}\n", "\t".repeat(depth), body)
-                })
-                .collect();
+            let mut tabs = String::with_capacity(source.len());
+            for line in source.lines() {
+                let body = line.trim_start_matches(' ');
+                let depth = (line.len() - body.len()).div_ceil(2);
+                for _ in 0..depth {
+                    tabs.push('\t');
+                }
+                tabs.push_str(body);
+                tabs.push('\n');
+            }
             assert_eq!(fmt(&name, &tabs), expected, "{name}: tab indentation");
         }
         let crlf = source.replace('\n', "\r\n");
