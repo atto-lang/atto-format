@@ -2904,7 +2904,7 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
     let line = structural.trim();
     if line.is_empty() || line.ends_with(';')
         || line.contains('{') || line.contains('}')
-        || contains_word(line, "static") || contains_word(line, "abstract")
+        || contains_word(line, "abstract")
         || contains_word(line, "actor") || contains_word(line, "isoactor")
         || starts_word(line, "return") || starts_word(line, "const")
         || starts_word(line, "let") || starts_word(line, "val")
@@ -2949,7 +2949,7 @@ fn is_return_first_callable_header(structural: &str, instance_member: bool) -> b
         return false;
     }
     let type_words: Vec<&str> = words.iter().copied().filter(|word| !matches!(*word,
-        "fnc" | "mtd" | "method" | "pub" | "private" | "async" | "suspend"
+        "fnc" | "mtd" | "method" | "static" | "pub" | "private" | "async" | "suspend"
         | "suspends" | "structural" | "critical")).collect();
     !type_words.is_empty() && type_words[0].chars().next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
