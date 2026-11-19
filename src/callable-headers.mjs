@@ -2,7 +2,10 @@
  * Not a full formatter; it refuses to transform unrecognized declaration grammar.
  * Accepted spelling contract: atto-spec language/callable-body-styles-v1.md.
  */
+import { assert_namespace_header_order } from './namespace-header-guard.mjs';
+
 export function normalize_callable_headers(source) {
+  assert_namespace_header_order(source);
   const toks = [];
   const word = c => /[A-Za-z_]/.test(c || '');
   const tail = c => /[A-Za-z0-9_]/.test(c || '');
