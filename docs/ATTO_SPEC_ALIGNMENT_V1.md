@@ -2,7 +2,7 @@
 
 **Status: consumer tracking, not a completed cross-formatter, semantic-AST or compiler-guest parity proof.** The canonical normative grammar and language rules are at atto-lang/atto-spec. This repository is a distinct historical formatter implementation; the Atto-named counterpart is atto-lang/atto-format.
 
-This file and contracts/v1/atto-spec-consumer-v1.json pin atto-spec PR #115 commit dab563bedaaf2ce801b2a2991e3c693f664bb2ab and rule-registry Git blob 987dfab669a0cc62b9be2eac5c968116df058a3a. These are explicit snapshot dependencies, not a live auto-sync mechanism. Reconcile any changed rule IDs before asserting a later edition.
+This file and contracts/v1/atto-spec-consumer-v1.json pin atto-spec PR #115 commit 2f32c957ce01bc157479a5c96538efd853dc3643 and rule-registry Git blob 987dfab669a0cc62b9be2eac5c968116df058a3a. These are explicit snapshot dependencies, not a live auto-sync mechanism. Reconcile any changed rule IDs before asserting a later edition.
 
 ## Minimum guarantees
 
