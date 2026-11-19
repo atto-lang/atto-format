@@ -20,7 +20,10 @@ export function normalize_callable_headers(source) {
       if (depth) throw new Error('unterminated block comment');
       continue;
     }
-    if (c === '"' || c === "'") {
+    // Treat template/backtick literals as opaque too: no constructor edits may
+    // happen inside them, including interpolations, until their own grammar
+    // has a fully verified formatter.
+    if (c === '"' || c === "'" || c === '`') {
       const quote = c; ++i;
       while (i < source.length && source[i] !== quote) {
         if (source[i] === '\\') ++i;
