@@ -92,10 +92,11 @@ export function normalize_callable_headers(source) {
     j = skipPaired(j, '(', ')');
     if (j < 0) return -1;
     let arrowType = is(j, '->'), colonType = is(j, ':');
-    if (arrowType || colonType) {
-      j = skipType(j + 1);
-      if (j < 0) return -1;
-    }
+    // Strict named-callable grammar: no implicit void/infer annotation.
+    // Refuse to rewrite any malformed or unannotated method header.
+    if (!arrowType && !colonType) return -1;
+    j = skipType(j + 1);
+    if (j < 0) return -1;
     if (colonType && is(j, '->')) ++j;
     if (is(j, '{')) return skipPaired(j, '{', '}');
     if (!arrowType) return -1;
@@ -142,6 +143,9 @@ export function normalize_callable_headers(source) {
     if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
     if (close <= i + 1 || !ident(close + 1) || !is(close + 2, '(')) continue;
+    // Never normalize out-of-line receiver names when their named callable
+    // lacks an explicit return result (including void or infer).
+    if (scanMethod(close + 1) < 0) continue;
     if (hasComment(toks[i + 1].start, toks[close].end)) continue;
     const r = toks.slice(i + 2, close).map(x => x.s);
     let canonical = null;
