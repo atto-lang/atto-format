@@ -51,3 +51,26 @@ test('untrusted unicode or malformed binder identifiers remain unchanged', () =>
     'lifetime!! alpha'];
   for (const source of bad) assert.equal(normalize(source), source);
 });
+
+test('default readonly borrowing remains omitted and explicit bang operations round-trip', () => {
+  // Formatter must never insert borrow! into a normal class call, or infer
+  // take!/share!/copy!! from a spelling. Grammar admission is compiler-owned.
+  const source = [
+    'fnc inspect(Foo value): int { return value.x; }',
+    'fnc update(mut Foo value): void { value.x = 42; }',
+    'fnc consume(take! Foo value): void { }',
+    'inspect(owner);',
+    'inspect(borrow! owner);',
+    'update(mut owner);',
+    'update(borrow! mut owner);',
+    'consume(take! moved_owner);',
+    'val shallow = copy! source;',
+    'val deep = copy!! source;',
+    'val shared = share! frozen;',
+    'val pinned = pin! take! prepared;',
+    'drop! deep;',
+  ].join('\n');
+  assert.equal(normalize(source), source);
+  assert.equal(normalize(normalize(source)), source);
+});
+
