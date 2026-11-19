@@ -502,3 +502,7 @@ into another group/session can escape and are **not guaranteed contained**.
 On Windows, the direct child alone is terminated; a job-object implementation
 is still required for descendant cleanup. Do not use untrusted compiler
 binaries or rely on this adapter as an OS sandbox. Analysis failures produce nonzero status and no source rewrites.
+
+## Canonical rule-registry consumer
+
+[Atto specification alignment](docs/ATTO_SPEC_ALIGNMENT_V1.md) and [pinned consumer contract](contracts/v1/atto-spec-consumer-v1.json) describe how the historical formatter must follow the canonical atto-spec rules and coordinate with [atto-format](https://github.com/atto-lang/atto-format). The added Rust checks are host-only; semantic AST and cross-backend guest parity remain unexecuted.
