@@ -156,7 +156,8 @@ export function normalize_callable_headers(source) {
   for (let i = 0; i < toks.length; ++i) {
     if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
-    if (close <= i + 1 || !ident(close + 1) || !is(close + 2, '(')) continue;
+    if (close <= i + 1 || !ident(close + 1) ||
+        !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
     // Never normalize out-of-line receiver names when their named callable
     // lacks an explicit return result (including void or infer).
     if (scanMethod(close + 1) < 0) continue;
