@@ -79,7 +79,7 @@ const cases = [
   ["inline class constructor untouched","define class Counter as constructor(int initial) { self.value = initial; } end","define class Counter as constructor(int initial) { self.value = initial; } end"],
   ["noncode constructor text untouched","// constructor(Counter) (int n): self {}\nval s = \"constructor(Counter) (int n): self {}\";","// constructor(Counter) (int n): self {}\nval s = \"constructor(Counter) (int n): self {}\";"],
   ["member constructor calls untouched","obj.constructor(Counter) (int initial): self {}","obj.constructor(Counter) (int initial): self {}"],
-  ["backtick template constructor text untouched", "val t = \`constructor(Counter) (int initial): self {}\`;", "val t = \`constructor(Counter) (int initial): self {}\`;"]
+  ["backtick template constructor text untouched", "val t = `constructor(Counter) (int initial): self {}`;", "val t = `constructor(Counter) (int initial): self {}`;"]
 ];
 for (const [name,input,expected] of cases) {
   test(name, () => {
