@@ -67,6 +67,19 @@ const cases = [
     "mtd (Calculator mut self) set() -> int :: 5 end",
     "mtd (Calculator mut self) set() -> int :: 5 end"
   ]
+  ,
+  ["constructor adjacent groups","pub constructor (Counter)(int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
+  ["constructor spaced groups","pub constructor (Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
+  ["constructor compact keyword","pub constructor(Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
+  ["constructor fully compact","pub constructor(Counter)(int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
+  ["constructor multiline spacing","pub constructor\n (Counter)\n (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
+  ["constructor comment before owner retained","pub constructor/*keep*/(Counter) (int initial): self { self.value = initial; }","pub constructor/*keep*/(Counter) (int initial): self { self.value = initial; }"],
+  ["constructor comment between groups retained","pub constructor (Counter) /*keep*/ (int initial): self { self.value = initial; }","pub constructor (Counter) /*keep*/ (int initial): self { self.value = initial; }"],
+  ["incomplete constructor header untouched","constructor(Counter) (int initial): self","constructor(Counter) (int initial): self"],
+  ["invalid constructor result untouched","constructor(Counter) (int initial): Counter {}","constructor(Counter) (int initial): Counter {}"],
+  ["inline class constructor untouched","define class Counter as constructor(int initial) { self.value = initial; } end","define class Counter as constructor(int initial) { self.value = initial; } end"],
+  ["noncode constructor text untouched","// constructor(Counter) (int n): self {}\nval s = \"constructor(Counter) (int n): self {}\";","// constructor(Counter) (int n): self {}\nval s = \"constructor(Counter) (int n): self {}\";"],
+  ["member constructor calls untouched","obj.constructor(Counter) (int initial): self {}","obj.constructor(Counter) (int initial): self {}"]
 ];
 for (const [name,input,expected] of cases) {
   test(name, () => {
