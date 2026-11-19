@@ -66,8 +66,7 @@ const cases = [
     "invalid receiver untouched",
     "mtd (Calculator mut self) set() -> int :: 5 end",
     "mtd (Calculator mut self) set() -> int :: 5 end"
-  ]
-  ,
+  ],
   ["constructor adjacent groups","pub constructor (Counter)(int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
   ["constructor spaced groups","pub constructor (Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
   ["constructor compact keyword","pub constructor(Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
