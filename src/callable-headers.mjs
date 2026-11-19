@@ -157,6 +157,26 @@ export function normalize_callable_headers(source) {
       add(toks[i + 1].start, toks[close].end, canonical);
     }
   }
+  // Constructor receiver headers use two independent parenthesized groups:
+  // constructor (Owner)(parameters): self { ... }
+  // Whitespace between those tokens cannot create a different constructor.
+  // We only rewrite proven, balanced out-of-line constructor headers and
+  // preserve intervening comments rather than erasing them.
+  for (let i = 0; i < toks.length; ++i) {
+    if (!is(i, 'constructor') || !is(i + 1, '(') ||
+        !ident(i + 2) || !is(i + 3, ')') || !is(i + 4, '(')) continue;
+    if (is(i - 1, '.') || is(i - 1, '::')) continue;
+    const afterParams = skipPaired(i + 4, '(', ')');
+    if (afterParams < 0 || !is(afterParams, ':') ||
+        !is(afterParams + 1, 'self') || !is(afterParams + 2, '{') ||
+        skipPaired(afterParams + 2, '{', '}') < 0) continue;
+    // A comment within either of the changed whitespace spans is kept
+    // byte-for-byte, with no partial rewrite of that declaration.
+    if (hasComment(toks[i].end, toks[i + 1].start) ||
+        hasComment(toks[i + 3].end, toks[i + 4].start)) continue;
+    add(toks[i].end, toks[i + 1].start, ' ');
+    add(toks[i + 3].end, toks[i + 4].start, '');
+  }
   // Canonical spelling of the callable effect: suspends -> susp.
   // Only rewrite in known modifier positions. The tokenizer has already
   // skipped strings and comments; all other identifiers remain untouched.
