@@ -1,0 +1,37 @@
+{
+  "schema": "atto.format.spec-consumer.v1",
+  "status": "HOST_ONLY_NORMALIZER_CHECKS_NOT_FULL_SEMANTIC_AST_PARITY",
+  "canonical_spec": {
+    "repository": "atto-lang/atto-spec",
+    "commit": "dab563bedaaf2ce801b2a2991e3c693f664bb2ab",
+    "registry_path": "contracts/specification-rules-v1.json",
+    "registry_blob_sha": "987dfab669a0cc62b9be2eac5c968116df058a3a"
+  },
+  "consumer_repository": "atto-lang/atto-format",
+  "rule_ids": [
+    "ATTO-SYN-001",
+    "ATTO-TYPE-001",
+    "ATTO-OWN-001",
+    "ATTO-OWN-002",
+    "ATTO-OWN-003",
+    "ATTO-CONST-001",
+    "ATTO-FMT-001",
+    "ATTO-FMT-002",
+    "ATTO-FMT-003"
+  ],
+  "evidence": {
+    "lexical_ownership_normalizer": "host_only",
+    "full_parser": "not_executed",
+    "independent_semantic_ast": "not_executed",
+    "compiled_guest_differential": "not_executed",
+    "other_backends": "not_executed"
+  },
+  "required_gates": [
+    "formatter_idempotence",
+    "positive_acceptance",
+    "invalidity_preservation",
+    "semantic_ast_equivalence",
+    "edition_path_context_agreement",
+    "guest_observable_equivalence"
+  ]
+}
