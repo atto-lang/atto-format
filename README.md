@@ -42,6 +42,24 @@ AttoLang is the canonical project name; new source, examples and documentation u
 
 **Acceptance:** name the exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
 
+## Out-of-line constructor header whitespace (target v1)
+
+The supported constructor *header* spellings `constructor (Counter)(int initial)`,
+`constructor (Counter) (int initial)`, and `constructor(Counter) (int initial)`
+are lexically identical. The bounded `normalize_callable_headers` pass now
+canonicalizes **complete** `: self { ... }` out-of-line declarations to
+`constructor (Counter)(int initial): self { ... }`. It preserves comments,
+quoted text, inline `constructor(args)` class bodies, and malformed/incomplete
+headers. Idempotence and lexical regression tests cover all three forms.
+
+This is a source-only formatter change. The verified wrapper
+`normalize_verified_callable_headers` continues to require the *real*
+compiler to produce valid, **byte-identical** guest Wasm before admitting a
+rewrite. No claim of class/struct constructor backend parity or state runtime
+readiness follows from the lexical tests. Normative contract:
+[atto-spec PR #98](https://github.com/atto-lang/atto-spec/pull/98).
+Companion Rust frontend change: [atto-source.rs PR #354](https://github.com/atto-lang/atto-source.rs/pull/354).
+
 ## Ownership operation normalization (staged v1)
 
 The limited src/ownership-operations.mjs pass preserves distinct ownership
