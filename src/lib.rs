@@ -2609,6 +2609,19 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
     {
         return false;
     }
+    // Contextual bang spellings are aliases of the corresponding pipeline
+    // words. Treat a contiguous, whole-word "pipe!" / "rpipe!" at the end
+    // of a visible line as a continuation without rewriting its spelling.
+    if let Some(prefix) = line.strip_suffix('!') {
+        let word_start = prefix
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !is_ident_char(c))
+            .map_or(0, |(at, c)| at + c.len_utf8());
+        if matches!(&prefix[word_start..], "pipe" | "rpipe") {
+            return true;
+        }
+    }
     let mut chars = line.chars().rev();
     let Some(last) = chars.next() else {
         return false;
@@ -2627,7 +2640,7 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
                 .rev()
                 .find(|&(_, c)| !is_ident_char(c))
                 .map_or(0, |(at, c)| at + c.len_utf8());
-            matches!(&line[word_start..], "and" | "or" | "pipe")
+            matches!(&line[word_start..], "and" | "or" | "pipe" | "rpipe")
         }
     }
 }
@@ -2642,6 +2655,7 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || starts_word(line, "and")
         || starts_word(line, "or")
         || starts_word(line, "pipe")
+        || starts_word(line, "rpipe")
 }
 
 fn set_once(value: &mut bool) -> bool {
