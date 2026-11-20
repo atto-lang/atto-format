@@ -2645,6 +2645,24 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
     }
 }
 
+// Only whole contextual pipeline words may begin a continuation. A
+// non-word immediately after the contiguous bang is required, so identifiers
+// such as pipe!suffix or rpipe!suffix do not receive operator indentation.
+fn starts_pipeline_keyword(line: &str, word: &str) -> bool {
+    if !starts_word(line, word) {
+        return false;
+    }
+    let suffix = &line[word.len()..];
+    let Some(after_bang) = suffix.strip_prefix('!') else {
+        return true;
+    };
+    !after_bang.starts_with('!')
+        && after_bang
+            .chars()
+            .next()
+            .is_none_or(|c| !is_ident_char(c))
+}
+
 /// A visible line beginning with a binary operator continues the previous one.
 fn starts_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_start();
@@ -2654,8 +2672,8 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || (line.starts_with('.') && !line.starts_with(".."))
         || starts_word(line, "and")
         || starts_word(line, "or")
-        || starts_word(line, "pipe")
-        || starts_word(line, "rpipe")
+        || starts_pipeline_keyword(line, "pipe")
+        || starts_pipeline_keyword(line, "rpipe")
 }
 
 fn set_once(value: &mut bool) -> bool {
