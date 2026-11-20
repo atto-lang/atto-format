@@ -3329,7 +3329,20 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
             return line.to_string();
         };
         let candidate = search + relative;
-        if line[candidate + 1..].trim_start().starts_with("->") {
+        let suffix = line[candidate + 1..].trim_start();
+        // A colon-annotated return type sits between the closing pipe and
+        // the body arrow: |name: T| : void -> { ... }. Accept only a
+        // bounded, comment-free type spelling here; do not mistake an OR
+        // operator or a malformed colon suffix for a lambda header.
+        let colon_result = suffix.strip_prefix(':').and_then(|after_colon| {
+            let (ty, _) = after_colon.split_once("->")?;
+            let ty = ty.trim();
+            (!ty.is_empty() && ty.chars().all(|ch| {
+                ch.is_ascii_alphanumeric()
+                    || matches!(ch, '_' | '.' | '<' | '>' | ',' | '?' | '[' | ']' | ' ' | '\\t')
+            })).then_some(())
+        }).is_some();
+        if suffix.starts_with("->") || colon_result {
             break candidate;
         }
         search = candidate + 1;
