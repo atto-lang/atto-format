@@ -111,7 +111,28 @@ export function normalize_callable_headers(source) {
       j = skipType(j + 1);
       if (j < 0) return -1;
     }
-    if (colonType && is(j, '->')) ++j;
+    if (colonType && is(j, '->')) {
+      ++j;
+      if (is(j, '{')) return skipPaired(j, '{', '}');
+      // Accepted single-expression body: : T -> expression;
+      // Fail closed on missing delimiter, another declaration, or a nested
+      // block. This bounded lexical normalizer MUST NOT silently turn an
+      // expression body into a braced body or an end-delimited sequence.
+      const start = j;
+      let parens = 0, brackets = 0;
+      for (; j < toks.length; ++j) {
+        if (is(j, '(')) ++parens;
+        else if (is(j, ')')) { if (--parens < 0) return -1; }
+        else if (is(j, '[')) ++brackets;
+        else if (is(j, ']')) { if (--brackets < 0) return -1; }
+        else if (!parens && !brackets && is(j, ';'))
+          return j > start ? j + 1 : -1;
+        else if (!parens && !brackets &&
+          ['fnc', 'method', 'static', 'pub', 'private', 'end', '{', '}'].some(s => is(j, s)))
+          return -1;
+      }
+      return -1;
+    }
     if (is(j, '{')) return skipPaired(j, '{', '}');
     // Explicit statement/end allows empty bodies. All source body-family
     // spellings must be preserved verbatim by the lexical formatter.
