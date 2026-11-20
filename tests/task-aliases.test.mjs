@@ -38,11 +38,35 @@ const cases = [
  ['malformed type', 'do sync task<Future<int> { return 42; };',
    'do sync task<Future<int> { return 42; };'],
 ];
-for (const [name,input,expected] of cases) {
+// Historical 'expected' values record the forbidden rewrite that the
+// previous formatter performed. Different scheduler semantics make that
+// rewrite illegal even when return values happen to coincide.
+for (const [name,input,legacyExpected] of cases) {
  test(name,()=>{
   const result = normalize_task_aliases(input);
-  assert.equal(result,expected);
-  assert.equal(normalize_task_aliases(result),result);
-  assert.equal(normalize_callable_headers(input),expected);
+  assert.equal(result,input,'task alias normalizer must preserve sync identity');
+  assert.equal(normalize_task_aliases(result),result,'normalization is idempotent');
+  assert.equal(normalize_callable_headers(input),input,
+    'callable-header formatting must not turn inline into detached work');
+  if (input !== legacyExpected) {
+    assert.notEqual(result,legacyExpected,
+      'old do-sync-to-do-task rewrite must never reappear');
+  }
  });
 }
+
+test('inline and independent task effects are distinct through full source formatting',()=>{
+ const source = `pub fnc main(): int {
+  do sync task<int> { return 1; };
+  do task<int> { return 2; };
+  val int value = sync task<int> { return 42; };
+  return value;
+}`;
+ const formatted = normalize_callable_headers(source);
+ assert.match(formatted,/do sync task<int>/);
+ assert.match(formatted,/do task<int>/);
+ assert.match(formatted,/val int value = sync task<int>/);
+ assert.equal((formatted.match(/do sync task<int>/g) ?? []).length,1);
+ assert.equal((formatted.match(/do task<int>/g) ?? []).length,1);
+ assert.equal(normalize_callable_headers(formatted),formatted);
+});
