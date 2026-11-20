@@ -57,16 +57,36 @@ for (const [name,input,legacyExpected] of cases) {
 
 test('inline and independent task effects are distinct through full source formatting',()=>{
  const source = `pub fnc main(): int {
-  do sync task<int> { return 1; };
+  do sync task<void> { return; };
   do task<int> { return 2; };
   val int value = sync task<int> { return 42; };
   return value;
 }`;
  const formatted = normalize_callable_headers(source);
- assert.match(formatted,/do sync task<int>/);
+ assert.match(formatted,/do sync task<void>/);
  assert.match(formatted,/do task<int>/);
  assert.match(formatted,/val int value = sync task<int>/);
- assert.equal((formatted.match(/do sync task<int>/g) ?? []).length,1);
+ assert.equal((formatted.match(/do sync task<void>/g) ?? []).length,1);
  assert.equal((formatted.match(/do task<int>/g) ?? []).length,1);
  assert.equal(normalize_callable_headers(formatted),formatted);
+});
+
+test('canonical void-only do sync task and typed inline value remain unchanged',()=>{
+ const source = `pub fnc main(): int {
+  do sync task {};
+  val result = sync task<int> {
+    return 40 + 2;
+  };
+  do sync task<void> {};
+  return result;
+}`;
+ const formatted = normalize_callable_headers(source);
+ assert.equal(formatted,source);
+ assert.equal(normalize_task_aliases(formatted),source);
+ assert.match(formatted,/do sync task<void> \\{\\};/);
+ assert.match(formatted,/val result = sync task<int>/);
+ assert.doesNotMatch(formatted,/do task<void>/);
+ // Invalid typed do-inline must remain invalid, never be coerced into void.
+ const invalid = 'do sync task<int> { return 42; };';
+ assert.equal(normalize_task_aliases(invalid),invalid);
 });
