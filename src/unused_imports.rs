@@ -167,7 +167,7 @@ fn take_keyword(tokens: &[Token], at: &mut usize, keyword: &str) -> Option<()> {
 // Resolution, export visibility, capability checks and initialization belong
 // to the compiler, not to the formatter.
 fn package_literal<'a>(token: &Token, source: &'a str) -> Option<&'a str> {
-    if !matches!(token.kind, Kind::Literal) {
+    if !matches!(&token.kind, Kind::Literal) {
         return None;
     }
     let quoted = source.get(token.start..token.end)?;
@@ -182,26 +182,36 @@ fn package_literal<'a>(token: &Token, source: &'a str) -> Option<&'a str> {
     if identity.is_empty()
         || identity.contains('\\')
         || identity.contains("..")
-        || identity.chars().any(|ch| ch.is_control())
+        || identity.starts_with('.')
+        || identity.starts_with('/')
+        || identity.ends_with('/')
+        || identity.contains("//")
+        || !identity.chars().all(|ch| ch.is_ascii_alphanumeric()
+            || matches!(ch, '_' | '-' | '.' | '/' | '@' | '+'))
     {
         return None;
     }
     Some(identity)
 }
 
-fn package_implicit_binding(identity: &str) -> Option<String> {
-    let name = identity.rsplit('.').next()?;
-    let mut chars = name.chars();
-    if !chars.next()?.is_ascii_alphabetic() && !name.starts_with('_') {
-        return None;
+fn safe_package_alias(name: &str) -> bool {
+    let Some(first) = name.chars().next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
     }
     if !name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
-        return None;
+        return false;
     }
-    if matches!(name, "import" | "from" | "as" | "module" | "pkg"
+    !matches!(name, "import" | "from" | "as" | "module" | "pkg"
         | "class" | "actor" | "type" | "fnc" | "pub" | "self"
         | "use" | "namespace")
-    {
+}
+
+fn package_implicit_binding(identity: &str) -> Option<String> {
+    let name = identity.rsplit('.').next()?;
+    if !safe_package_alias(name) {
         return None;
     }
     Some(name.to_string())
@@ -220,7 +230,11 @@ fn parse_import(tokens: &[Token], start: usize, source: &str) -> Option<(Vec<Str
         at += 1;
         let local_name = if tokens.get(at).is_some_and(|t| t.word("as")) {
             at += 1;
-            take_word(tokens, &mut at)?.to_string()
+            let alias = take_word(tokens, &mut at)?;
+            if !safe_package_alias(alias) {
+                return None;
+            }
+            alias.to_string()
         } else {
             package_implicit_binding(identity)?
         };
