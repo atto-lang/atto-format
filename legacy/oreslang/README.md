@@ -1,0 +1,504 @@
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/ores-truffle-oreslang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
+
+# oreslang-format
+
+## AttoLang migration and current specification (2026-11-18)
+
+**AttoLang** is the current language name, formerly **Oreslang**. This `ores-truffle-oreslang/oreslang-format` checkout retains its historical name and documentation. The AttoLang-named destination for new related work is **[atto-lang/atto-format](https://github.com/atto-lang/atto-format)**. These are distinct GitHub repositories unless an exact verified migration establishes otherwise; do not assume identical code, issues, PRs, releases or test status.
+
+**[atto-spec](https://github.com/atto-lang/atto-spec)** is the canonical normative language specification; old Oreslang-named specifications and examples are historical, not an independent authority. Use [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance) for portable executable conformance, [atto-common-source](https://github.com/atto-lang/atto-common-source) for portable `.atto` libraries, and backend-specific `atto-source.*` for compiler/runtime implementations. The design direction includes `snake_case` methods, `borrow!`/`take!`/`share!`/`copy!`/`copy!!`, [implicit borrowing](https://github.com/atto-lang/atto-spec/blob/main/language/implicit-argument-borrow-v1.md), [file/module constants with one-time nonthrowing environment reads](https://github.com/atto-lang/atto-spec/blob/main/language/file-module-const-v1.md) and the [bitwise/stream operator proposal](https://github.com/atto-lang/atto-spec/blob/main/language/bitwise-and-stream-operators-v1.md). **These are targets, not proof that this checkout executes them.**
+
+Existing `.ores`, `oreslang-*` tool commands, package/ABI names and fixture syntax below document legacy compatibility; only replace them after real target-specific compiler/runtime tests. Avoid Python tooling/tests in AttoLang projects; prefer Rust for supporting tooling. For backend feature claims, require exact source SHA/tree, target/toolchain, actual positive and negative guest execution, and explicit passed/failed/unsupported/not-executed status. Host-only and zero-step CI runs do not establish parity.
+
+**Formatter direction:** canonical formatting targets two-space indentation and the newer `mtd` instance-method spelling where implemented; check parser/formatter round-trip fixtures and [atto-format](https://github.com/atto-lang/atto-format) before declaring syntax support.
+
+The canonical formatter for AttoLang (`.atto`) and explicitly supported legacy Oreslang (`.ores`) source code.
+
+Directory traversal discovers both `.atto` and `.ores` files; explicit file paths are also accepted. Legacy `.ores` files are retained for migration and conformance checks, not as the extension for new AttoLang sources.
+
+There is deliberately **one format and no style configuration**. The same Rust
+library powers the CLI, so editor integrations, CI, and local development use
+identical behavior.
+
+## Canonical concrete field syntax (pre-1.0)
+
+In direct class member declarations, use `final` to seal
+the member slot and `mut` to permit mutation through a referenced value.
+Local binding declarations retain `const` / `val` / `let` and `=`.
+
+```ores
+define class Foo as
+  int counter: 5;
+  final int limit: 6;
+  final mut Map cache: new Map();
+end
+```
+
+The formatter preserves every explicit direct-class-member binding keyword
+(`val`, `let`, `const`, `final`) because each carries distinct semantics in
+the production compilers: Java parses a bare type-first field as LET, and
+LLVM gives `val` a final slot plus a mutable referent while a bare field has
+neither. Eliding `val` therefore changes a program's meaning (the LLVM
+fixture `class-val-alias-write-reject` went from rejected to accepted), and an
+uninitialized bare `String method;` is parsed by Java as a method header.
+Only bare and `final [mut]` type-first initializers canonicalize `=` to `:`;
+Java's `parseField` accepts only `=` after `val`/`let`/`const`, so those keep
+`=`. Actor state, module bindings, local bindings,
+nested declarations, malformed or conflicting qualifiers, and ambiguous
+source are not silently migrated, and unsupported named-struct declarations,
+trait signatures, and callable-local declarations are left alone.
+Formatter output alone does not prove compiler AST equivalence across backends.
+
+Uninitialized `val`, `let`, `const`, and `final` fields remain explicit.
+These spellings still require compiler validation, especially where
+constructors assign stored fields.
+
+The language's final initialization rules are compiler constraints, not
+formatter transformations. Formatting does not make an uninitialized final
+field valid, and formatter output is not proof that all backends support
+the full field contract.
+
+## Canonical style
+
+- two spaces per indentation level, never tabs for indentation;
+- callable parameter lists are expanded one parameter per line when they have 4+ parameters, or when they have 3+ parameters and either a parameter name contains at least two underscores or the combined parameter-name width exceeds 60 columns; continuation parameters are indented one additional two-space level and the closing `)` returns to the callable declaration indentation;
+- static `select`, `nb select`, and `try select` arms are indented one level for both `{ ... }` and `over ... end` outer delimiters;
+- every `when` and `default` arm has a braced body; legacy `case` select arms are accepted and canonicalized to `when` in both delimiter styles;
+- brace-delimited `switch` and `match ... over` blocks coexist with legacy `end` delimiters; redundant `,`/`;` immediately after switch/match arm bodies are removed, while grouped case alternatives keep their commas;
+- braced `switch` `_` fallback is formatted as `default`; `match ... over` preserves canonical `on _` (and migrates legacy `on default` to `on _`), while tuple-pattern `_` discards are preserved;
+- LF line endings, no trailing whitespace, one final newline; CRLF is normalized to LF, but a bare CR is rejected because the import-v1 conformance spec ends a `//` comment at CR while the Java and LLVM lexers do not, so rewriting it would expose or hide code;
+- a `for`/`while ... do` header whose body starts on the same line (closed by a later `done`) gets its body on the next line; a complete one-line `... do body; done` loop is kept;
+- bare and `final [mut]` type-first class field initializers canonically use `:`:
+  `final int foo = 5` becomes `final int foo: 5`, and `string bar = "100"`
+  becomes `string bar: "100"`; fields declared with `val`, `let`, or `const`
+  keep `=` (the only separator Java accepts there); ordinary assignments,
+  name-first declarations, comments, string literals, and nested method
+  bodies are never rewritten;
+- at most one ordinary blank line;
+- **two blank lines between sibling executable function/routine/method declarations**;
+- in class/actor bodies, legacy `fnc name(...)` formats as `name(...)`;
+  explicit `method name(...)` remains explicit, and `static fnc` is preserved;
+  instance methods require an explicit lambda to be used as callbacks;
+- executable declarations and method implementations use the slim arrow `->`,
+  except actor callables and top-level legacy `suspend fnc` declarations, which
+  use `:` because LLVM requires it there (Java accepts both);
+- ordinary free/module callables may use `fnc ... -> Type` followed by an `end`-delimited body; `::` may separate the complete return type from the body and permit compact same-line source; callable-body `as` is rejected; callable-header `do` is retired so `do select` / `do match` remain body-only syntax; class methods, class `static fnc` implementations, and actor callables remain brace-bodied;
+- interface, contract, and trait callable signatures use the type-level fat arrow `=>` (Java's interface parser accepts only `=>`/`:` and LLVM requires `=>` for contracts);
+- conditionals canonically use `if ... then` / `elif ... then` / `else` / `fi`, and compact keyword-delimited conditionals are expanded so bodies and `fi` never share a line; brace-form conditionals (`if c { ... } elif d { ... } else { ... } fi`) are also accepted, keep their author's line layout, and still require `fi`, which may share a line with the closing brace (`} fi`);
+- `/* ... */` block comments nest, as in the Java and LLVM lexers;
+- lines inside an unclosed `(`/`[`, after a line ending in a binary operator, or starting with `.`/`&&`/`||`/`and`/`or` receive one continuation indent level;
+- complete single-line `return` statements receive an explicit trailing semicolon, including bare `return;`; the formatter fails closed rather than inserting a semicolon when a return may continue as a multiline `match`, `select`, cast/member chain, or other continuation;
+- declaration modifiers are accepted in compatibility order but rewritten to one canonical order:
+  - classes: `define [pub|private] [abstract] class Name ... as`;
+  - interfaces/contracts: `define [pub|private] interface|contract Name ...`;
+  - actor declarations/callables: visibility/effects first, then `shared|untrusted` when present, then `actor|isoactor`, then `fnc|routine` for actor callables;
+  - package/module callables use the ordinary `fnc|routine` modifier order; generator declaration headers are preserved verbatim (see below); the `suspend`/`suspends` spelling is preserved; `quantum` is currently meaningful only for `fnc`/`static fnc`, and unsupported quantum combinations are left untouched for compiler diagnostics;
+  - duplicate/conflicting or comment-separated modifier prefixes are left untouched so the compiler can diagnose them;
+  - class headers keep `as` after the complete inheritance/conformance clause.
+
+For example:
+
+```ores
+pub define class User extends Entity implements Named, Serializable as
+  pub final String name: "guest";
+end
+
+fnc pub async refresh() {
+}
+```
+
+formats as:
+
+```ores
+define pub class User extends Entity implements Named, Serializable as
+  pub final String name: "guest";
+end
+
+pub async fnc refresh() {
+}
+```
+
+The nesting engine understands `module`, `class`, `interface`, `contract`, `trait`,
+`struct`, actor/braced bodies, `end`, `if`/`fi`, and `do`/`done`. In particular,
+`implements Foo, Bar` never creates formatter nesting; the class body begins
+only after the class header and is closed by its matching `end`.
+
+End-delimited free/module callables participate in the same structural nesting engine as modules and keyword blocks. The optional `::` delimiter is preserved when supplied; the default formatter does not minify or insert it automatically. Any separate minifier must emit `::` before deleting the newline that separates a return type from its function body.
+**Compiler status (verified 2026-11-08 against Java `6d8eb70048` and LLVM `0ee037ca3`):** both production
+compilers currently reject an end-delimited body on a free or module callable (Java: "expected '{'"; LLVM:
+"native '::' body requires a class method"). Both accept the `-> Type ::` ... `end` form on class methods.
+The formatter lays the free-callable form out but never rewrites a braced body into it. Likewise,
+`define actor Name as { ... }` (a brace body after `as`) is accepted by LLVM but rejected by Java.
+
+
+```ores
+fnc classify(int x) -> tuple (int, int, string) ::
+  if x > 0 then
+    return (1, x, "positive");
+  else
+    return (0, x, "non-positive");
+  fi
+end
+```
+
+The formatter recognizes this only at file/module declaration scope and only with an explicit slim-arrow return type. A callable-header `do` is never interpreted as a `done`-terminated control-flow block; compact `do ... end` source is expanded before structural indentation. It fails closed instead of interpreting an `end`-delimited class method, static class implementation, or actor callable as a free function. The contextual `tuple (...)` spelling is preserved as a type spelling; formatting does not invent a separate tuple runtime form.
+
+Conditional compatibility spellings are migrated automatically: optional semicolons before keyword `then` are removed, and deprecated
+`if ... do` becomes `if ... then`, `elseif` becomes `elif`, and a
+single-`fi` `else if` branch becomes `elif`. Loop `do ... done` syntax is
+unchanged; the deprecation applies only to using `do` as an if/branch
+introducer.
+
+Static select arms use the same nesting rules as other blocks. The outer
+selection may be braced or end-delimited:
+
+```ores
+nb select {
+  when readch inbox: val value {
+    nb writech replies, value * 10;
+  }
+  default: {
+  }
+}
+
+nb select over
+  when readch inbox: val value {
+    nb writech replies, value * 10;
+  }
+  default: {
+  }
+end
+```
+
+The formatter accepts both `when` and legacy `case` for static select arms,
+canonicalizes `case` to `when`, and adds braces to legacy unbraced select
+arms, including read arms without a binding and write/default arms. Arm
+boundaries are recognized only outside nested `()`, `[]`, and `{}`;
+mismatched delimiters fail closed instead of being reformatted heuristically.
+Comments and literals retain their contents. Dynamic `select from cases`
+expressions retain their syntax.
+
+Streaming channel writes use ordinary `for ... of ...` loops or
+`for await ... of ...` over an async iterator. Both braced loops and `do`/`done`
+loops use two-space nesting:
+
+```ores
+for const value of values do
+  writech output, value;
+done
+for await const value of events() {
+  await nb writech output, value;
+}
+```
+
+Expression-bodied lambdas follow the compiler's lexical split: an immediate
+`{` after `->` is the block form; otherwise the body is an expression. For a
+multiline expression body, the formatter adds one continuation indent and
+fails closed if the containing statement never reaches its required explicit
+semicolon. Block lambdas keep explicit `return` statements.
+
+Generator declaration headers are preserved exactly as written (only their
+indentation changes): the production compilers currently accept disjoint
+spellings. Java accepts `fnc gen*`, `async fnc gen*`, and `generator fnc`
+but rejects a top-level bare `gen*`; LLVM accepts only bare sync `gen*` /
+`generator*` with a `:` return type. No rewrite between them is accepted by
+both, so none is made until the backends converge. A callable literally named
+`generator` is an ordinary function. Delegating `yield* source;` is
+preserved, and only the scheduler compatibility spelling `rt yield` is
+rewritten to `rt cooperate`.
+
+The formatter is intentionally conservative about grammar that is still
+changing. It reorders only recognized declaration-modifier prefixes; imports,
+traits, interfaces, class conformance lists, and unknown modifier spellings are
+left untouched.
+
+For semantic safety, multiline string/template literals currently fail closed
+instead of being rewritten. This prevents indentation, trailing-whitespace, or
+line-ending normalization from changing literal runtime bytes while parser-backed
+literal preservation is still being completed.
+
+## Unused imports and module initialization safety
+
+Oreslang source imports participate in the compiler's dependency graph. Importing
+a source module can execute its `init()` hook, even when no selected binding is
+referenced; removing the import edge can therefore change program behavior.
+**The formatter preserves unreviewed imports by default.** It never deletes
+imports. Once a developer has verified that an import is safe to deactivate,
+put an exact `// oresfmt: pure-import` marker immediately above that import
+(or as an exact trailing comment on the import's final line). The formatter
+then comments out the whole unused import, leaving the declaration readable:
+
+```ores
+// oresfmt: pure-import
+import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main(): void {
+  make();
+}
+```
+
+becomes:
+
+```ores
+// oresfmt: pure-import
+// import class Box from "./box";
+import fnc make from "./factory";
+
+pub fnc main() -> void {
+  make();
+}
+```
+
+The purity marker is a **human assertion, not a compiler certificate**:
+use it only after checking direct and transitive module initialization.
+Without the marker, an apparently unused import remains active. This applies
+to every import kind, including Java host imports, until a compiler-proven
+side-effect analysis is available. Lexical reference detection still excludes
+comments, quoted strings, import paths, and Symbol literals; aliases are
+resolved by local name and grouped imports remain active when any binding is
+referenced. Unsupported grammar or ambiguous embedded templates fail closed.
+
+Use `// oresfmt: keep-import` for intentionally effectful imports or imports
+that must stay active even if a conflicting purity marker is present.
+`keep-import` always wins. Both markers apply only to one declaration and
+idempotent formatting preserves the original text as comments. Neither CLI
+dry-run nor check mode modifies files; `--write` retains the full filesystem
+and Git safety preflight. See the example:
+
+```ores
+// oresfmt: keep-import
+import module Bootstrap from "./bootstrap";
+```
+
+The long-term goal is compiler-derived import-effect certification from both
+backends, at which point the formatter can comment certified unused imports
+without manual assertions.
+
+## CLI
+
+```bash
+cargo install --path .
+
+# default: preview only, never modify files
+oresfmt src examples
+# would format src/foo.ores
+
+# explicit in-place rewrite
+oresfmt --write src examples
+
+# CI / pre-commit mode; exits 1 if anything would change
+oresfmt --check .
+
+# stdin -> stdout
+oresfmt - < input.ores
+
+# one file -> stdout
+oresfmt --stdout example.ores
+
+# stop option parsing for paths beginning with '-'
+oresfmt --check -- -generated.ores
+```
+
+The installed binary is `oresfmt`; `oreslang-format` is also provided as an
+alias. Directories are walked recursively and only `.atto` (canonical) and
+legacy `.ores` files are selected.
+Filesystem arguments are parsed as native OS strings rather than forced through
+UTF-8, and `--` terminates option parsing for dash-prefixed filenames.
+
+### Safe writes
+
+Filesystem inputs are **dry-run by default**. `--write` is the only normal mode
+that modifies files, and it performs a full preflight before touching any file.
+This prevents a later unsafe path from leaving a project half-formatted.
+
+For every file that would change, `--write` fails closed when the file is:
+
+- tracked by Git but has staged or unstaged changes;
+- untracked or ignored;
+- outside a Git worktree.
+
+The overrides are intentionally explicit:
+
+```bash
+oresfmt --write --ok-to-mod-dirty-files src
+oresfmt --write --ok-to-mod-untracked-files generated
+oresfmt --write --ok-to-mod-outside-git /tmp/example.ores
+```
+
+These flags only relax write-safety checks. They do not change formatting style.
+
+Additional write hardening:
+
+- explicit symlink inputs are refused, symlinked parent-directory components are
+  refused, and symlinks found during recursive walks are skipped rather than followed;
+- after the full Git preflight, every file is re-read before the first write, and
+  each target is revalidated again immediately before its own write; changed
+  contents, leaf symlink substitutions, and symlinked-parent substitutions fail closed;
+- write-safety override flags are rejected unless `--write` is active.
+
+CLI exit codes are explicit: `0` means success, `1` means either a
+noncanonical `--check` input or rejected Oreslang source (with an error
+diagnostic), and `2` means CLI usage, filesystem, Git-policy or other tool
+failure. Both `oresfmt` and `oreslang-format` use the same codes. Audit
+scripts must not confuse a syntax rejection with a tool/runner failure.
+
+## Rust SDK
+
+```rust
+use oreslang_format::{format_source, is_formatted};
+
+let formatted = format_source(source)?;
+let clean = is_formatted(&formatted)?;
+assert!(clean);
+```
+
+`format_source` is idempotent: formatting canonical output again produces the
+same bytes.
+
+## Compiler acceptance differential
+
+`scripts/check_formatter_acceptance_delta.py` formats every `.atto`/`.ores`
+file in one or more corpora and asks each supplied compiler whether it accepts
+the original and the formatted copy (the two trees keep their layout so
+relative imports still resolve). It fails on any file a compiler accepted
+before formatting but rejects after (`broken`), rejected before but accepts
+after (`newly-accepted`: formatting changed meaning), on compiler-valid source
+the formatter rejects (`rejects-valid`), and on non-idempotent output. A
+missing compiler or a timeout is a harness error, never a rejection. Reviewed
+findings, such as documented migrations that repair source a compiler
+rejected, go in a `--triaged` file (`tests/acceptance_delta_triage.tsv` lists
+those from the wide audit); a triaged entry that no longer occurs is reported
+as stale.
+
+The harness snapshots all bounded, regular corpus inputs into both comparison
+trees, including `.ores.pkg.toml`, non-source import dependencies and supporting
+configuration; Git and generated build/cache directories are excluded. Symlinks,
+special files, unstable inputs and snapshot-budget overruns fail closed. This
+preserves package-root resolution instead of treating a broken original
+checkout and equally broken formatted checkout as equivalent.
+
+A successful differential audit requires at least one configured compiler and
+at least one baseline-accepted original source **for each** compiler. The report
+records `baseline_accepted_by_compiler` and `baseline_unadmitted`. A
+reject/reject case may be a valid negative fixture, but it is **not** proof of
+semantic or compiler-admission equivalence; every such case is counted.
+A corpus containing only rejects fails as a harness error. Compiler
+labels must be unique, and each configured compiler must reject a syntactically
+invalid `.atto` control **in a package whose original source it accepted**.
+This rejects always-successful stubs and avoids misinterpreting missing-package
+errors as proof of syntax checking. The control is isolated from the original
+corpus and removed before final reporting.
+
+Compiler crashes, source mutation despite `--stdout`, or changes to **any**
+file in the original snapshot (including manifests or other auxiliary inputs)
+are harness errors. The formatter pass runs sequentially, **completes across
+the whole corpus before compiler admission begins**, and then compiler
+admissions may run in parallel (`--jobs`). This phase barrier prevents
+mixed pre/post-format imports from producing schedule-dependent results.
+
+Snapshot inventories and streamed SHA-256 digests reject source or auxiliary
+file additions, replacements, deletions, and persistent content changes in
+either comparison tree. Formatted source content is fixed before compiler
+admission and must remain unchanged afterward; compiler side effects cannot
+quietly become acceptance evidence. `--jobs` and `--timeout` must be
+positive. Run compiler commands only in an isolated, trusted environment:
+the harness is evidence collection, not a general untrusted-code sandbox.
+This is still parse/typecheck admission evidence only, not exact-head compiler
+execution certification, semantic AST equivalence, or cross-backend guest
+parity.
+
+```bash
+scripts/check_formatter_acceptance_delta.py \
+  --formatter target/release/oresfmt \
+  --compiler 'java=java -cp CLASSPATH dev.oreslang.launcher.OresMain --check {source}' \
+  --compiler 'llvm=PATH/TO/oreslang-llvmc {source}' \
+  --corpus ../oreslang-source.java --corpus ../oreslang-source.llvm
+```
+
+This is parse/typecheck admission evidence for the exact compiler builds
+used, not guest execution parity and not semantic AST equivalence.
+
+## Why no configuration?
+
+Oreslang should have one mechanically enforceable source style. This avoids
+project-specific formatter drift and gives compiler diagnostics, generated
+code, examples, editor integrations, and code review the same layout contract.
+
+## Exception effect annotations (staged grammar)
+
+Proposed optional postfix annotations for named functions and methods
+are `throws(ErrorType)`, `raises(ErrorType)`, and `panics(ErrorType)`.
+The formatter has round-trip preservation tests for these signatures;
+preservation does **not** mean that either production compiler accepts
+or executes the grammar. These three effects remain semantically distinct:
+ordinary catch/trap may handle throw; raise bypasses them and may reach
+a direct deferred recover; actor panic bypasses all local handlers and
+goes to supervisor CONTROL.
+
+A separate initial advisory checker is provided by
+`oreslang-test.cli --effects`. Integration with formatter diagnostics,
+complete callable-effect inference and LSP quick fixes remains pending.
+See the proposed shared contract in oreslang-common-source.
+
+## Optional `mtd` migration
+
+The Java compiler accepts both bare instance methods and the contextual `mtd`
+prefix in class/actor bodies. The formatter preserves either by default.
+Use `oresfmt --insert-mtd --stdout path/to/file.ores` to preview an explicit
+method-introducer migration, or `oresfmt --insert-mtd --write path/to/file.ores`
+(with the normal write-safety policy) to apply it. The same switch works with
+`--check` and stdin. It does not convert static `fnc`, top-level `fnc`,
+constructors, or nested callable bodies. Both `foo(): void {}` and
+`foo() -> void :: ... end` remain valid regardless of marker.
+
+The ordinary `format_source` API keeps existing default formatting.
+Library callers that explicitly want the marker can use
+`format_source_with_mtd`. Migration is idempotent and preserves existing
+explicit `mtd` and `method` declarations.
+
+## Experimental compiler analysis adapter
+
+`oresfmt --analyze src/` delegates each selected `.atto` (canonical) or
+legacy `.ores` file to `ORESLANG_BIN --analyze FILE` without rewriting the
+source. It is **not** an effect inference implementation and it is **not yet
+verified against a production compiler**: current Java/GraalVM and LLVM
+compiler entrypoints must implement and validate a compatible `--analyze`
+contract before this mode can be promoted. A missing/incompatible compiler
+fails rather than silently falling back to formatting or a lexical scan.
+Delegated analysis exit codes preserve the versioned compiler outcome:
+`0` means all inputs completed an explicitly supported analysis,
+`2` means at least one inconclusive input and no other failures, and
+`1` means any source/compiler/process failure. For multiple files,
+failure takes precedence over inconclusive; neither becomes success.
+Each inconclusive input is named on stderr. A missing or unrunnable compiler,
+an invalid analysis setting, or a path that selects no source also exits `1`, so
+`2` can never mean nothing was analyzed. Invalid command-line arguments still
+exit `2` as usage errors before analysis starts, and print no inconclusive line.
+This exit convention is experimental until verified against actual
+compiler binaries.
+
+For immediate advisory diagnostics on explicit `throw`, `raise`, `panic`,
+and declaration markers, use the independent
+`atto test --effects --file src/example.atto` command in
+`oreslang-test.cli`. That scanner is lexical and does not prove transitive
+effects or guest runtime behavior. Future compiler diagnostics must distinguish
+an unsupported/unknown effect from a certified safe result.
+
+The formatter preserves exception effect signatures and deferred `recover()`
+and never inserts/invents effect declarations. A caller's
+`unchecked call()` form is preserved unchanged; it is not a security
+or runtime-failure bypass.
+
+A bare `ORESLANG_BIN` searches only absolute `PATH` entries. The selected
+compiler cannot resolve to this formatter, including through a symlink.
+`ORESFMT_ANALYZE_ACTIVE` prevents recursive invocation through wrappers.
+The compiler receives closed stdin, and a per-file timeout of
+`ORESFMT_ANALYZE_TIMEOUT_SECS` (default 300 seconds; range 1–86400).
+On Unix, each analyzer runs in its own process group, and a timeout sends
+`SIGKILL` to **that process group** before reaping the direct child. Ordinary
+background shell children in that group are terminated; children that detach
+into another group/session can escape and are **not guaranteed contained**.
+On Windows, the direct child alone is terminated; a job-object implementation
+is still required for descendant cleanup. Do not use untrusted compiler
+binaries or rely on this adapter as an OS sandbox. Analysis failures produce nonzero status and no source rewrites.

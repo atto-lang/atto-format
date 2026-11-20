@@ -1,0 +1,6 @@
+// Ünïcödé comment: 中文 ✓
+pub fnc main(): int {
+  val String greeting = "héllo 世界 😀";
+  stdio.stdout.write(greeting);
+  return 42;
+}
