@@ -12,4 +12,18 @@ pub fnc main(): int {
     x.add(entry2);
     return x.get("foo").unwrap();
 }
-// expected exit: 3 (Map.add is insert-if-absent)
+// expected exit: 5 (Map.add replaces; Map.try_add is insert-only)
+
+// TARGET ONLY: closed Records use typed, literal-name field writes.
+pub fnc record_bracket_target(): int {
+    let mut Record r = {
+        foo: 1,
+        "content-type": 2
+    };
+    r["foo"] = 3;
+    r["content-type"] = 7;
+    return r["foo"];
+}
+
+// Nominal Struct bracket indexing is forbidden even for existing fields.
+// A future compiler must reject 'p["foo"] = 3' and accept checked 'p.foo = 3'.
