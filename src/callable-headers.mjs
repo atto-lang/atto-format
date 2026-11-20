@@ -20,7 +20,10 @@ export function normalize_callable_headers(source) {
       if (depth) throw new Error('unterminated block comment');
       continue;
     }
-    if (c === '"' || c === "'") {
+    // Treat template/backtick literals as opaque too: no constructor edits may
+    // happen inside them, including interpolations, until their own grammar
+    // has a fully verified formatter.
+    if (c === '"' || c === "'" || c === '`') {
       const quote = c; ++i;
       while (i < source.length && source[i] !== quote) {
         if (source[i] === '\\') ++i;
@@ -30,7 +33,7 @@ export function normalize_callable_headers(source) {
       ++i; continue;
     }
     if (word(c)) { ++i; while (tail(source[i])) ++i; }
-    else if (['::', '->', '=>'].some(x => source.startsWith(x, i))) i += 2;
+    else if (['::', '->', '<-', '=>'].some(x => source.startsWith(x, i))) i += 2;
     else ++i;
     toks.push({ s: source.slice(s, i), start: s, end: i });
   }
@@ -82,6 +85,13 @@ export function normalize_callable_headers(source) {
   function scanMethod(name) {
     if (!ident(name)) return -1;
     let j = name + 1;
+    // Return-first inline method: int <- name(...), with optional fnc.
+    // This is a declaration delimiter, not a left-directed stream operator.
+    const returnFirst = is(j, '<-');
+    if (returnFirst) {
+      if (!ident(j + 1)) return -1;
+      j += 2;
+    }
     // Generic parameters are part of the method header, before '('.
     // Never confuse an unclosed '<' with a callable body or class 'end'.
     if (is(j, '<')) {
@@ -91,19 +101,27 @@ export function normalize_callable_headers(source) {
     if (!is(j, '(')) return -1;
     j = skipPaired(j, '(', ')');
     if (j < 0) return -1;
-    let arrowType = is(j, '->'), colonType = is(j, ':');
-    if (arrowType || colonType) {
+    let arrowType = !returnFirst && is(j, '->');
+    let colonType = !returnFirst && is(j, ':');
+    // No omitted return is allowed. A return-first header already carried
+    // a complete result, and cannot declare a second result after params.
+    if (!returnFirst && !arrowType && !colonType) return -1;
+    if (returnFirst && (is(j, '->') || is(j, ':'))) return -1;
+    if (!returnFirst) {
       j = skipType(j + 1);
       if (j < 0) return -1;
     }
     if (colonType && is(j, '->')) ++j;
     if (is(j, '{')) return skipPaired(j, '{', '}');
-    if (!arrowType) return -1;
-    if (is(j, '::')) ++j;
+    // Explicit statement/end allows empty bodies. All source body-family
+    // spellings must be preserved verbatim by the lexical formatter.
+    if (is(j, 'begin')) ++j;
+    else if (!returnFirst && !arrowType) return -1;
+    else if (!returnFirst && is(j, '::')) ++j;
     let nestedEnd = 0;
     for (; j < toks.length; ++j) {
       if (is(j, '{')) { j = skipPaired(j, '{', '}'); if (j < 0) return -1; --j; continue; }
-      if (is(j, 'match') || is(j, 'switch') || is(j, 'select')) ++nestedEnd;
+      if (is(j, 'match') || is(j, 'switch') || is(j, 'select') || is(j, 'begin')) ++nestedEnd;
       else if (is(j, 'end')) { if (nestedEnd) --nestedEnd; else return j + 1; }
     }
     return -1;
@@ -128,7 +146,7 @@ export function normalize_callable_headers(source) {
         if (finish < 0) break;
         j = finish; continue;
       }
-      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<'))) {
+      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<') || is(j + 1, '<-'))) {
         const finish = scanMethod(j);
         if (finish < 0) break;
         j = finish; continue;
@@ -141,7 +159,11 @@ export function normalize_callable_headers(source) {
   for (let i = 0; i < toks.length; ++i) {
     if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
-    if (close <= i + 1 || !ident(close + 1) || !is(close + 2, '(')) continue;
+    if (close <= i + 1 || !ident(close + 1) ||
+        !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
+    // Never normalize out-of-line receiver names when their named callable
+    // lacks an explicit return result (including void or infer).
+    if (scanMethod(close + 1) < 0) continue;
     if (hasComment(toks[i + 1].start, toks[close].end)) continue;
     const r = toks.slice(i + 2, close).map(x => x.s);
     let canonical = null;
@@ -156,6 +178,26 @@ export function normalize_callable_headers(source) {
         (r.length === 1 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) || r[0] === 'mut')) {
       add(toks[i + 1].start, toks[close].end, canonical);
     }
+  }
+  // Constructor receiver headers use two independent parenthesized groups:
+  // constructor (Owner)(parameters): self { ... }
+  // Whitespace between those tokens cannot create a different constructor.
+  // We only rewrite proven, balanced out-of-line constructor headers and
+  // preserve intervening comments rather than erasing them.
+  for (let i = 0; i < toks.length; ++i) {
+    if (!is(i, 'constructor') || !is(i + 1, '(') ||
+        !ident(i + 2) || !is(i + 3, ')') || !is(i + 4, '(')) continue;
+    if (is(i - 1, '.') || is(i - 1, '::')) continue;
+    const afterParams = skipPaired(i + 4, '(', ')');
+    if (afterParams < 0 || !is(afterParams, ':') ||
+        !is(afterParams + 1, 'self') || !is(afterParams + 2, '{') ||
+        skipPaired(afterParams + 2, '{', '}') < 0) continue;
+    // A comment within either of the changed whitespace spans is kept
+    // byte-for-byte, with no partial rewrite of that declaration.
+    if (hasComment(toks[i].end, toks[i + 1].start) ||
+        hasComment(toks[i + 3].end, toks[i + 4].start)) continue;
+    add(toks[i].end, toks[i + 1].start, ' ');
+    add(toks[i + 3].end, toks[i + 4].start, '');
   }
   // Canonical spelling of the callable effect: suspends -> susp.
   // Only rewrite in known modifier positions. The tokenizer has already
