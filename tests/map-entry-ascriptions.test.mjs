@@ -32,3 +32,13 @@ test('quoted pseudo-entry strings and comments remain completely unchanged', () 
   const output = normalize_ownership_operations(normalize_callable_headers(input));
   assert.equal(output, input);
 });
+
+test('closed Record static bracket syntax is preserved; nominal Struct never gets rewritten', () => {
+  const formatted = normalize_ownership_operations(normalize_callable_headers(sample));
+  assert.ok(formatted.includes('let mut Record r = {'));
+  assert.ok(formatted.includes('r["foo"] = 3;'));
+  assert.ok(formatted.includes('r["content-type"] = 7;'));
+  assert.ok(formatted.includes('expected exit: 5 (Map.add replaces; Map.try_add is insert-only)'));
+  assert.ok(formatted.includes('p["foo"] = 3'), 'negative Struct syntax must remain a comment');
+  assert.equal(formatted, sample);
+});
