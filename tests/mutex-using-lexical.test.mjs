@@ -48,3 +48,38 @@ for (const [name, input, expected] of cases) {
     assert.equal(normalize_ownership_operations(formatted), formatted);
   });
 }
+
+
+test('formatter preserves mandatory new on opaque Mutex resource class', () => {
+  const cases = [
+    'val counter = new Mutex<int>(0);',
+    'val counter = new Mutex<Map<int, string>>(Map.of());',
+    'val counter = Mutex<int>(0); // invalid; do NOT silently insert new',
+    'val p = Point(x=1, y=2); // ordinary value struct, no new required',
+    'val source = "Mutex<int>(0)"; // quoted old source is not repaired',
+    '// new Mutex<int>(0) is a class constructor in a comment',
+  ];
+  for (const src of cases) {
+    const once=normalize_callable_headers(src);
+    assert.equal(once,src);
+    assert.equal(normalize_callable_headers(once),once);
+    assert.equal(normalize_ownership_operations(once),once);
+  }
+});
+
+test('effect aliases canonicalize but class constructor and scope remain byte-identical', () => {
+  const input=[
+    'suspends fnc increment(Mutex<int> counter): int {',
+    '  using await counter.lock_async() as lease {',
+    '    lease.value += 1;',
+    '    return lease.value;',
+    '  }',
+    '}',
+    'pub suspends fnc main(): int {',
+    '  val counter = new Mutex<int>(0);',
+    '  return await increment(counter);',
+    '}',
+  ].join('\n');
+  const expected=input.replaceAll('suspends fnc','susp fnc');
+  assert.equal(normalize_callable_headers(input),expected);
+});
