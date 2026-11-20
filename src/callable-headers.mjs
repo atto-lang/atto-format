@@ -1,3 +1,4 @@
+import {normalize_task_aliases} from './task-aliases.mjs';
 /** Conservative lexical normalizer for a bounded subset of AttoLang declaration headers.
  * Not a full formatter; it refuses to transform unrecognized declaration grammar.
  * Accepted spelling contract: atto-spec language/callable-body-styles-v1.md.
@@ -210,5 +211,5 @@ export function normalize_callable_headers(source) {
   edits.sort((a, b) => b.start - a.start);
   let result = source;
   for (const { start, end, replacement } of edits) result = result.slice(0, start) + replacement + result.slice(end);
-  return result;
+  return normalize_task_aliases(result);
 }
