@@ -3339,7 +3339,8 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
             let ty = ty.trim();
             (!ty.is_empty() && ty.chars().all(|ch| {
                 ch.is_ascii_alphanumeric()
-                    || matches!(ch, '_' | '.' | '<' | '>' | ',' | '?' | '[' | ']' | ' ' | '\\t')
+                    || ch.is_ascii_whitespace()
+                    || matches!(ch, '_' | '.' | '<' | '>' | ',' | '?' | '[' | ']')
             })).then_some(())
         }).is_some();
         if suffix.starts_with("->") || colon_result {
