@@ -44,6 +44,22 @@ const cases = [
   ['line breaks in the direction marker retain line structure',
     'nb stdio.in >>\n    = Future<string> x |> |f| -> await f >> =\n    val string line;',
     'nb stdio.in >>\n    Future<string> x |> |f| -> await f >>\n    val string line;'],
+  // Postfix receive and constructor grammar belongs to checked I/O, NOT
+  // optional directional-binding-equals canonicalization. The formatter must
+  // leave these bytes intact until real parse-equivalence evidence exists.
+  ['parenthesized checked postfix receive', 'val outcome = (c >>);',
+    'val outcome = (c >>);'],
+  ['bare checked postfix receive', 'return c >>;', 'return c >>;'],
+  ['prefix checked receive', 'return (<< c);', 'return (<< c);'],
+  ['new bounded channel constructor', 'val opened = new Channel<int>(2);',
+    'val opened = new Channel<int>(2);'],
+  ['checked result nested generic closers', 'val outcome: Result<Option<int>,IoError> = (c >>);',
+    'val outcome: Result<Option<int>,IoError> = (c >>);'],
+  ['typed directional binder already canonical', 'c >> val item: Result<Option<int>,IoError>;',
+    'c >> val item: Result<Option<int>,IoError>;'],
+  ['invalid spaced postfix read must not be repaired', 'return (c > >);',
+    'return (c > >);'],
+  ['triple shift is not a read', 'return c >>> 1;', 'return c >>> 1;'],
   ['quoted escaped markers remain literal',
     'val x = "quoted \\" nb stdio.in >> = Future<int> x"; inbox >> = val y;',
     'val x = "quoted \\" nb stdio.in >> = Future<int> x"; inbox >> val y;'],
