@@ -1,7 +1,10 @@
 /** Inline task formatting contract (atto-spec typed-task-payload-sync-v1).
  *
  * 'do task<T>' spawns an independently supervised child, whereas
- * 'do sync task<T>' executes inline in the caller's logical task.
+ * 'do sync task<void>' (or inferred void) runs inline in the caller's task.
+ * Nonvoid 'do sync task<T>' is an error for the compiler, not a formatter
+ * rewrite opportunity. Bare 'sync task {};' is invalid statement syntax;
+ * the formatter preserves it unchanged for proper parser diagnostics.
  * Erasing 'sync' changes execution order, cancellation ownership,
  * borrowing, supervision and the permitted suspension effects.
  *
