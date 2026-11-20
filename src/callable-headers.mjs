@@ -85,9 +85,10 @@ export function normalize_callable_headers(source) {
   function scanMethod(name) {
     if (!ident(name)) return -1;
     let j = name + 1;
-    // Return-first inline method: int <- name(...), with optional fnc.
+    // Return-first inline method: int <- name(...) OR int • name(...), with optional fnc.
+    // U+2022 BULLET is a token distinct from similar middle-dot characters.
     // This is a declaration delimiter, not a left-directed stream operator.
-    const returnFirst = is(j, '<-');
+    const returnFirst = is(j, '<-') || is(j, '•');
     if (returnFirst) {
       if (!ident(j + 1)) return -1;
       j += 2;
@@ -146,7 +147,7 @@ export function normalize_callable_headers(source) {
         if (finish < 0) break;
         j = finish; continue;
       }
-      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<') || is(j + 1, '<-'))) {
+      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<') || is(j + 1, '<-') || is(j + 1, '•'))) {
         const finish = scanMethod(j);
         if (finish < 0) break;
         j = finish; continue;
@@ -160,7 +161,7 @@ export function normalize_callable_headers(source) {
     if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
     if (close <= i + 1 || !ident(close + 1) ||
-        !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
+        !(is(close + 2, '(') || is(close + 2, '<-') || is(close + 2, '•'))) continue;
     // Never normalize out-of-line receiver names when their named callable
     // lacks an explicit return result (including void or infer).
     if (scanMethod(close + 1) < 0) continue;
