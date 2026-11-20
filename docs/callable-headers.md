@@ -52,3 +52,20 @@ two executable class receiver fixtures (including legacy inline method
 prefixes), idempotence and the atomic CLI's fail-closed operation.
 Real compiler comparisons must execute against an exact-source SHA; Node
 mock test success alone does not count as semantic equivalence.
+
+## Functional pipeline and inline arrow body compatibility
+
+The narrow header normalizer now recognizes a single-expression method
+body of the form `: int -> expression;` in addition to its existing braced
+and `end`-delimited families. It can remove redundant instance-method
+`fnc`/`method` prefixes around these declarations without changing the
+expression, its trailing semicolon, or either functional pipeline operator.
+
+For example, the following method expression must be preserved byte-for-byte:
+`double <| (x |> increment)`.
+
+This formatter is intentionally **not** a parser for the entire AttoLang
+expression language. It refuses unbalanced or incomplete inline bodies rather
+than guessing their boundaries. The host-only formatting tests prove only
+lexical idempotence; accepted compiler behavior still requires the separate
+real guest/source-equivalence gate and cross-backend conformance.
