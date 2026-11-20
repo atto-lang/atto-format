@@ -83,7 +83,7 @@ test('canonical void-only do sync task and typed inline value remain unchanged',
  const formatted = normalize_callable_headers(source);
  assert.equal(formatted,source);
  assert.equal(normalize_task_aliases(formatted),source);
- assert.match(formatted,/do sync task<void> \\{\\};/);
+ assert.match(formatted,/do sync task<void> \{\};/);
  assert.match(formatted,/val result = sync task<int>/);
  assert.doesNotMatch(formatted,/do task<void>/);
  // Invalid typed do-inline must remain invalid, never be coerced into void.
