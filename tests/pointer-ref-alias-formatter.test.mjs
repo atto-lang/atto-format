@@ -54,3 +54,45 @@ test('preserve literals/comments and avoid inventing live pointer references', (
   ].join('\n');
   assert.equal(normalize(source), source);
 });
+
+test('no whitespace repair or accidental pointer authority rewrite', () => {
+  for (const code of [
+    'val Pointer<int> ptr = rt ref (value);',
+    'val Pointer<int> ptr = ref!value;',
+    'val answer = deref! (ptr);',
+    'val answer = deref!ptr;',
+    'val answer = rt deref ptr;',
+    'rt unref (ptr);',
+    'unref!ptr;',
+    'deref !ptr;',
+    'unref !ptr;',
+    'ref !value;',
+    'val duplicate = copy! ptr;',
+    'val duplicate = share! ptr;',
+    'val nested = copy!! owned;',
+    'val raw: int = ptr as int;',
+    'val a = deref! ptr + rt deref ptr;',
+  ]) {
+    assert.equal(normalize(code), code);
+    assert.equal(normalize(normalize(code)), code);
+  }
+});
+
+test('quoted strings, nested comments, and templates are opaque to pointer alias formatting', () => {
+  const text = [
+    '// ref!value deref!ptr unref!ptr',
+    '/* rt ref value /* deref!ptr */ unref!ptr */',
+    'val literal = "ref!value rt deref ptr";',
+    "val single = 'unref!ptr';",
+    'val template = '+String.fromCharCode(96)+'deref!ptr'+String.fromCharCode(96)+';',
+    'val Pointer<int> ptr = rt ref value;',
+  ].join('\n');
+  assert.equal(normalize(text), text);
+});
+
+test('large repeated bang aliases remain idempotent without quadratic editing', () => {
+  const text = 'val result = deref! ptr;\nunref! ptr;\n'.repeat(4096);
+  assert.ok(Buffer.byteLength(text, 'utf8') < 1024 * 1024);
+  assert.equal(normalize(text), text);
+  assert.equal(normalize(normalize(text)), text);
+});

@@ -2,7 +2,8 @@
  * Conservative ownership-operator formatter.
  *
  * We do NOT split or rewrite copy!!, copy! !value, borrow! mut, take!,
- * share!, freeze!, weak!, pin!, drop! or mut. They have different static
+ * share!, freeze!, weak!, pin!, drop!, ref!, deref!, unref!, the legacy
+ * rt ref/deref/unref forms, or mut. They have different static
  * rights, and whitespace-based guesses could silently weaken a program.
  *
  * Only a contextually admitted lifetime! binder is canonicalized to lt!.
