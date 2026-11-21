@@ -49,6 +49,7 @@ impl std::error::Error for FormatError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
     Try,
+    Maybe,
     Switch,
     Match,
     Select,
@@ -760,6 +761,15 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                     && frame.brace_depth == brace_stack.len()
                     && frame.keyword_depth == keyword_stack.len()
             });
+        // A maybe failure arm is value matching, not an if-else arm.
+        // The nearest end-delimited frame must be Maybe so an enclosing
+        // try/catch/finally keeps ownership of its own END.
+        let maybe_arm = starts_block_keyword(structural, "else")
+            && define_stack.last().is_some_and(|frame| {
+                frame.kind == DefineKind::Maybe
+                    && frame.brace_depth == brace_stack.len()
+                    && frame.keyword_depth == keyword_stack.len()
+            });
         let branch_line =
             starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
 
@@ -805,6 +815,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         if branch_line
+            && !maybe_arm
             && !matches!(
                 keyword_stack.last(),
                 Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced)
@@ -818,7 +829,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         let leading_closing_braces = leading_closing_braces(structural);
         let keyword_dedent = usize::from(
-            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm,
+            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm || maybe_arm,
         );
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
@@ -1091,6 +1102,20 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             }
         }
 
+        // Only explicit contextual spellings open a maybe block.
+        // A normal identifier use (e.g. return maybe;) must not acquire
+        // an END frame. Preserve the original return/statement syntax.
+        if matches!(structural.trim(), "do maybe" | "return maybe") {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Maybe,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
         // "try" without an opening brace is an end-delimited block.
         // Store it alongside callable/dispatch frames so nested constructs
         // close at their own END and cannot steal the outer try terminator.
@@ -1105,7 +1130,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             indent += 1;
         }
 
-        if try_arm {
+        if try_arm || maybe_arm {
             indent += 1;
         }
 
