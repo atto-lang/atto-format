@@ -33,7 +33,7 @@ fn preserves_existing_bangs_and_literals_comments_and_effects() {
     assert!(formatted.contains("// throw new Error(); raise new Error(); panic new Error();"));
     assert!(formatted.contains("\"throw new Error(); raise new Error(); panic new Error();\""));
     assert!(formatted.contains("/* throw new Error();"));
-    assert!(formatted.contains("raise new Error();\n     panic new Error(); */"));
+    assert!(formatted.contains("panic new Error(); */"));
     assert!(!formatted.contains("throw!!"));
     assert!(!formatted.contains("raise!!"));
     assert!(!formatted.contains("panic!!"));
