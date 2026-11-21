@@ -51,15 +51,18 @@ pub(super) fn canonicalize(source: &str) -> String {
                 continue;
             }
 
-            // A contiguous ! is already canonical. An adjacent logical-not
-            // expression (with whitespace) must not be silently reinterpreted
-            // as the exceptional bang token.
-            let following = &line[span.end..];
-            if following.trim_start().starts_with('!')
-                || following.trim_start().starts_with("/*")
+            // Require an unambiguous operand on THIS physical line. A
+            // bare keyword followed by a newline and `!expression` is the
+            // migration spelling plus logical-not, never the bang token.
+            // Treat comment-separated operands, call-like identifiers, and
+            // punctuation-only tails as ambiguous until parser verification.
+            let following = line[span.end..].trim_start();
+            if following.is_empty()
+                || following.starts_with('!')
+                || following.starts_with("/*")
+                || following.starts_with("//")
+                || following.starts_with([';', ':', '=', '.', '(', ')', ',', '}'])
             {
-                // Comments between a keyword and its operand can hide
-                // negation or other grammar; leave such source unchanged.
                 continue;
             }
 
@@ -107,6 +110,18 @@ panic new Error();
         assert!(result.contains("then throw! new Error();"));
         assert!(result.contains("begin raise! new Error();"));
         assert!(result.contains("throw !error;"));
+    }
+
+    #[test]
+    fn never_conflates_multiline_logical_not_with_an_exception_bang() {
+        let source = "throw\n  !ready;\nraise // comment\n  Error(1);\npanic;\n";
+        assert_eq!(canonicalize(source), source);
+    }
+
+    #[test]
+    fn leave_ambiguous_call_syntax_and_commented_operands_unchanged() {
+        let source = "throw(new Error());\nraise /* why */ error;\npanic::value;\n";
+        assert_eq!(canonicalize(source), source);
     }
 
     #[test]
