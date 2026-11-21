@@ -48,6 +48,7 @@ impl std::error::Error for FormatError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
+    Maybe,
     Try,
     Switch,
     Match,
@@ -613,6 +614,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let mut pending_blank = false;
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
+    // Atto maybe v1 requires one exhaustive value-failure else before end.
+    let mut maybe_else_orders = std::collections::HashSet::<usize>::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
     let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
     let mut lex = LexState::default();
@@ -760,8 +763,20 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                     && frame.brace_depth == brace_stack.len()
                     && frame.keyword_depth == keyword_stack.len()
             });
+        let maybe_else = starts_block_keyword(structural, "else")
+            && define_stack.last().is_some_and(|frame| {
+                frame.kind == DefineKind::Maybe
+                    && frame.brace_depth == brace_stack.len()
+                    && frame.keyword_depth == keyword_stack.len()
+            });
         let branch_line =
             starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
+        if maybe_else {
+            let owner = define_stack.last().expect("matching maybe frame");
+            if !maybe_else_orders.insert(owner.order) {
+                return Err(FormatError::new(line_no, "duplicate maybe else handler"));
+            }
+        }
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
@@ -805,6 +820,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         if branch_line
+            && !maybe_else
             && !matches!(
                 keyword_stack.last(),
                 Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced)
@@ -818,7 +834,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         let leading_closing_braces = leading_closing_braces(structural);
         let keyword_dedent = usize::from(
-            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm,
+            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm || maybe_else,
         );
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
@@ -840,6 +856,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             }
             if frame.kind == DefineKind::Callable {
                 ended_end_callable = Some(indent);
+            }
+            if frame.kind == DefineKind::Maybe && !maybe_else_orders.remove(&frame.order) {
+                return Err(FormatError::new(
+                    line_no,
+                    "maybe v1 requires an exhaustive else before end",
+                ));
             }
             define_stack.pop();
         }
@@ -1105,7 +1127,20 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             indent += 1;
         }
 
-        if try_arm {
+        // These contextual forms open an end-delimited value-match scope.
+        // A variable named maybe (e.g. return maybe;) is not a scope.
+        if matches!(structural.trim(), "do maybe" | "return maybe") {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Maybe,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
+        if try_arm || maybe_else {
             indent += 1;
         }
 
