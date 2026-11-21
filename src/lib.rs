@@ -1909,7 +1909,7 @@ fn canonicalize_declaration_line(
     }
 
     (instance_member
-        .then(|| canonicalize_instance_method_fnc(line, &words))
+        .then(|| canonicalize_instance_method_prefix(line, &words))
         .flatten())
     .or_else(|| {
         class_member
@@ -2048,10 +2048,11 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
-// Legacy "fnc name(...)" inside a class or actor is an instance method,
-// not a static, reifiable function. Drop only that declaration marker.
-// In particular never touch static fnc, comments, strings or nested callables.
-fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
+// In a class or actor, legacy `fnc name(...)` denotes an instance method and
+// becomes a bare declaration; legacy `method name(...)` becomes canonical
+// `mtd name(...)`. Keep existing `mtd`, statics, named methods, literals,
+// comments and nested callable bodies untouched.
+fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_modifier = |word: &str| {
         matches!(
             word,
@@ -2066,15 +2067,15 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         )
     };
     let mut prefix_len = 0;
-    let mut saw_fnc = false;
+    let mut keyword: Option<&str> = None;
     let mut modifiers: Vec<&str> = Vec::new();
     for span in words {
         let word = &line[span.start..span.end];
-        if word == "fnc" {
-            if saw_fnc {
+        if matches!(word, "fnc" | "method") {
+            if keyword.is_some() {
                 return None;
             }
-            saw_fnc = true;
+            keyword = Some(word);
         } else if is_modifier(word) {
             if modifiers.contains(&word) {
                 return None;
@@ -2085,7 +2086,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         }
         prefix_len += 1;
     }
-    if !saw_fnc || prefix_len >= words.len() {
+    if keyword.is_none() || prefix_len >= words.len() {
         return None;
     }
     // No static modifier, comments, punctuation or expressions may appear
@@ -2123,6 +2124,9 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     if !canonical.is_empty() {
         out.push_str(&canonical.join(" "));
         out.push(' ');
+    }
+    if keyword == Some("method") {
+        out.push_str("mtd ");
     }
     out.push_str(&line[name.start..]);
     Some(out)
