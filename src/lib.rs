@@ -7,6 +7,7 @@ use std::fmt;
 
 #[cfg(target_arch = "wasm32")]
 mod browser_wasm;
+mod exception_bang;
 mod inline_blocks;
 mod keyword_blocks;
 mod match_switch;
@@ -606,6 +607,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let normalized = select::normalize(&normalized)?;
     let normalized = inline_blocks::normalize(&normalized);
     let normalized = keyword_blocks::normalize(&normalized);
+    let normalized = exception_bang::canonicalize(&normalized);
     let mut out: Vec<String> = Vec::new();
     let mut indent = 0usize;
     let mut block_comment_indent_shift = 0isize;
