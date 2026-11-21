@@ -20,9 +20,11 @@ pub(super) fn canonicalize(source: &str) -> String {
         let _ = scan_visible(line, &mut next_lex);
         lex = next_lex;
 
-        let mut rewritten = line.to_owned();
-        // Work from right to left so the original byte offsets stay valid.
-        for (index, span) in words.iter().enumerate().rev() {
+        // Assemble spans once: repeated insertions would be quadratic for a
+        // large one-line sequence of exceptional statements.
+        let mut rewritten = String::with_capacity(line.len());
+        let mut cursor = 0usize;
+        for (index, span) in words.iter().enumerate() {
             let word = &line[span.start..span.end];
             if !matches!(word, "throw" | "raise" | "panic") {
                 continue;
@@ -57,9 +59,12 @@ pub(super) fn canonicalize(source: &str) -> String {
                 continue;
             }
 
-            rewritten.insert(span.end, '!');
+            rewritten.push_str(&line[cursor..span.end]);
+            rewritten.push('!');
+            cursor = span.end;
         }
 
+        rewritten.push_str(&line[cursor..]);
         output.push_str(&rewritten);
     }
 
