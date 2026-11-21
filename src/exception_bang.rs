@@ -41,7 +41,11 @@ pub(super) fn canonicalize(source: &str) -> String {
                     matches!(prior_word, "then" | "else" | "do" | "begin")
                         && line[previous.end..span.start].trim().is_empty()
                 });
-            if !boundary || prefix.ends_with('.') || prefix.ends_with('#') || prefix.ends_with('@') {
+            if !boundary
+                || prefix.ends_with('.')
+                || prefix.ends_with('#')
+                || prefix.ends_with('@')
+            {
                 continue;
             }
 
@@ -60,4 +64,39 @@ pub(super) fn canonicalize(source: &str) -> String {
     }
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalize;
+
+    #[test]
+    fn masks_literals_comments_and_members() {
+        let source = r#"throw new Error();
+// raise new Error();
+/* panic new Error();
+   throw new Error(); */
+const text = "panic new Error();";
+object.raise(new Error());
+panic new Error();
+"#;
+        let result = canonicalize(source);
+        assert!(result.starts_with("throw! new Error();"));
+        assert!(result.contains("// raise new Error();"));
+        assert!(result.contains("/* panic new Error();"));
+        assert!(result.contains("   throw new Error(); */"));
+        assert!(result.contains("\"panic new Error();\""));
+        assert!(result.contains("object.raise(new Error());"));
+        assert!(result.contains("panic! new Error();"));
+        assert_eq!(canonicalize(&result), result);
+    }
+
+    #[test]
+    fn handles_inline_statement_boundaries_without_changing_logical_not() {
+        let source = "if ready then throw new Error(); fi\nbegin raise new Error();\nthrow !error;\n";
+        let result = canonicalize(source);
+        assert!(result.contains("then throw! new Error();"));
+        assert!(result.contains("begin raise! new Error();"));
+        assert!(result.contains("throw !error;"));
+    }
 }
