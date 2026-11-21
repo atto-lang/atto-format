@@ -25,8 +25,8 @@ define class Worker as {
     assert!(formatted.contains("panics(InvariantError)"));
     assert!(formatted.contains("method handle() -> void raises(Error)"));
     assert!(formatted.contains("static fnc shutdown() -> void panics(Error)"));
-    assert!(formatted.contains("raise new Error();"));
-    assert!(formatted.contains("panic new Error();"));
+    assert!(formatted.contains("raise! new Error();"));
+    assert!(formatted.contains("panic! new Error();"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
 
