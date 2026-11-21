@@ -614,7 +614,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let mut pending_blank = false;
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
-    // Atto maybe v1 requires one exhaustive value-failure else before end.
+    // Atto maybe v1 requires one explicit value-failure else before end.
     let mut maybe_else_orders = std::collections::HashSet::<usize>::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
     let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
@@ -860,7 +860,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             if frame.kind == DefineKind::Maybe && !maybe_else_orders.remove(&frame.order) {
                 return Err(FormatError::new(
                     line_no,
-                    "maybe v1 requires an exhaustive else before end",
+                    "maybe v1 requires an else handler before end",
                 ));
             }
             define_stack.pop();
