@@ -2885,7 +2885,8 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     // Inside a class, mtd is a normal single-parameter-list instance method.
     // Only free-standing mtd declarations have the separate receiver group.
     let out_of_line_mtd = !instance_member && starts_word(without_visibility, "mtd");
-    let standalone = contains_word(line, "fnc") || contains_word(line, "routine") || out_of_line_mtd;
+    let standalone =
+        contains_word(line, "fnc") || contains_word(line, "routine") || out_of_line_mtd;
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
     if !line.contains('(')
@@ -2895,7 +2896,8 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
         return false;
     }
     let close = if out_of_line_mtd {
-        let Some(receiver_close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+        let Some(receiver_close) = callable_parameter_close(line, line.len(), LexState::default())
+        else {
             return false;
         };
         let after_receiver = &line[receiver_close + 1..];
@@ -2905,7 +2907,10 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
             return false;
         };
         let method_name = after_receiver[..method_open].trim();
-        if !method_name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        if !method_name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
             || !method_name.chars().all(is_ident_char)
         {
             return false;
