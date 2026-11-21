@@ -35,12 +35,10 @@ pub(super) fn canonicalize(source: &str) -> String {
                 || prefix.ends_with(';')
                 || prefix.ends_with('{')
                 || prefix.ends_with('}')
-                || prefix.ends_with("::")
-                || prefix.ends_with("->")
-                || prefix.ends_with("=>")
                 || words.get(index.wrapping_sub(1)).is_some_and(|previous| {
                     let prior_word = &line[previous.start..previous.end];
                     matches!(prior_word, "then" | "else" | "do" | "begin")
+                        && !line[..previous.start].trim_end().ends_with('.')
                         && line[previous.end..span.start].trim().is_empty()
                 });
             if !boundary
@@ -123,7 +121,7 @@ panic new Error();
 
     #[test]
     fn leave_ambiguous_call_syntax_and_commented_operands_unchanged() {
-        let source = "throw(new Error());\nraise /* why */ error;\npanic::value;\n";
+        let source = "throw(new Error());\nraise /* why */ error;\npanic::value;\nfoo::throw new Error();\nvalue -> raise new Error();\ncase => panic new Error();\n";
         assert_eq!(canonicalize(source), source);
     }
 
