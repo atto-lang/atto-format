@@ -61,7 +61,10 @@ pub(super) fn canonicalize(source: &str) -> String {
                 || following.starts_with('!')
                 || following.starts_with("/*")
                 || following.starts_with("//")
-                || following.starts_with([';', ':', '=', '.', '(', ')', ',', '}'])
+                || following
+                    .chars()
+                    .next()
+                    .is_some_and(|c| matches!(c, ';' | ':' | '=' | '.' | '(' | ')' | ',' | '}'))
             {
                 continue;
             }
