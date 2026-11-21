@@ -171,11 +171,24 @@ export function normalize_callable_headers(source) {
     // The receiver is a source-local binding, not a fixed 'self' keyword.
     // These are only lexical formatting candidates: the real compiler must
     // reject reserved/invalid names and verify actor-state permissions.
+    // Match the compiler's reserved-keyword admission in this target profile.
+    // Lexical formatting is still subject to verified compiler equivalence.
     const reservedNames = new Set([
-      'actor', 'class', 'struct', 'mut', 'self', 'pub', 'private',
-      'fnc', 'routine', 'return', 'await', 'select', 'state!',
-      'let', 'val', 'const', 'using', 'new', 'spawn', 'stop',
-      'true', 'false', 'null', 'void', 'end', 'if', 'else', 'this!'
+      'unsafe', 'sync', 'task', 'pipe', 'rpipe', 'define', 'def',
+      'module', 'namespace', 'contract', 'conforms', 'class', 'struct', 'interface',
+      'trait', 'type', 'types', 'typeof', 'abstract', 'extends', 'implements',
+      'impl', 'import', 'from', 'as', 'using', 'fnc', 'routine',
+      'pure', 'async', 'suspends', 'generator', 'yield', 'nlex', 'return',
+      'begin', 'super', 'static', 'pub', 'private', 'const', 'val',
+      'let', 'mut', 'if', 'guard', 'then', 'else', 'elif',
+      'elseif', 'fi', 'do', 'done', 'end', 'while', 'for',
+      'of', 'loop', 'block', 'break', 'continue', 'switch', 'match',
+      'maybe', 'matches', 'over', 'default', 'try', 'catch', 'finally',
+      'throw', 'raise', 'panic', 'recover', 'trap', 'defer', 'actor',
+      'persistent', 'durable', 'isoactor', 'shared', 'untrusted', 'spawn', 'stop',
+      'rt', 'await', 'nb', 'cb', 'select', 'readch', 'writech',
+      'eq', 'neq', 'is', 'new', 'true', 'false', 'null',
+      'void', 'obj', 'arr', 'cpu', 'gpu', 'quantum',
     ]);
     const validBinding = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name || '') &&
       name !== '_' && (name === 'self' || !reservedNames.has(name));
