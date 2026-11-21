@@ -157,7 +157,8 @@ export function normalize_callable_headers(source) {
     i = j;
   }
   for (let i = 0; i < toks.length; ++i) {
-    if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
+    if (!is(i, 'mtd') || !is(i + 1, '(') ||
+        is(i - 1, '.') || is(i - 1, '::')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
     if (close <= i + 1 || !ident(close + 1) ||
         !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
@@ -189,11 +190,15 @@ export function normalize_callable_headers(source) {
       'rt', 'await', 'nb', 'cb', 'select', 'readch', 'writech',
       'eq', 'neq', 'is', 'new', 'true', 'false', 'null',
       'void', 'obj', 'arr', 'cpu', 'gpu', 'quantum',
+      // Target parser's extra declaration-context exclusions.
+      'declare', 'mtd', 'use',
     ]);
     const validBinding = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name || '') &&
       name !== '_' && (name === 'self' || !reservedNames.has(name));
+    const validNominalOrField = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name || '') &&
+      name !== 'self' && name !== '_' && !reservedNames.has(name);
     // No square-bracket/array receiver rewrite, no unchecked duplicates.
-    if (r.length >= 5 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) &&
+    if (r.length >= 5 && validNominalOrField(r[0]) &&
         r[1] === 'mut' && validBinding(r[2]) &&
         r[3] === '.' && r[4] === 'state') {
       let fields = null;
@@ -201,12 +206,12 @@ export function normalize_callable_headers(source) {
         canonical = `(${r[0]} mut ${r[2]}.state)`;
         projected = true;
       } else if (r.length >= 7 && r[5] === '.') {
-        if (r.length === 7 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[6])) {
+        if (r.length === 7 && validNominalOrField(r[6])) {
           fields = [r[6]];
         } else if (r[6] === '{' && r.at(-1) === '}') {
           const items = r.slice(7, -1);
           if (items.length > 0 && items.length <= 63 && items.length % 2 === 1 &&
-              items.every((value, j) => j % 2 ? value === ',' : /^[A-Za-z_][A-Za-z0-9_]*$/.test(value))) {
+              items.every((value, j) => j % 2 ? value === ',' : validNominalOrField(value))) {
             fields = items.filter((_, j) => j % 2 === 0);
           }
         }
