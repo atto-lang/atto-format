@@ -167,15 +167,40 @@ export function normalize_callable_headers(source) {
     if (hasComment(toks[i + 1].start, toks[close].end)) continue;
     const r = toks.slice(i + 2, close).map(x => x.s);
     let canonical = null;
-    if (r.length === 3 && r[0] === 'self' && r[1] === ':' && ident(i + 4))
+    let projected = false;
+    // State-field receiver permissions are type-first *declaration syntax*,
+    // never an array expression. Only normalize a verified, comment-free,
+    // duplicate-free projection; malformed inputs remain untouched for the
+    // real compiler to reject.
+    if (r.length >= 7 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) &&
+        r[1] === 'mut' && r[2] === 'self' && r[3] === '.' &&
+        r[4] === 'state' && r[5] === '.') {
+      let fields = [];
+      if (r.length === 7 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[6])) {
+        fields = [r[6]];
+      } else if (r[6] === '{' && r.at(-1) === '}') {
+        const items = r.slice(7, -1);
+        if (items.length > 0 && items.length <= 63 && items.length % 2 === 1 &&
+            items.every((value, j) => j % 2 ? value === ',' : /^[A-Za-z_][A-Za-z0-9_]*$/.test(value))) {
+          fields = items.filter((_, j) => j % 2 === 0);
+        }
+      }
+      if (fields.length && fields.length <= 32 &&
+          new Set(fields).size === fields.length) {
+        const projection = fields.length === 1 ? fields[0] : `{${fields.join(', ')}}`;
+        canonical = `(${r[0]} mut self.state.${projection})`;
+        projected = true;
+      }
+    }
+    if (!projected && r.length === 3 && r[0] === 'self' && r[1] === ':' && ident(i + 4))
       canonical = `(self: ${r[2]})`;
-    else if (r.length === 4 && r[0] === 'mut' && r[1] === 'self' && r[2] === ':')
+    else if (!projected && r.length === 4 && r[0] === 'mut' && r[1] === 'self' && r[2] === ':')
       canonical = `(mut self: ${r[3]})`;
-    else if (r.length === 2 && (r[1] === 'self' || r[1] === '_'))
+    else if (!projected && r.length === 2 && (r[1] === 'self' || r[1] === '_'))
       canonical = r[1] === 'self' ? `(self: ${r[0]})` : `(${r[0]})`;
-    else if (r.length === 1) canonical = `(${r[0]})`;
-    if (canonical && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r.at(-1)) &&
-        (r.length === 1 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) || r[0] === 'mut')) {
+    else if (!projected && r.length === 1) canonical = `(${r[0]})`;
+    if (canonical && (projected || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r.at(-1))) &&
+        (projected || r.length === 1 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) || r[0] === 'mut')) {
       add(toks[i + 1].start, toks[close].end, canonical);
     }
   }
