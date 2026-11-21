@@ -55,7 +55,11 @@ pub(super) fn canonicalize(source: &str) -> String {
             // expression (with whitespace) must not be silently reinterpreted
             // as the exceptional bang token.
             let following = &line[span.end..];
-            if following.trim_start().starts_with('!') {
+            if following.trim_start().starts_with('!')
+                || following.trim_start().starts_with("/*")
+            {
+                // Comments between a keyword and its operand can hide
+                // negation or other grammar; leave such source unchanged.
                 continue;
             }
 
@@ -104,4 +108,15 @@ panic new Error();
         assert!(result.contains("begin raise! new Error();"));
         assert!(result.contains("throw !error;"));
     }
+
+    #[test]
+    fn preserves_unicode_offsets_and_stays_linear_for_long_lines() {
+        let prefix = "\"🤖\"; throw new Error();";
+        assert_eq!(canonicalize(prefix), "\"🤖\"; throw! new Error();");
+        let source = "throw e; ".repeat(4096);
+        let result = canonicalize(&source);
+        assert_eq!(result.matches("throw! e;").count(), 4096);
+        assert_eq!(canonicalize(&result), result);
+    }
+
 }
