@@ -13,7 +13,13 @@ fn production_immutable_class_mtd_fixture_formats_and_is_idempotent() {
     // into a type-first receiver; preserve the method and body delimiter.
     assert!(formatted.contains("five()"), "{formatted}");
     assert!(formatted.contains("::"), "{formatted}");
-    assert!(formatted.lines().filter(|line| line.trim() == "end").count() >= 3);
+    assert!(
+        formatted
+            .lines()
+            .filter(|line| line.trim() == "end")
+            .count()
+            >= 3
+    );
     assert!(formatted.contains("return calculator.one()"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
@@ -39,6 +45,9 @@ fn malformed_receiver_or_signature_cannot_open_a_spurious_end_frame() {
         "pub mtd (Calculator) sum() => int",
     ] {
         let source = format!("define class Calculator as\nend\n{signature}\nend\n");
-        assert!(format_source(&source).is_err(), "{signature} should not own an end frame");
+        assert!(
+            format_source(&source).is_err(),
+            "{signature} should not own an end frame"
+        );
     }
 }
