@@ -93,3 +93,34 @@ test('return-first bullet at top level is preserved and lookalikes never canonic
     'define class C as fnc int < - calculate(int x) { return x; } end',
   ]) assert.equal(normalize_callable_headers(src), src);
 });
+
+
+test('return-first :: is preserved after safe inline-method normalization', () => {
+  for (const [src, expected] of [
+    [
+      'define class C as fnc int <- calculate(int x) ::\n return x * 2;\nend end',
+      'define class C as int <- calculate(int x) ::\n return x * 2;\nend end'
+    ],
+    [
+      'define class C as fnc int • calculate(int x) ::\n return x * 2;\nend end',
+      'define class C as int • calculate(int x) ::\n return x * 2;\nend end'
+    ],
+    [
+      'mtd (C self) int • calculate(int x) ::\n return x * 2;\nend',
+      'mtd (self: C) int • calculate(int x) ::\n return x * 2;\nend'
+    ]
+  ]) {
+    assert.equal(normalize_callable_headers(src), expected, src);
+    assert.equal(normalize_callable_headers(expected), expected, 'idempotent');
+  }
+});
+
+test('unverified effects and invalid same-line :: never get rewritten', () => {
+  for (const src of [
+    'define class C as fnc int <- twice(int x)\nraises Foo ::\n  return x * 2;\nend end',
+    'define class C as fnc int • twice(int x)\nraises Foo\nbegin\n  raise! new Foo();\nend end',
+    'define class C as fnc int <- twice(int x) :: return x * 2; end end',
+    'define class C as fnc int • twice(int x) :: { return x * 2; } end',
+    'fnc int <- twice(int x)\nraises Foo ::\n  return x * 2;\nend',
+  ]) assert.equal(normalize_callable_headers(src), src);
+});
