@@ -135,7 +135,7 @@ fn matching_select_end(tokens: &[Token<'_>], over: usize) -> Option<usize> {
 
 fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
     match tokens[index].text {
-        "when" | "case" => {
+        "when" | "case" | "on" => {
             if tokens.get(index + 1).is_some_and(|token| {
                 matches!(
                     token.text,
@@ -145,7 +145,7 @@ fn is_arm_start(tokens: &[Token<'_>], index: usize) -> bool {
                 return true;
             }
             // Generic Selectable arms are recognized only by the explicit
-            // typed-arrow shape, so an ordinary identifier named 'when'
+            // typed-arrow shape, so an ordinary identifier named 'when' or 'on'
             // inside a legacy unbraced body is not mistaken for a new arm.
             let mut nesting = Vec::new();
             let mut separator = false;
@@ -317,10 +317,10 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
         let mut arm = open + 1;
         let mut seen_default = false;
         while arm < close {
-            if !matches!(tokens[arm].text, "when" | "case" | "default") {
+            if !matches!(tokens[arm].text, "when" | "case" | "on" | "default") {
                 return Err(error(
                     tokens[arm].start,
-                    "expected when/case/default inside select",
+                    "expected when/on/case/default inside select",
                 ));
             }
             if seen_default {
@@ -338,7 +338,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
             if arm_keyword == "default" {
                 seen_default = true;
             }
-            if arm_keyword == "case" {
+            if matches!(arm_keyword, "case" | "on") {
                 edits.entry(tokens[arm].start).or_default().push_str("when");
                 for (offset, _) in source[tokens[arm].start..tokens[arm].end].char_indices() {
                     removed.insert(tokens[arm].start + offset);
@@ -432,7 +432,7 @@ pub(crate) fn normalize(source: &str) -> Result<String, FormatError> {
                     }
                     (body, tokens[body - 1].end)
                 } else {
-                    if matches!(arm_keyword, "when" | "case") && !known_operation {
+                    if matches!(arm_keyword, "when" | "case" | "on") && !known_operation {
                         return Err(error(
                             tokens[arm].start,
                             "select arm must be readch, writech, await, timeout, cancelled, or a typed Selectable arm using '->'",
