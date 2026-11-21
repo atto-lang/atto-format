@@ -113,12 +113,20 @@ export function normalize_callable_headers(source) {
       if (j < 0) return -1;
     }
     if (colonType && is(j, '->')) ++j;
+    // This is a bounded lexical normalizer, not a checked effects parser.
+    // Never drop an inline method prefix when type lists / effect bounds
+    // have not been parsed and proved equivalent by the real compiler.
+    if (['throws', 'raises', 'panics'].some(k => is(j, k))) return -1;
     if (is(j, '{')) return skipPaired(j, '{', '}');
-    // Explicit statement/end allows empty bodies. All source body-family
-    // spellings must be preserved verbatim by the lexical formatter.
+    // Preserve body-family choice. New return-first '::' requires the
+    // following statement on a later physical line; fail closed otherwise.
     if (is(j, 'begin')) ++j;
+    else if (is(j, '::')) {
+      if (returnFirst && (!toks[j + 1] ||
+          !source.slice(toks[j].end, toks[j + 1].start).includes('\n'))) return -1;
+      ++j;
+    }
     else if (!returnFirst && !arrowType) return -1;
-    else if (!returnFirst && is(j, '::')) ++j;
     let nestedEnd = 0;
     for (; j < toks.length; ++j) {
       if (is(j, '{')) { j = skipPaired(j, '{', '}'); if (j < 0) return -1; --j; continue; }
