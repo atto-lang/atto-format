@@ -48,6 +48,7 @@ impl std::error::Error for FormatError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
+    Try,
     Switch,
     Match,
     Select,
@@ -750,6 +751,15 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
         let starts_fi = starts_block_keyword(structural, "fi");
         let starts_done = starts_block_keyword(structural, "done");
+        // A keyword/end try owns its catch/finally arms; braced try forms
+        // are outside this stack and retain their original layout.
+        let try_arm = (starts_word(structural, "catch")
+            || starts_block_keyword(structural, "finally"))
+            && define_stack.last().is_some_and(|frame| {
+                frame.kind == DefineKind::Try
+                    && frame.brace_depth == brace_stack.len()
+                    && frame.keyword_depth == keyword_stack.len()
+            });
         let branch_line =
             starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
 
@@ -808,7 +818,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         let leading_closing_braces = leading_closing_braces(structural);
         let keyword_dedent = usize::from(
-            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented,
+            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm,
         );
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
@@ -1079,6 +1089,24 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 });
                 indent += 1;
             }
+        }
+
+        // "try" without an opening brace is an end-delimited block.
+        // Store it alongside callable/dispatch frames so nested constructs
+        // close at their own END and cannot steal the outer try terminator.
+        if structural.trim() == "try" {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Try,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
+        if try_arm {
+            indent += 1;
         }
 
         if end_delimited_callable {
