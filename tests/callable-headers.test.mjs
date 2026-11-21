@@ -67,6 +67,46 @@ const cases = [
     "mtd (Calculator mut self) set() -> int :: 5 end",
     "mtd (Calculator mut self) set() -> int :: 5 end"
   ],
+  [
+    "actor state projection canonical spacing",
+    "mtd ( Foo mut self . state . { counter , xyz } ) update(): void { return; }",
+    "mtd (Foo mut self.state.{counter, xyz}) update(): void { return; }"
+  ],
+  [
+    "actor state projection already canonical",
+    "mtd (Foo mut self.state.{counter, xyz}) update(): void { return; }",
+    "mtd (Foo mut self.state.{counter, xyz}) update(): void { return; }"
+  ],
+  [
+    "actor single state field and singleton group",
+    "mtd ( Foo mut self . state . { counter } ) increment(): void { return; }",
+    "mtd (Foo mut self.state.counter) increment(): void { return; }"
+  ],
+  [
+    "actor whole state authority retained",
+    "mtd (Foo mut self.state) reset(): void { return; }",
+    "mtd (Foo mut self.state) reset(): void { return; }"
+  ],
+  [
+    "duplicate projected field is not normalized",
+    "mtd (Foo mut self.state.{counter,counter}) invalid(): void { return; }",
+    "mtd (Foo mut self.state.{counter,counter}) invalid(): void { return; }"
+  ],
+  [
+    "square-bracket receiver is not accepted as projection",
+    "mtd (Foo mut [self.state.{counter,xyz}]) invalid(): void { return; }",
+    "mtd (Foo mut [self.state.{counter,xyz}]) invalid(): void { return; }"
+  ],
+  [
+    "comment in projection prevents destructive edits",
+    "mtd (Foo mut self.state.{counter, /*keep*/ xyz}) update(): void { return; }",
+    "mtd (Foo mut self.state.{counter, /*keep*/ xyz}) update(): void { return; }"
+  ],
+  [
+    "noncode projection text is preserved",
+    "// mtd (Foo mut self.state.{counter,xyz}) update(): void {}\\nval label = \"mtd (Foo mut self.state.{counter,xyz})\";",
+    "// mtd (Foo mut self.state.{counter,xyz}) update(): void {}\\nval label = \"mtd (Foo mut self.state.{counter,xyz})\";"
+  ],
   ["constructor adjacent groups","pub constructor (Counter)(int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
   ["constructor spaced groups","pub constructor (Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
   ["constructor compact keyword","pub constructor(Counter) (int initial): self { self.value = initial; }","pub constructor (Counter)(int initial): self { self.value = initial; }"],
