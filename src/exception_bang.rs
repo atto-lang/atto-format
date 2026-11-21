@@ -121,7 +121,15 @@ panic new Error();
 
     #[test]
     fn leave_ambiguous_call_syntax_and_commented_operands_unchanged() {
-        let source = "throw(new Error());\nraise /* why */ error;\npanic::value;\nfoo::throw new Error();\nvalue -> raise new Error();\ncase => panic new Error();\n";
+        let source = concat!(
+            "throw(new Error());\n",
+            "raise /* why */ error;\n",
+            "panic::value;\n",
+            "foo::throw new Error();\n",
+            "value -> raise new Error();\n",
+            "case => panic new Error();\n",
+            "object.then throw new Error();\n",
+        );
         assert_eq!(canonicalize(source), source);
     }
 
@@ -134,5 +142,4 @@ panic new Error();
         assert_eq!(result.matches("throw! e;").count(), 4096);
         assert_eq!(canonicalize(&result), result);
     }
-
 }
