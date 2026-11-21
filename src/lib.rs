@@ -2882,7 +2882,9 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
         .or_else(|| line.strip_prefix("private "))
         .unwrap_or(line)
         .trim_start();
-    let out_of_line_mtd = starts_word(without_visibility, "mtd");
+    // Inside a class, mtd is a normal single-parameter-list instance method.
+    // Only free-standing mtd declarations have the separate receiver group.
+    let out_of_line_mtd = !instance_member && starts_word(without_visibility, "mtd");
     let standalone = contains_word(line, "fnc") || contains_word(line, "routine") || out_of_line_mtd;
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
