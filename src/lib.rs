@@ -2073,6 +2073,14 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
         let word = &line[span.start..span.end];
         if matches!(word, "fnc" | "method") {
             if keyword.is_some() {
+                // A callable can literally be named method(), including
+                // "method method()" and "fnc method()". The second word is
+                // the name when immediately followed by '(' or '<', not a
+                // second declaration introducer.
+                let following = line[span.end..].trim_start();
+                if following.starts_with('(') || following.starts_with('<') {
+                    break;
+                }
                 return None;
             }
             keyword = Some(word);
