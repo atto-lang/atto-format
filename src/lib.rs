@@ -1068,19 +1068,23 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         // Protocol state blocks are end-delimited only inside a protocol. A
         // plain actor state field or a call named state must not open a frame.
+        let mut protocol_words = structural.split_whitespace();
+        let state_header = matches!(
+            (protocol_words.next(), protocol_words.next(),
+             protocol_words.next(), protocol_words.next()),
+            (Some("state"), Some(_name), Some("as"), None)
+        );
         let protocol_state = define_stack.last().is_some_and(|f|
-            f.kind == DefineKind::Protocol)
-            && structural.split_whitespace().collect::<Vec<_>>().as_slice()
-                .first() == Some(&"state")
-            && structural.split_whitespace().count() == 3
-            && structural.trim_end().ends_with(" as");
+            f.kind == DefineKind::Protocol) && state_header;
         if let Some(kind) = if protocol_state {
             Some(DefineKind::ProtocolState)
         } else { define_kind(structural) } {
             // Empty type-only bodies may keep their matching `as end` on
             // one line; they must not leave a phantom block frame behind.
-            let compact_empty_type = matches!(kind, DefineKind::Trait | DefineKind::Interface)
-                && structural.trim_end().ends_with(" as end");
+            let compact_empty_type = matches!(
+                kind,
+                DefineKind::Trait | DefineKind::Interface | DefineKind::Actor
+            ) && structural.trim_end().ends_with(" as end");
             if !structural.contains('{') && !ends_statement(structural) && !compact_empty_type {
                 next_order += 1;
                 define_stack.push(DefineFrame {
