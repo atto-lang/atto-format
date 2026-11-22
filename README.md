@@ -100,3 +100,7 @@ test execution is **not** a passed runner receipt. This does not establish JVM/L
 guest compiler parity or automatic formatting of unsupported grammar.
 Related source and language PRs: atto-source.rs#344, atto-spec#92,
 atto-borrow-checker.rs#43 and atto-platform-conformance#76.
+
+## Canonical spec consumer protocol
+
+See [spec-rule-consumer-v1](docs/spec-rule-consumer-v1.md) and the [pinned consumer contract](contracts/spec-rule-consumer-v1.json). Host-only lexical safety checks do **not** establish Atto parser/semantic AST/guest parity; track rule IDs and refresh the pinned atto-spec revision before claiming conformance.
