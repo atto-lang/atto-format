@@ -100,3 +100,35 @@ test execution is **not** a passed runner receipt. This does not establish JVM/L
 guest compiler parity or automatic formatting of unsupported grammar.
 Related source and language PRs: atto-source.rs#344, atto-spec#92,
 atto-borrow-checker.rs#43 and atto-platform-conformance#76.
+
+## Directional `>> =` binding canonicalization (candidate)
+
+`src/directional-binding-equals.mjs` exports
+`normalize_directional_binding_equals(source)`, a conservative lexical
+normalizer for optional, whitespace-separated `=` after an authorized
+directional `>>` binding:
+
+```atto
+nb stdio.in >> = Future<Result<Option<string>, IoError>> x
+    |> |f| -> (await f)?
+    >> = val Option<string> line;
+```
+
+The canonical target removes both redundant markers while preserving
+`Result`, `Option`, ownership, suspension and evaluation order.
+Contiguous `>>=`, arithmetic operations, comments, string literals,
+nested-generic `>>` closers, and nonbinding assignment are not rewritten.
+Backtick templates are rejected until a full interpolation-aware lexer exists
+rather than risking an edit inside embedded source-like text.
+This lexical pass is not a compiler or a static capability proof.
+
+`src/verified-directional-binding-equals.mjs` exports
+`normalize_verified_directional_binding_equals(source, compileGuest)`.
+It returns a usable result **only if a real compiler returns identical
+structurally valid guest Wasm bytes for the original and canonical sources**,
+using `WebAssembly.validate` instead of trusting the magic header alone. Syntax-only
+stdin/Future continuations are not yet guest-executable and therefore must
+fail this admission gate until the ABI is implemented. The included
+Node-only golden tests do not replace this compiler gate.
+
+Language contract: atto-spec PR #32; staged compiler: atto-source.rs PR #206.
