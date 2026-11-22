@@ -100,3 +100,14 @@ test execution is **not** a passed runner receipt. This does not establish JVM/L
 guest compiler parity or automatic formatting of unsupported grammar.
 Related source and language PRs: atto-source.rs#344, atto-spec#92,
 atto-borrow-checker.rs#43 and atto-platform-conformance#76.
+
+
+## Spawn-effect callable headers (target-only)
+
+The bounded callable normalizer now recognizes the **proposed** `spawns`
+callable effect from [atto-spec #123](https://github.com/atto-lang/atto-spec/pull/123)
+and canonicalizes `suspends spawns` / `spawns suspends` to
+`susp spawns` when the header is lexically unambiguous. It does not
+remove duplicate effects or grant actor-spawn capabilities. The real-compiler
+verified rewrite remains fail-closed until a backend actually supports and
+equivalently compiles both spellings. See `tests/spawns-effect.test.mjs`.

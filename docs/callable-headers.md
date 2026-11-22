@@ -52,3 +52,23 @@ two executable class receiver fixtures (including legacy inline method
 prefixes), idempotence and the atomic CLI's fail-closed operation.
 Real compiler comparisons must execute against an exact-source SHA; Node
 mock test success alone does not count as semantic equivalence.
+
+
+## Actor creation effect modifier order (target v1)
+
+Following [atto-spec #123](https://github.com/atto-lang/atto-spec/pull/123),
+`spawns` is a callable effect independently combined with `susp`.
+The bounded lexical pass canonicalizes `spawns susp fnc`,
+`spawns suspends fnc` and equivalent `receive`/lambda/callable-type
+headers to `susp spawns ...`; it also canonicalizes
+`suspends spawns` to `susp spawns`. Non-suspending `spawns` is preserved.
+
+Duplicate `spawns`, contradictory `pure spawns`, comments separating
+reorderable modifiers, strings, and identifier prefixes are not hidden or
+silently repaired. The **compiler** must reject invalid effects and enforce
+spawn capability and TenantVM isolation; this lexical pass does neither.
+The real-compiler byte-identical guest verification still gates writes,
+so until all backends admit these new signatures this is **host-only formatting
+target behavior**, not certified compiler or runtime support.
+
+Run `node --test tests/spawns-effect.test.mjs`.

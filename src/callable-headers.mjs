@@ -199,13 +199,31 @@ export function normalize_callable_headers(source) {
     add(toks[i].end, toks[i + 1].start, ' ');
     add(toks[i + 3].end, toks[i + 4].start, '');
   }
-  // Canonical spelling of the callable effect: suspends -> susp.
-  // Only rewrite in known modifier positions. The tokenizer has already
-  // skipped strings and comments; all other identifiers remain untouched.
+  // Canonical callable effects: `suspends` -> `susp` and `spawns susp`
+  // -> `susp spawns`. Keep both effect dimensions; never erase a duplicate
+  // `spawns`, infer missing effects, or swap through comments. The lexical
+  // pass is not a compiler effect checker. Actual writes require the verified
+  // compiler adapter to prove identical executable guest bytes.
+  const startsCallable = j =>
+    ['fnc', 'routine', 'mtd', 'method', 'receive', '|'].some(w => is(j, w)) ||
+    (ident(j) && is(j + 1, '(')); // keyword-free instance methods
   for (let i = 0; i < toks.length; ++i) {
-    if (!is(i, 'suspends')) continue;
-    if (['fnc', 'routine', 'mtd', 'method', '|'].some(next => is(i + 1, next)))
+    if (is(i, 'spawns') && (is(i + 1, 'susp') || is(i + 1, 'suspends')) &&
+        startsCallable(i + 2)) {
+      if (!hasComment(toks[i].end, toks[i + 1].start)) {
+        // Token-only edits retain existing whitespace while swapping order.
+        add(toks[i].start, toks[i].end, 'susp');
+        add(toks[i + 1].start, toks[i + 1].end, 'spawns');
+      }
+      continue;
+    }
+    if (is(i, 'suspends') &&
+        (startsCallable(i + 1) || (is(i + 1, 'spawns') && startsCallable(i + 2)))) {
+      // If `spawns suspends` contains a comment between modifiers, leave
+      // both unchanged rather than applying half of a reorder.
+      if (is(i - 1, 'spawns') && startsCallable(i + 1)) continue;
       add(toks[i].start, toks[i].end, 'susp');
+    }
   }
   edits.sort((a, b) => b.start - a.start);
   let result = source;
