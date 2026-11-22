@@ -54,6 +54,8 @@ enum DefineKind {
     Module,
     Class,
     Actor,
+    Protocol,
+    ProtocolState,
     Interface,
     Contract,
     Trait,
@@ -1064,7 +1066,17 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             indent = indent.saturating_sub(nonleading_closes - opens);
         }
 
-        if let Some(kind) = define_kind(structural) {
+        // Protocol state blocks are end-delimited only inside a protocol. A
+        // plain actor state field or a call named state must not open a frame.
+        let protocol_state = define_stack.last().is_some_and(|f|
+            f.kind == DefineKind::Protocol)
+            && structural.split_whitespace().collect::<Vec<_>>().as_slice()
+                .first() == Some(&"state")
+            && structural.split_whitespace().count() == 3
+            && structural.trim_end().ends_with(" as");
+        if let Some(kind) = if protocol_state {
+            Some(DefineKind::ProtocolState)
+        } else { define_kind(structural) } {
             // Empty type-only bodies may keep their matching `as end` on
             // one line; they must not leave a phantom block frame behind.
             let compact_empty_type = matches!(kind, DefineKind::Trait | DefineKind::Interface)
@@ -2749,6 +2761,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
             "actor" | "isoactor" => return Some(DefineKind::Actor),
+            "protocol" => return Some(DefineKind::Protocol),
             "interface" => return Some(DefineKind::Interface),
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
