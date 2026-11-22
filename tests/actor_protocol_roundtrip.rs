@@ -65,3 +65,30 @@ end
     assert!(formatted.contains("state {"));
     assert!(!formatted.contains("state { as"));
 }
+
+#[test]
+fn inline_actor_implementer_does_not_create_a_phantom_protocol_frame() {
+    let src = format!(
+        "{}\ndefine actor Connection implements ConnectionProtocol as end\n",
+        SOURCE,
+    );
+    let formatted = format_source(&src).expect("protocol + inline actor");
+    assert!(formatted.contains("define actor Connection implements ConnectionProtocol as end"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn plain_actor_with_inline_end_is_not_a_protocol_container() {
+    let src = r#"define actor Connection as end
+define protocol StateProtocol as
+  initial Ready
+  state Ready as
+    on Stop -> Closed replies StopAck
+  end
+  terminal state Closed
+end
+"#;
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("define actor Connection as end"));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
