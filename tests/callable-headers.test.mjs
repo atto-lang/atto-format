@@ -3,6 +3,31 @@ import assert from 'node:assert/strict';
 import {normalize_callable_headers} from '../src/callable-headers.mjs';
 const cases = [
   [
+    "multi-argument pipe application and grouped reverse arrow-body methods",
+    "define class Arithmetic as\n  fnc subtract(int value, int adjustment): int -> value - adjustment;\n  method apply(int x): int -> subtract(2) <| (x |> double);\n  fnc tail(int x): int -> x |> subtract(2);\nend",
+    "define class Arithmetic as\n  subtract(int value, int adjustment): int -> value - adjustment;\n  apply(int x): int -> subtract(2) <| (x |> double);\n  tail(int x): int -> x |> subtract(2);\nend"
+  ],
+  [
+    "top-level multiarg application never accidentally reformatted",
+    "fnc subtract(int value, int adjustment): int -> value - adjustment;\npub fnc main(): int { val a = 42 |> subtract(2); val b = subtract(1) <| 22; return a+b; }",
+    "fnc subtract(int value, int adjustment): int -> value - adjustment;\npub fnc main(): int { val a = 42 |> subtract(2); val b = subtract(1) <| 22; return a+b; }"
+  ],
+  [
+    "inline-arrow method keeps functional pipelines and next method visible",
+    "define class Pipeline as\n  fnc double(int x): int -> x * 2;\n  method apply(int x): int -> double <| (x |> increment);\n  static fnc keep(int x): int -> x;\n  fnc after(): int { return 5; }\nend",
+    "define class Pipeline as\n  double(int x): int -> x * 2;\n  apply(int x): int -> double <| (x |> increment);\n  static fnc keep(int x): int -> x;\n  after(): int { return 5; }\nend",
+  ],
+  [
+    "inline-arrow top-level function unchanged",
+    "pub fnc double(int x): int -> x * 2;\npub fnc main(): int -> double <| 21;",
+    "pub fnc double(int x): int -> x * 2;\npub fnc main(): int -> double <| 21;",
+  ],
+  [
+    "incomplete inline-arrow method fails unchanged",
+    "define class C as fnc broken(int x): int -> x + 1\n fnc after(): int { return 5; } end",
+    "define class C as fnc broken(int x): int -> x + 1\n fnc after(): int { return 5; } end",
+  ],
+  [
     "named legacy",
     "mtd (Calculator self) square(int x) -> int :: x*x end",
     "mtd (self: Calculator) square(int x) -> int :: x*x end"
