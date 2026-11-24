@@ -1,0 +1,9 @@
+// expect-exit: 3
+define class C as
+  pub fnc one() -> int :: 1 end
+  pub method two(): int { return 2; }
+end
+pub fnc main(): int {
+  val c = new C();
+  return c.one() + c.two();
+}

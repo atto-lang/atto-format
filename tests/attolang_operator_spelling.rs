@@ -10,7 +10,7 @@ fn keeps_attolang_equality_operator_spelling_and_is_idempotent() {
         ("!eq", "7 !eq 8"),
     ];
     for (name, expr) in cases {
-        let input = format!("fnc check() -> bool as\n  return {expr};\nend\n");
+        let input = format!("fnc check() -> bool ::\n  return {expr};\nend\n");
         let once = format_source(&input).expect(name);
         assert!(once.contains(&format!("return {expr};")), "{name}: {once}");
         let twice = format_source(&once).expect(name);
@@ -20,7 +20,7 @@ fn keeps_attolang_equality_operator_spelling_and_is_idempotent() {
 
 #[test]
 fn does_not_conflate_equality_with_binding_or_touch_literals_and_comments() {
-    let input = r#"fnc check() -> bool as
+    let input = r#"fnc check() -> bool ::
   val x = 7;
   // x eq 7; x neq 8; x !eq 8; x == 7; x != 7
   val name = "eq neq !eq == !=";
@@ -37,7 +37,7 @@ end
 #[test]
 fn does_not_rewrite_unsupported_operators_into_valid_attolang_operators() {
     for expr in ["7 == 7", "7 != 8", "7 =:= 7", "7 ! eq 8", "7 !eqvalue 8", "7 neqvalue 8"] {
-        let input = format!("fnc check() -> bool as\n  return {expr};\nend\n");
+        let input = format!("fnc check() -> bool ::\n  return {expr};\nend\n");
         match format_source(&input) {
             Ok(output) => {
                 // Rejecting invalid syntax is also safe, but if this formatter
@@ -55,7 +55,7 @@ fn does_not_rewrite_unsupported_operators_into_valid_attolang_operators() {
 
 #[test]
 fn operator_keywords_are_not_substrings_of_longer_identifiers() {
-    let src = r#"fnc check() -> bool as
+    let src = r#"fnc check() -> bool ::
   val eq_value = 7;
   val unequal_value = 8;
   // !eq is a prospective atomic binary token, not unary ! followed by eq
@@ -71,7 +71,7 @@ end
 
 #[test]
 fn no_operator_rewrites_inside_multiline_comments_and_strings() {
-    let src = r#"fnc check() -> bool as
+    let src = r#"fnc check() -> bool ::
   /*
   7 == 7; 7 != 8; 7 eq 7; 7 neq 8; 7 !eq 8;
   */

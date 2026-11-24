@@ -1,0 +1,16 @@
+// Field binding keywords are semantic; only bare/final initializers use `:`.
+define class Account as
+    pub val int id = 7;
+    pub let int balance = 100;
+    const int limit = 9;
+    int bonus = 3;
+    final int version = 2;
+    final mut Array<int> history = new Array<int>();
+    pub read(): int {
+        return self.balance + self.bonus;
+    }
+end
+pub fnc main(): int {
+  let mut Account a = new Account();
+  return a.read() - 61;
+}

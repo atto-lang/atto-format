@@ -1,0 +1,9 @@
+pub fnc main(): int {
+  let int total = 0;
+  for let i=0;i<4;i++ do if i eq 2 then total = total + 10;fi
+  total = total + i;
+  done
+  let int n = 3;
+  while n > 0 do n = n - 1; done
+  return total;
+}

@@ -1,0 +1,17 @@
+define contract MathApi as
+  fnc add(int a, int b) => int;
+  fnc neg(int a): int;
+end
+define actor Counter as
+  let int total = 0;
+  pub fnc on_message(int n) -> int {
+    self.total = self.total + n;
+    return self.total;
+  }
+end
+pub fnc add(int a, int b): int {
+  return a + b;
+}
+pub fnc main(): int {
+  return add(20, 22);
+}
