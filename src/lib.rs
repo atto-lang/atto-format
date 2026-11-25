@@ -3087,6 +3087,21 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         return false;
     }
     let lower = structural.trim_start();
+    // The first parenthesis of a named typed binding belongs to its type,
+    // not the initializer callable. Preserve type-level arrows. Require
+    // whitespace after a binding qualifier so a method named final() still
+    // receives ordinary executable arrow normalization.
+    let binding_head = lower
+        .strip_prefix("pub ")
+        .or_else(|| lower.strip_prefix("private "))
+        .unwrap_or(lower);
+    if ["const", "let", "val", "final"].iter().any(|keyword| {
+        binding_head
+            .strip_prefix(keyword)
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    }) {
+        return false;
+    }
     for kw in [
         "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
         "default",
