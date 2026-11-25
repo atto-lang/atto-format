@@ -2,7 +2,11 @@
  * Not a full formatter; it refuses to transform unrecognized declaration grammar.
  * Accepted spelling contract: atto-spec language/callable-body-styles-v1.md.
  */
+import { assert_namespace_header_order } from './namespace-header-guard.mjs';
+import { normalize_task_aliases } from './task-aliases.mjs';
+
 export function normalize_callable_headers(source) {
+  assert_namespace_header_order(source);
   const toks = [];
   const word = c => /[A-Za-z_]/.test(c || '');
   const tail = c => /[A-Za-z0-9_]/.test(c || '');
@@ -85,9 +89,10 @@ export function normalize_callable_headers(source) {
   function scanMethod(name) {
     if (!ident(name)) return -1;
     let j = name + 1;
-    // Return-first inline method: int <- name(...), with optional fnc.
+    // Return-first inline method: int <- name(...) OR int • name(...), with optional fnc.
+    // U+2022 BULLET is a token distinct from similar middle-dot characters.
     // This is a declaration delimiter, not a left-directed stream operator.
-    const returnFirst = is(j, '<-');
+    const returnFirst = is(j, '<-') || is(j, '•');
     if (returnFirst) {
       if (!ident(j + 1)) return -1;
       j += 2;
@@ -112,12 +117,20 @@ export function normalize_callable_headers(source) {
       if (j < 0) return -1;
     }
     if (colonType && is(j, '->')) ++j;
+    // This is a bounded lexical normalizer, not a checked effects parser.
+    // Never drop an inline method prefix when type lists / effect bounds
+    // have not been parsed and proved equivalent by the real compiler.
+    if (['throws', 'raises', 'panics'].some(k => is(j, k))) return -1;
     if (is(j, '{')) return skipPaired(j, '{', '}');
-    // Explicit statement/end allows empty bodies. All source body-family
-    // spellings must be preserved verbatim by the lexical formatter.
+    // Preserve body-family choice. New return-first '::' requires the
+    // following statement on a later physical line; fail closed otherwise.
     if (is(j, 'begin')) ++j;
+    else if (is(j, '::')) {
+      if (returnFirst && (!toks[j + 1] ||
+          !source.slice(toks[j].end, toks[j + 1].start).includes('\n'))) return -1;
+      ++j;
+    }
     else if (!returnFirst && !arrowType) return -1;
-    else if (!returnFirst && is(j, '::')) ++j;
     let nestedEnd = 0;
     for (; j < toks.length; ++j) {
       if (is(j, '{')) { j = skipPaired(j, '{', '}'); if (j < 0) return -1; --j; continue; }
@@ -146,7 +159,7 @@ export function normalize_callable_headers(source) {
         if (finish < 0) break;
         j = finish; continue;
       }
-      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<') || is(j + 1, '<-'))) {
+      if (ident(j) && (is(j + 1, '(') || is(j + 1, '<') || is(j + 1, '<-') || is(j + 1, '•'))) {
         const finish = scanMethod(j);
         if (finish < 0) break;
         j = finish; continue;
@@ -160,7 +173,7 @@ export function normalize_callable_headers(source) {
     if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
     if (close <= i + 1 || !ident(close + 1) ||
-        !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
+        !(is(close + 2, '(') || is(close + 2, '<-') || is(close + 2, '•'))) continue;
     // Never normalize out-of-line receiver names when their named callable
     // lacks an explicit return result (including void or infer).
     if (scanMethod(close + 1) < 0) continue;
@@ -210,5 +223,5 @@ export function normalize_callable_headers(source) {
   edits.sort((a, b) => b.start - a.start);
   let result = source;
   for (const { start, end, replacement } of edits) result = result.slice(0, start) + replacement + result.slice(end);
-  return result;
+  return normalize_task_aliases(result);
 }

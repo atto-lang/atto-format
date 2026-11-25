@@ -1,0 +1,27 @@
+{
+  "schema": "oreslang-format-fixtures-v1",
+  "accepted": [
+    {
+      "name": "constant-main.ores",
+      "sha256": "31aa6315558e082ff5563f37baaf0797cfa7d6b9595feaab974072706569cd26"
+    },
+    {
+      "name": "forward-call-main.ores",
+      "sha256": "01410c8ab47e8a08eff63032a410bc13a92da218d06ef621483842f561521566"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "invalid_callable_as.ores",
+      "sha256": "cf003ad450b6bcac325b7a69661f92e32b58821a7ecf671cf7e21f293a9a97e6"
+    },
+    {
+      "name": "invalid_if_assignment.ores",
+      "sha256": "d2e07f1b29faba18a7f56d5206b44bd2dd6bf98b3c5a40f240ea1d8da3fb3853"
+    },
+    {
+      "name": "unclosed_callable.ores",
+      "sha256": "02231ea4a4fc3ff47ff4d63b08a8fe2faff4decb7030b3325a342e9d53e30a1f"
+    }
+  ]
+}

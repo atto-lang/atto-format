@@ -55,3 +55,72 @@ test('split arrows, missing returns, and comments are not silently fixed', () =>
     'define class C as fnc /* preserve */ int <- method() begin end end',
   ]) assert.equal(normalize_callable_headers(src), src);
 });
+
+
+test('exact U+2022 bullet is an equivalent preserved return-first method separator', () => {
+  for (const [src, expected] of [
+    [
+      'define class C as fnc int • calculate(int x) { return x * 2; } end',
+      'define class C as int • calculate(int x) { return x * 2; } end',
+    ],
+    [
+      'define actor A as fnc void • reset() begin end end',
+      'define actor A as void • reset() begin end end',
+    ],
+    [
+      'define class C as method infer • guess() begin return 42; end end',
+      'define class C as infer • guess() begin return 42; end end',
+    ],
+  ]) {
+    assert.equal(normalize_callable_headers(src), expected, src);
+    assert.equal(normalize_callable_headers(expected), expected, 'idempotence');
+  }
+});
+
+test('bullet out-of-line receiver formatting preserves exact separator', () => {
+  const src = 'mtd (C self) int • calculate(int x) begin return x * 2; end';
+  const canonical = 'mtd (self: C) int • calculate(int x) begin return x * 2; end';
+  assert.equal(normalize_callable_headers(src), canonical);
+  assert.equal(normalize_callable_headers(canonical), canonical);
+});
+
+test('return-first bullet at top level is preserved and lookalikes never canonicalized', () => {
+  for (const src of [
+    'fnc int • calculate(int x) begin return x * 2; end',
+    'int • calculate(int x) return x * 2; end',
+    'define class C as fnc int · calculate(int x) { return x; } end',
+    'define class C as fnc int ∙ calculate(int x) { return x; } end',
+    'define class C as fnc int < - calculate(int x) { return x; } end',
+  ]) assert.equal(normalize_callable_headers(src), src);
+});
+
+
+test('return-first :: is preserved after safe inline-method normalization', () => {
+  for (const [src, expected] of [
+    [
+      'define class C as fnc int <- calculate(int x) ::\n return x * 2;\nend end',
+      'define class C as int <- calculate(int x) ::\n return x * 2;\nend end'
+    ],
+    [
+      'define class C as fnc int • calculate(int x) ::\n return x * 2;\nend end',
+      'define class C as int • calculate(int x) ::\n return x * 2;\nend end'
+    ],
+    [
+      'mtd (C self) int • calculate(int x) ::\n return x * 2;\nend',
+      'mtd (self: C) int • calculate(int x) ::\n return x * 2;\nend'
+    ]
+  ]) {
+    assert.equal(normalize_callable_headers(src), expected, src);
+    assert.equal(normalize_callable_headers(expected), expected, 'idempotent');
+  }
+});
+
+test('unverified effects and invalid same-line :: never get rewritten', () => {
+  for (const src of [
+    'define class C as fnc int <- twice(int x)\nraises Foo ::\n  return x * 2;\nend end',
+    'define class C as fnc int • twice(int x)\nraises Foo\nbegin\n  raise! new Foo();\nend end',
+    'define class C as fnc int <- twice(int x) :: return x * 2; end end',
+    'define class C as fnc int • twice(int x) :: { return x * 2; } end',
+    'fnc int <- twice(int x)\nraises Foo ::\n  return x * 2;\nend',
+  ]) assert.equal(normalize_callable_headers(src), src);
+});
