@@ -2864,16 +2864,36 @@ fn canonicalize_initialize_header(
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
+    // A static fnc *inside a class* is still a legitimate :: callable.
+    // Do not relax the ban for top-level static declarations, nor treat an
+    // arbitrary static member as a callable frame without an exact marker.
+    let static_class_function = instance_member
+        && contains_word(line, "static")
+        && contains_word(line, "fnc")
+        && line.ends_with("::");
     if line.ends_with(';')
         || contains_word(line, "actor")
         || contains_word(line, "isoactor")
-        || contains_word(line, "static")
+        || (contains_word(line, "static") && !static_class_function)
         || contains_word(line, "abstract")
         || starts_word(line, "constructor")
     {
         return false;
     }
-    let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
+    // An out-of-line 'mtd (receiver) method(args) -> Type' has two
+    // parenthesized groups. The first is the receiver, not the callable
+    // parameters. Only accept a visible mtd introducer, never a stray 'mtd'
+    // appearing inside a parameter, return type, string, or ordinary call.
+    let without_visibility = line
+        .strip_prefix("pub ")
+        .or_else(|| line.strip_prefix("private "))
+        .unwrap_or(line)
+        .trim_start();
+    // Inside a class, mtd is a normal single-parameter-list instance method.
+    // Only free-standing mtd declarations have the separate receiver group.
+    let out_of_line_mtd = !instance_member && starts_word(without_visibility, "mtd");
+    let standalone =
+        contains_word(line, "fnc") || contains_word(line, "routine") || out_of_line_mtd;
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
     if !line.contains('(')
@@ -2882,8 +2902,32 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     {
         return false;
     }
-    let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
-        return false;
+    let close = if out_of_line_mtd {
+        let Some(receiver_close) = callable_parameter_close(line, line.len(), LexState::default())
+        else {
+            return false;
+        };
+        let after_receiver = &line[receiver_close + 1..];
+        let Some((method_open, method_close)) =
+            callable_parameter_bounds(after_receiver, after_receiver.len(), LexState::default())
+        else {
+            return false;
+        };
+        let method_name = after_receiver[..method_open].trim();
+        if !method_name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            || !method_name.chars().all(is_ident_char)
+        {
+            return false;
+        }
+        receiver_close + 1 + method_close
+    } else {
+        let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+            return false;
+        };
+        close
     };
     let header_tail = line[close + 1..].trim();
     if !header_tail.starts_with("->") {

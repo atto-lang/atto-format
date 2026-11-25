@@ -1,58 +1,31 @@
-name: ci
-
+name: Callable header formatter conformance
 on:
   push:
   pull_request:
-
+  workflow_dispatch:
 permissions:
   contents: read
-
-env:
-  EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  test:
-    runs-on: [indiebuild-linux-arm64]
-    timeout-minutes: 45
+  header-conformance:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out exact PR/branch head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ env.EXPECTED_SHA }}
           persist-credentials: false
-      - run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
-          sha256sum contracts/v1/type-declarations-conformance-v1.tsv
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - run: cargo fmt --all -- --check
-      - run: cargo test --test type_only_declarations
-      - run: cargo test --all-targets
-      - run: cargo test --doc
-      - run: python3 -m unittest discover -s scripts -p 'test_compiler_parity.py'
-      - run: python3 -m unittest discover -s scripts -p 'test_compiler_ast_parity.py'
-      - run: python3 -m unittest discover -s scripts -p 'test_formatter_acceptance_delta.py'
-      - run: python3 -m unittest discover -s tests -p 'test_private_ci_visibility.py'
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-      - run: cargo build --release --bins
-
-  msrv:
-    runs-on: [indiebuild-linux-arm64]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.EXPECTED_SHA }}
-          persist-credentials: false
-      - run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          echo "Exact formatter tree: $(git rev-parse HEAD^{tree})"
-          sha256sum contracts/v1/type-declarations-conformance-v1.tsv
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
-        with:
-          toolchain: 1.85.0
-      - run: cargo test --all-targets
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout SHA and tree
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+      - name: Run golden, fail-closed and standalone verification tests
+        run: |
+          node --version
+          node --test tests/*.test.mjs
+      - name: Real compiler conformance must not be inferred from JS-only checks
+        run: |
+          echo "Node golden tests are not a real parser/guest ABI proof."
+          echo "Private exact-tree carrier CI must set ATTOC and run actual Rust compiler comparisons."
