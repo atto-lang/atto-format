@@ -111,7 +111,9 @@ pub(crate) fn normalize(source: &str) -> String {
                     let has_if = words.iter().any(|word| {
                         matches!(&prefix[word.start..word.end], "if" | "elif" | "elseif")
                     });
-                    if !(header_suffix && has_if) {
+                    let guard_separator = crate::starts_word(after, "else")
+                        && crate::keyword_blocks::is_guard_else_separator(line, at, initial);
+                    if !(header_suffix && has_if || guard_separator) {
                         cuts.push(at + 1);
                     }
                 }

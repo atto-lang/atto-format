@@ -7,6 +7,7 @@ use crate::{LexState, is_ident_char};
 enum Phase {
     Header,
     Body,
+    Braced,
 }
 
 #[derive(Clone, Copy)]
@@ -125,66 +126,45 @@ fn is_keyword_delimiter(tokens: &[Token<'_>], index: usize) -> bool {
         && !next.is_some_and(|token| matches!(token.text, "(" | "[" | "."))
 }
 
-fn has_top_level_keyword_header(tokens: &[Token<'_>], start: usize) -> bool {
-    let (mut parens, mut brackets) = (0usize, 0usize);
-
-    for (offset, token) in tokens[start..].iter().enumerate() {
-        match token.text {
-            "(" => parens += 1,
-            ")" => {
-                if parens == 0 {
-                    return false;
-                }
-                parens -= 1;
-            }
-            "[" => brackets += 1,
-            "]" => {
-                if brackets == 0 {
-                    return false;
-                }
-                brackets -= 1;
-            }
-            "{" if parens == 0 && brackets == 0 => return false,
-            "then" | "do" if parens == 0 && brackets == 0 => {
-                let absolute = start + offset;
-                if is_keyword_delimiter(tokens, absolute) {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    false
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HeaderTerminator {
-    Keyword,
-    Brace,
-}
-
 fn first_top_level_header_terminator(
     tokens: &[Token<'_>],
     start: usize,
 ) -> Option<HeaderTerminator> {
     let (mut parens, mut brackets) = (0usize, 0usize);
 
-    for token in tokens.iter().skip(start) {
+    for (index, token) in tokens.iter().enumerate().skip(start) {
         match token.text {
             "(" => parens += 1,
-            ")" => parens = parens.saturating_sub(1),
+            ")" => {
+                if parens == 0 {
+                    return None;
+                }
+                parens -= 1;
+            }
             "[" => brackets += 1,
-            "]" => brackets = brackets.saturating_sub(1),
+            "]" => {
+                if brackets == 0 {
+                    return None;
+                }
+                brackets -= 1;
+            }
             "{" if parens == 0 && brackets == 0 => return Some(HeaderTerminator::Brace),
             "then" | "do" if parens == 0 && brackets == 0 => {
-                return Some(HeaderTerminator::Keyword);
+                if is_keyword_delimiter(tokens, index) {
+                    return Some(HeaderTerminator::Keyword);
+                }
             }
             _ => {}
         }
     }
 
     None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeaderTerminator {
+    Keyword,
+    Brace,
 }
 
 fn collapse_multiline_keyword_headers(source: &str) -> String {
@@ -281,6 +261,199 @@ fn inline_return_before(tokens: &[Token<'_>], index: usize) -> bool {
         && statement.len() >= 2
 }
 
+fn guard_delimiter(tokens: &[Token<'_>], start: usize) -> Option<(usize, HeaderTerminator)> {
+    let (mut parens, mut brackets) = (0usize, 0usize);
+    let call_like = tokens
+        .get(start + 1)
+        .is_some_and(|next| next.text == "(" && next.start == tokens[start].end);
+    for (index, token) in tokens.iter().enumerate().skip(start + 1) {
+        match token.text {
+            "(" => parens += 1,
+            ")" if parens == 0 => break,
+            ")" => parens -= 1,
+            "[" => brackets += 1,
+            "]" if brackets == 0 => break,
+            "]" => brackets -= 1,
+            "{" if parens == 0 && brackets == 0 && index > start + 1 => {
+                return Some((index, HeaderTerminator::Brace));
+            }
+            "else"
+                if parens == 0
+                    && brackets == 0
+                    && index > start + 1
+                    && is_keyword_delimiter(tokens, index) =>
+            {
+                return if tokens.get(index + 1).is_some_and(|next| next.text == "{") {
+                    Some((index + 1, HeaderTerminator::Brace))
+                } else {
+                    Some((index, HeaderTerminator::Keyword))
+                };
+            }
+            "}" if parens == 0 && brackets == 0 => break,
+            "then" | "fi" | "end"
+                if parens == 0
+                    && brackets == 0
+                    && index > start + 1
+                    && is_keyword_delimiter(tokens, index) =>
+            {
+                break;
+            }
+            ";" if parens == 0
+                && brackets == 0
+                && (call_like
+                    || !tokens
+                        .get(index + 1)
+                        .is_some_and(|next| next.text == "else")) =>
+            {
+                break;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(crate) fn guard_body_kind(line: &str, mut state: LexState) -> Option<HeaderTerminator> {
+    let tokens = lex_line(line, &mut state).tokens;
+    if tokens.first()?.text != "guard" {
+        return None;
+    }
+    let (delimiter, kind) = guard_delimiter(&tokens, 0)?;
+    (delimiter + 1 == tokens.len()).then_some(kind)
+}
+
+pub(crate) fn is_guard_else_separator(line: &str, at: usize, mut state: LexState) -> bool {
+    let tokens = lex_line(line, &mut state).tokens;
+    let Some(separator) = tokens.iter().position(|token| token.start == at) else {
+        return false;
+    };
+    (0..separator).rev().any(|start| {
+        tokens[start].text == "guard"
+            && statement_boundary(&tokens, start)
+            && guard_delimiter(&tokens, start).is_some_and(|(delimiter, kind)| {
+                let before_body = delimiter - usize::from(kind == HeaderTerminator::Brace);
+                before_body == separator + 1
+            })
+    })
+}
+
+fn split_guard_blocks(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut lex = LexState::default();
+    let mut depth = (0usize, 0usize, 0usize);
+    let mut guards = Vec::new();
+
+    for (line_index, line) in source.split('\n').enumerate() {
+        if line_index != 0 {
+            output.push('\n');
+        }
+        let tokens = lex_line(line, &mut lex).tokens;
+        let mut cuts = Vec::new();
+        let mut header = None;
+        let mut after_guard = None;
+        for (index, token) in tokens.iter().enumerate() {
+            let next = tokens.get(index + 1).map(|token| token.text);
+            let starts_after_closer = cuts.last() == Some(&token.start)
+                || tokens
+                    .get(index.wrapping_sub(1))
+                    .is_some_and(|previous| cuts.last() == Some(&previous.end));
+            let recent_guard = guards.last().copied();
+            if let Some((delimiter, kind)) = header {
+                if index == delimiter {
+                    let mut body_depth = depth;
+                    body_depth.2 += usize::from(kind == HeaderTerminator::Brace);
+                    guards.push((body_depth, kind));
+                    if next.is_some() {
+                        cuts.push(token.end);
+                    }
+                    header = None;
+                }
+            } else if token.text == "guard"
+                && (statement_boundary(&tokens, index)
+                    || starts_after_closer
+                    || tokens
+                        .get(index.wrapping_sub(1))
+                        .is_some_and(|previous| previous.text == "do"))
+            {
+                header = guard_delimiter(&tokens, index);
+                if header.is_some() {
+                    cuts.push(token.start);
+                }
+            } else if let Some((_, kind)) = recent_guard.filter(|(body, _)| *body == depth) {
+                let closes = match kind {
+                    HeaderTerminator::Brace => token.text == "}",
+                    HeaderTerminator::Keyword => {
+                        token.text == "end"
+                            && is_keyword_delimiter(&tokens, index)
+                            && (statement_boundary(&tokens, index)
+                                || inline_return_before(&tokens, index)
+                                || tokens
+                                    .get(index.wrapping_sub(1))
+                                    .is_some_and(|t| t.text == ")")
+                                || (next != Some(";")
+                                    && tokens
+                                        .get(index.wrapping_sub(1))
+                                        .is_some_and(|t| t.text == "return")))
+                    }
+                };
+                if closes {
+                    guards.pop();
+                    after_guard = Some((
+                        depth.0,
+                        depth.1,
+                        depth
+                            .2
+                            .saturating_sub(usize::from(kind == HeaderTerminator::Brace)),
+                    ));
+                    cuts.push(token.start);
+                    match next {
+                        Some(";") if index + 2 < tokens.len() => cuts.push(tokens[index + 1].end),
+                        Some(text) if text != ";" => cuts.push(token.end),
+                        _ => {}
+                    }
+                } else if token.text == ";"
+                    && next.is_some_and(|text| !matches!(text, "then" | "do"))
+                {
+                    cuts.push(token.end);
+                }
+            } else if after_guard == Some(depth)
+                && token.text == ";"
+                && next.is_some_and(|text| !matches!(text, "then" | "do"))
+            {
+                cuts.push(token.end);
+            }
+            match token.text {
+                "(" => depth.0 += 1,
+                ")" => depth.0 = depth.0.saturating_sub(1),
+                "[" => depth.1 += 1,
+                "]" => depth.1 = depth.1.saturating_sub(1),
+                "{" => depth.2 += 1,
+                "}" => depth.2 = depth.2.saturating_sub(1),
+                _ => {}
+            }
+        }
+        append_split_line(&mut output, line, cuts);
+    }
+    output
+}
+
+fn append_split_line(output: &mut String, line: &str, mut cuts: Vec<usize>) {
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut last = 0;
+    for cut in cuts {
+        if line[cut..].trim().is_empty() {
+            continue;
+        }
+        if !line[last..cut].trim().is_empty() {
+            output.push_str(line[last..cut].trim_end());
+            output.push('\n');
+        }
+        last = cut;
+    }
+    output.push_str(&line[last..]);
+}
+
 fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
     let expression_head = tokens.get(1).map(|token| token.text);
     let expression_tail = tokens.last().map(|token| token.text);
@@ -326,10 +499,17 @@ fn split_keyword_blocks(source: &str) -> String {
         }
         let scanned = lex_line(line, &mut lex);
         let tokens = scanned.tokens;
+        if tokens.first().is_some_and(|token| token.text == "guard")
+            && guard_delimiter(&tokens, 0).is_some_and(|(index, _)| index + 1 == tokens.len())
+        {
+            // The guard owns this delimiter, even inside a keyword conditional.
+            output.push_str(line);
+            continue;
+        }
         let mut cuts: Vec<usize> = Vec::new();
         // A keyword if may have opened on a previous line. Every logical
         // statement in its body still needs its own line.
-        let mut saw_keyword_arm = !frames.is_empty();
+        let mut saw_keyword_arm = frames.last() == Some(&Phase::Body);
         let (mut parens, mut brackets, mut braces) = (0usize, 0usize, 0usize);
 
         for (index, token) in tokens.iter().enumerate() {
@@ -347,15 +527,18 @@ fn split_keyword_blocks(source: &str) -> String {
             }
 
             match token.text {
-                "if" if statement_boundary(&tokens, index) => {
-                    // Braced if/elif arms are a separate grammatical form.
-                    // Require an actual keyword header terminator to opt in.
-                    let has_keyword_header = has_top_level_keyword_header(&tokens, index + 1);
-                    if has_keyword_header && (index == 0 || tokens[index - 1].text != "else") {
-                        frames.push(Phase::Header);
-                        if index > 0 {
-                            cuts.push(token.start);
+                "if" if statement_boundary(&tokens, index)
+                    && (index == 0 || tokens[index - 1].text != "else") =>
+                {
+                    match first_top_level_header_terminator(&tokens, index + 1) {
+                        Some(HeaderTerminator::Keyword) => {
+                            frames.push(Phase::Header);
+                            if index > 0 {
+                                cuts.push(token.start);
+                            }
                         }
+                        Some(HeaderTerminator::Brace) => frames.push(Phase::Braced),
+                        None => {}
                     }
                 }
                 "then" | "do"
@@ -372,7 +555,7 @@ fn split_keyword_blocks(source: &str) -> String {
                     }
                 }
                 "elif" | "elseif"
-                    if !frames.is_empty()
+                    if matches!(frames.last(), Some(Phase::Header | Phase::Body))
                         && statement_boundary(&tokens, index)
                         && is_keyword_delimiter(&tokens, index) =>
                 {
@@ -383,7 +566,7 @@ fn split_keyword_blocks(source: &str) -> String {
                     }
                 }
                 "else"
-                    if !frames.is_empty()
+                    if matches!(frames.last(), Some(Phase::Header | Phase::Body))
                         && statement_boundary(&tokens, index)
                         && is_keyword_delimiter(&tokens, index) =>
                 {
@@ -399,6 +582,12 @@ fn split_keyword_blocks(source: &str) -> String {
                     if frames.last() == Some(&Phase::Body) && index + 1 < tokens.len() {
                         cuts.push(token.end);
                     }
+                }
+                "fi" if frames.last() == Some(&Phase::Braced)
+                    && statement_boundary(&tokens, index)
+                    && is_keyword_delimiter(&tokens, index) =>
+                {
+                    frames.pop();
                 }
                 "fi" if frames.last() == Some(&Phase::Body)
                     && is_keyword_delimiter(&tokens, index)
@@ -426,24 +615,7 @@ fn split_keyword_blocks(source: &str) -> String {
             }
         }
 
-        cuts.sort_unstable();
-        cuts.dedup();
-        let mut last = 0;
-        for cut in cuts {
-            if line[cut..].trim().is_empty() {
-                continue;
-            }
-            if line[last..cut].trim().is_empty() {
-                // A preceding semicolon already inserted the newline.
-                // Discard the whitespace between that terminator and fi.
-                last = cut;
-                continue;
-            }
-            output.push_str(line[last..cut].trim_end());
-            output.push('\n');
-            last = cut;
-        }
-        output.push_str(&line[last..]);
+        append_split_line(&mut output, line, cuts);
     }
     output
 }
@@ -594,7 +766,8 @@ fn split_compact_loop_headers(source: &str) -> String {
 
 pub(crate) fn normalize(source: &str) -> String {
     let collapsed = collapse_multiline_keyword_headers(source);
-    let loops = split_compact_loop_headers(&collapsed);
+    let guards = split_guard_blocks(&collapsed);
+    let loops = split_compact_loop_headers(&guards);
     terminate_simple_returns(&split_keyword_blocks(&loops))
 }
 
