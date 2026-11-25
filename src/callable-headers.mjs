@@ -157,7 +157,8 @@ export function normalize_callable_headers(source) {
     i = j;
   }
   for (let i = 0; i < toks.length; ++i) {
-    if (!is(i, 'mtd') || !is(i + 1, '(')) continue;
+    if (!is(i, 'mtd') || !is(i + 1, '(') ||
+        is(i - 1, '.') || is(i - 1, '::')) continue;
     const close = skipPaired(i + 1, '(', ')') - 1;
     if (close <= i + 1 || !ident(close + 1) ||
         !(is(close + 2, '(') || is(close + 2, '<-'))) continue;
@@ -167,15 +168,75 @@ export function normalize_callable_headers(source) {
     if (hasComment(toks[i + 1].start, toks[close].end)) continue;
     const r = toks.slice(i + 2, close).map(x => x.s);
     let canonical = null;
-    if (r.length === 3 && r[0] === 'self' && r[1] === ':' && ident(i + 4))
+    let projected = false;
+    // The receiver is a source-local binding, not a fixed 'self' keyword.
+    // These are only lexical formatting candidates: the real compiler must
+    // reject reserved/invalid names and verify actor-state permissions.
+    // Match the compiler's reserved-keyword admission in this target profile.
+    // Lexical formatting is still subject to verified compiler equivalence.
+    const reservedNames = new Set([
+      'unsafe', 'sync', 'task', 'pipe', 'rpipe', 'define', 'def',
+      'module', 'namespace', 'contract', 'conforms', 'class', 'struct', 'interface',
+      'trait', 'type', 'types', 'typeof', 'abstract', 'extends', 'implements',
+      'impl', 'import', 'from', 'as', 'using', 'fnc', 'routine',
+      'pure', 'async', 'suspends', 'generator', 'yield', 'nlex', 'return',
+      'begin', 'super', 'static', 'pub', 'private', 'const', 'val',
+      'let', 'mut', 'if', 'guard', 'then', 'else', 'elif',
+      'elseif', 'fi', 'do', 'done', 'end', 'while', 'for',
+      'of', 'loop', 'block', 'break', 'continue', 'switch', 'match',
+      'maybe', 'matches', 'over', 'default', 'try', 'catch', 'finally',
+      'throw', 'raise', 'panic', 'recover', 'trap', 'defer', 'actor',
+      'persistent', 'durable', 'isoactor', 'shared', 'untrusted', 'spawn', 'stop',
+      'rt', 'await', 'nb', 'cb', 'select', 'readch', 'writech',
+      'eq', 'neq', 'is', 'new', 'true', 'false', 'null',
+      'void', 'obj', 'arr', 'cpu', 'gpu', 'quantum',
+      // Target parser's extra declaration-context exclusions.
+      'declare', 'mtd', 'use',
+    ]);
+    const validBinding = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name || '') &&
+      name !== '_' && (name === 'self' || !reservedNames.has(name));
+    const validNominalOrField = name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name || '') &&
+      name !== 'self' && name !== '_' && !reservedNames.has(name);
+    // No square-bracket/array receiver rewrite, no unchecked duplicates.
+    if (r.length >= 5 && validNominalOrField(r[0]) &&
+        r[1] === 'mut' && validBinding(r[2]) &&
+        r[3] === '.' && r[4] === 'state') {
+      let fields = null;
+      if (r.length === 5) {
+        canonical = `(${r[0]} mut ${r[2]}.state)`;
+        projected = true;
+      } else if (r.length >= 7 && r[5] === '.') {
+        if (r.length === 7 && validNominalOrField(r[6])) {
+          fields = [r[6]];
+        } else if (r[6] === '{' && r.at(-1) === '}') {
+          const items = r.slice(7, -1);
+          if (items.length > 0 && items.length <= 63 && items.length % 2 === 1 &&
+              items.every((value, j) => j % 2 ? value === ',' : validNominalOrField(value))) {
+            fields = items.filter((_, j) => j % 2 === 0);
+          }
+        }
+        if (fields && fields.length <= 32 && new Set(fields).size === fields.length) {
+          const projection = fields.length === 1 ? fields[0] : `{${fields.join(', ')}}`;
+          canonical = `(${r[0]} mut ${r[2]}.state.${projection})`;
+          projected = true;
+        }
+      }
+    }
+    if (!projected && r.length === 3 && r[0] === 'self' && r[1] === ':' && ident(i + 4))
       canonical = `(self: ${r[2]})`;
-    else if (r.length === 4 && r[0] === 'mut' && r[1] === 'self' && r[2] === ':')
-      canonical = `(mut self: ${r[3]})`;
-    else if (r.length === 2 && (r[1] === 'self' || r[1] === '_'))
+    else if (!projected && r.length === 4 && r[0] === 'mut' &&
+        validBinding(r[1]) && r[2] === ':' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[3]))
+      canonical = `(mut ${r[1]}: ${r[3]})`;
+    else if (!projected && r.length === 3 && validBinding(r[0]) &&
+        r[1] === ':' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[2]))
+      canonical = `(${r[0]}: ${r[2]})`;
+    else if (!projected && r.length === 2 && (r[1] === 'self' || r[1] === '_'))
       canonical = r[1] === 'self' ? `(self: ${r[0]})` : `(${r[0]})`;
-    else if (r.length === 1) canonical = `(${r[0]})`;
-    if (canonical && /^[A-Za-z_][A-Za-z0-9_]*$/.test(r.at(-1)) &&
-        (r.length === 1 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) || r[0] === 'mut')) {
+    else if (!projected && r.length === 2 && validBinding(r[1]))
+      canonical = `(${r[0]} ${r[1]})`;
+    else if (!projected && r.length === 1) canonical = `(${r[0]})`;
+    if (canonical && (projected || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r.at(-1))) &&
+        (projected || r.length === 1 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(r[0]) || r[0] === 'mut')) {
       add(toks[i + 1].start, toks[close].end, canonical);
     }
   }
