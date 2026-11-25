@@ -23,7 +23,7 @@ define class Worker as {
     assert!(formatted.contains("throws(NetworkError, DecodeError)"));
     assert!(formatted.contains("raises(AccessError)"));
     assert!(formatted.contains("panics(InvariantError)"));
-    assert!(formatted.contains("method handle() -> void raises(Error)"));
+    assert!(formatted.contains("mtd handle() -> void raises(Error)"));
     assert!(formatted.contains("static fnc shutdown() -> void panics(Error)"));
     assert!(formatted.contains("raise new Error();"));
     assert!(formatted.contains("panic new Error();"));

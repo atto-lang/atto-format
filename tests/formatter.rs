@@ -2250,14 +2250,32 @@ end
 pub fnc method(): int { return 7; }
 "#;
     let formatted = oreslang_format::format_source(source).unwrap();
-    assert!(formatted.contains("pub mtd explicit() -> int {"), "{formatted}");
+    assert!(
+        formatted.contains("pub mtd explicit() -> int {"),
+        "{formatted}"
+    );
     assert!(formatted.contains("mtd already() -> int {"), "{formatted}");
     assert!(formatted.contains("  method() -> int {"), "{formatted}");
     assert!(formatted.contains("  legacy() -> int {"), "{formatted}");
-    assert!(formatted.contains("  method() -> int { return 8; }"), "{formatted}");
-    assert!(formatted.contains("  mtd method() -> int { return 9; }"), "{formatted}");
-    assert!(formatted.contains("static fnc helper() -> int {"), "{formatted}");
-    assert!(formatted.contains("pub fnc method() -> int {"), "{formatted}");
+    assert!(
+        formatted.contains("  method() -> int {\n    return 8;\n  }"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("  mtd method() -> int {\n    return 9;\n  }"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("static fnc helper() -> int {"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("pub fnc method() -> int {"),
+        "{formatted}"
+    );
     assert!(!formatted.contains("  method explicit()"), "{formatted}");
-    assert_eq!(formatted, oreslang_format::format_source(&formatted).unwrap());
+    assert_eq!(
+        formatted,
+        oreslang_format::format_source(&formatted).unwrap()
+    );
 }
