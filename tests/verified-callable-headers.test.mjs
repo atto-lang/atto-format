@@ -26,6 +26,21 @@ test('host verifier admits only binary-identical compilable rewrites',async()=>{
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>new Uint8Array(16*1024*1024+1)),/bounded guest Wasm binary/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,null),/required/);
 });
+test('header verifier validates the entire bounded guest and explicit version',async()=>{
+  await assert.rejects(()=>normalize_verified_callable_headers(
+    sample,async()=>new Uint8Array([0,97,115,109,1,0,0,0,77])),/invalid guest Wasm module/);
+  await assert.rejects(()=>normalize_verified_callable_headers(
+    sample,async()=>guest,{language_version:2}),/version-aware compiler callback/);
+  for(const edition of [0,3,'2',null]) {
+    await assert.rejects(()=>normalize_verified_callable_headers(
+      sample,async()=>guest,{language_version:edition}),/Unsupported Atto language_version/);
+  }
+  const seen=[];
+  const result=await normalize_verified_callable_headers(sample,
+    async (_source,version)=>{seen.push(version);return guest;},{language_version:2});
+  assert.deepEqual(seen,[2,2]);
+  assert.equal(result.language_version,2);
+});
 const attoc=process.env.ATTOC?resolve(process.env.ATTOC):null;
 async function compileGuest(source) {
   const dir=await mkdtemp(join(tmpdir(),'atto-format-integration-'));

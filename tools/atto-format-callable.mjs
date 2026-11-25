@@ -13,9 +13,14 @@ import { normalize_verified_callable_headers } from '../src/verified-callable-he
 const args = process.argv.slice(2);
 const flag = args.filter(arg=>arg.startsWith('--'));
 const paths = args.filter(arg=>!arg.startsWith('--'));
-if(paths.length!==1 || flag.some(x=>!['--check','--write'].includes(x)) ||
+const versions = flag.filter(x=>x.startsWith('--language-version='));
+const language_version=versions.length===1 &&
+  /^(1|2)$/.test(versions[0].slice('--language-version='.length))
+    ? Number(versions[0].slice('--language-version='.length)) : 1;
+if(paths.length!==1 || versions.length>1 || versions.some(x=>!/^--language-version=(1|2)$/.test(x)) ||
+   flag.some(x=>!['--check','--write'].includes(x) && !x.startsWith('--language-version=')) ||
    (flag.includes('--check') && flag.includes('--write')) || !process.env.ATTOC) {
-  console.error('usage: ATTOC=/path/to/attoc node tools/atto-format-callable.mjs [--check|--write] file.atto');
+  console.error('usage: ATTOC=/path/to/attoc node tools/atto-format-callable.mjs [--check|--write] [--language-version=1|2] file.atto');
   process.exit(2);
 }
 const filename=resolve(paths[0]);
@@ -26,16 +31,21 @@ if(st.size>1024*1024) throw new RangeError('Source too large');
 const original=await readFile(filename);
 const decoder=new TextDecoder('utf-8',{fatal:true});
 const source=decoder.decode(original);
-async function compileGuest(input) {
+async function compileGuest(input, selectedVersion) {
+  if(selectedVersion!==language_version)
+    throw new Error('formatter/compiler language version mismatch');
   const dir=await mkdtemp(join(tmpdir(),'atto-verified-format-'));
   try {
     const src=join(dir,'input.atto'),dst=join(dir,'guest.wasm');
     await writeFile(src,input,'utf8');
-    execFileSync(process.env.ATTOC,[src,'-o',dst],{timeout:15000,stdio:['ignore','pipe','pipe']});
+    // No explicit edition means the compiler's legacy/default-v1 entry point.
+    // An explicit request is never downgraded if the compiler rejects the flag.
+    const compilerArgs=versions.length===0 ? [src,'-o',dst] : ['--language-version',String(selectedVersion),src,'-o',dst];
+    execFileSync(process.env.ATTOC,compilerArgs,{timeout:15000,stdio:['ignore','pipe','pipe']});
     return await readFile(dst);
   } finally { await rm(dir,{recursive:true,force:true}); }
 }
-const result=await normalize_verified_callable_headers(source,compileGuest);
+const result=await normalize_verified_callable_headers(source,compileGuest,{language_version});
 if(flag.includes('--check')) {
   if(result.changed) {
     console.error('Noncanonical method headers; compiler-verified rewrite available');

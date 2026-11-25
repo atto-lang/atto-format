@@ -28,7 +28,7 @@ for(const [i,source] of mustPreserve.entries()){
     assert.equal(normalize_callable_headers(output),output,"formatting must be idempotent");
   });
 }
-test("verified callable rewrite preserves nested Entry literal and struct shape",()=>{
+test("lexical callable rewrite preserves nested Entry literal and struct shape",()=>{
   const source=[
     "define class Builder as",
     "  fnc make(): int {",

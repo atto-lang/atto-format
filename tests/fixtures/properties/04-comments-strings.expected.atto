@@ -1,0 +1,8 @@
+/* outer /* nested { if fi end */ still comment */
+// line comment with "quotes" and { braces }
+pub fnc main() -> int {
+  val String s = "if x then { fi } end // not a comment";
+  val String t = "tab\tand \"escaped\" quote";
+  stdio.stdout.write(s + t);
+  /* trailing block */ return 42; // tail
+}
