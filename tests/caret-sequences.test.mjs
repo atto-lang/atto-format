@@ -5,6 +5,27 @@ import {normalize_verified_caret_sequences} from '../src/verified-caret-sequence
 
 const canonical=[
   ['caret scalar', 'pub fnc main(): int { ^42; }', 'pub fnc main(): int { ^ 42; }'],
+  ['bare return commas preserve semantics', 'pub fnc main(): int { return 1, 42; }',
+   'pub fnc main(): int { return 1, 42; }'],
+  ['bare caret return commas preserve semantics', 'pub fnc main(): int { ^ 1, 42; }',
+   'pub fnc main(): int { ^ 1, 42; }'],
+  ['bare return nested call commas preserve semantics',
+   'pub fnc main(): int { return add(10,20), add(20,22); }',
+   'pub fnc main(): int { return add(10,20), add(20,22); }'],
+  ['contextual return no spaces', 'pub fnc main(): int { return^(40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual return missing post-caret space', 'pub fnc main(): int { return ^(40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual return missing keyword space', 'pub fnc main(): int { return^ (40,42); }',
+   'pub fnc main(): int { return ^ (40,42); }'],
+  ['contextual empty stays invalid', 'pub fnc main(): int { return ^ (); }',
+   'pub fnc main(): int { return ^ (); }'],
+  ['tuple return unchanged', 'pub fnc main(): (int,int) { return (1,2); }',
+   'pub fnc main(): (int,int) { return (1,2); }'],
+  ['standalone caret tuple unchanged', 'pub fnc main(): (int,int) { ^ (1,2); }',
+   'pub fnc main(): (int,int) { ^ (1,2); }'],
+  ['caret sequence with comment unchanged', 'pub fnc main(): int { return ^ /* c */ (1,42); }',
+   'pub fnc main(): int { return ^ /* c */ (1,42); }'],
   ['caret parenthesized expression', 'pub fnc main(): int { ^(40+2); }', 'pub fnc main(): int { ^ (40+2); }'],
   ['caret seq', 'pub fnc main(): int { ^seq let a = 5, a + 3; }', 'pub fnc main(): int { ^ seq let a = 5, a + 3; }'],
   ['nested paren sequences', 'pub fnc main(): int { ^(>let x=5,(>let y=x+3,y)); }',
@@ -111,6 +132,11 @@ async function compileGuest(source){
     return await readFile(dst);
   }finally{await rm(tmp,{force:true,recursive:true});}
 }
+// Select the exact compiler grammar exercised by the guest lane. Both
+// profiles run the complete host corpus; CI runs both compiler pins.
+const profile=process.env.ATTO_CARET_COMPILER_PROFILE ?? 'contextual-return';
+if(!['legacy','contextual-return'].includes(profile)) throw new Error('unsupported caret compiler profile: '+profile);
+if(profile==='legacy') {
 // These cases are executable in the pinned Rust/Wasm compiler revision.
 // The legacy seq / (> and :: migration forms are version-gated in a different
 // branch: retain their host idempotence tests above, but do not misreport
@@ -137,6 +163,23 @@ test('version-gated seq syntax rejects before emitting a guest in this compiler'
       ()=>compileGuest('pub fnc main(): int { ^seq let x=5, x+37; }'),
       /E_SEMICOLON/);
 });
+} else {
+test('real compiler output identical for caret and nested sequence formatting',
+  {skip:!attoc},async()=>{
+    for(const src of [
+      'pub fnc main(): int { ^42; }',
+      'pub fnc main(): int { return^(40,42); }',
+      'pub fnc main(): int { return 1, 42; }',
+      'pub fnc main(): int { ^seq let x=5, x+37; }',
+      'pub fnc main(): int { ^(>let x=5,(>let y=x+3,y+34)); }',
+      'pub fnc main() -> int :: const x: int = 40, x+2 end',
+    ]){
+      const result=await normalize_verified_caret_sequences(src,compileGuest);
+      assert.equal(result.guest_sha256_same,true);
+      assert.equal(normalize_caret_sequence_spacing(result.formatted),result.formatted);
+    }
+});
+}
 
 test('guarded match return and caret arms preserve grammar and normalize only caret spacing', () => {
   const returnForm = `
