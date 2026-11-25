@@ -34,6 +34,33 @@ const canonical=[
    'fnc f(): int { if true then ^ 42; else ^ 0; fi }'],
   ['lambda body caret', 'fnc f(): int { const f = |x| -> ^x+1; ^5; }',
    'fnc f(): int { const f = |x| -> ^ x+1; ^ 5; }'],
+  ['else-free guard caret exits',
+   'pub fnc main(): int { guard false { ^-1; } ^42; }',
+   'pub fnc main(): int { guard false { ^ -1; } ^ 42; }'],
+  ['guard true preserves fallthrough and caret return',
+   'pub fnc main(): int { guard true { ^-1; } ^42; }',
+   'pub fnc main(): int { guard true { ^ -1; } ^ 42; }'],
+  ['multiline explicit await transform and terminal >> val capture',
+    [
+      'fnc plus_one(int x): int { ^x+1; }',
+      'pub susp fnc main(): int {',
+      '  val pending=task { return 41; };',
+      '  ^pending',
+      '    |> susp |f| -> await f',
+      '    |> plus_one',
+      '    >> val result: int;',
+      '}'
+    ].join('\n'),
+    [
+      'fnc plus_one(int x): int { ^ x+1; }',
+      'pub susp fnc main(): int {',
+      '  val pending=task { return 41; };',
+      '  ^ pending',
+      '    |> susp |f| -> await f',
+      '    |> plus_one',
+      '    >> val result: int;',
+      '}'
+    ].join('\n')],
   ['no transform existing semantics', 'fnc f() -> int :: const z: int=5, z+5 end',
    'fnc f() -> int :: const z: int=5, z+5 end'],
   ['ordinary begin', 'pub fnc main(): int { ^ begin let z=5, z+3 end; }',
@@ -105,6 +132,38 @@ async function compileGuest(source){
     return await readFile(dst);
   }finally{await rm(tmp,{force:true,recursive:true});}
 }
+// Select the exact compiler grammar exercised by the guest lane. Both
+// profiles run the complete host corpus; CI runs both compiler pins.
+const profile=process.env.ATTO_CARET_COMPILER_PROFILE ?? 'contextual-return';
+if(!['legacy','contextual-return'].includes(profile)) throw new Error('unsupported caret compiler profile: '+profile);
+if(profile==='legacy') {
+// These cases are executable in the pinned Rust/Wasm compiler revision.
+// The legacy seq / (> and :: migration forms are version-gated in a different
+// branch: retain their host idempotence tests above, but do not misreport
+// them as runnable guest programs in this compiler revision.
+test('real compiler produces identical guests for caret, guard and awaited capture',
+  {skip:!attoc},async()=>{
+    for(const src of [
+      'pub fnc main(): int { ^42; }',
+      'pub fnc main(): int { guard true { ^-1; } ^42; }',
+      'pub fnc main(): int { guard false { ^-1; } ^42; }',
+      'fnc plus_one(int x): int { ^x+1; } pub susp fnc main(): int { val pending=task { return 41; }; ^pending |> susp |f| -> await f |> plus_one >> val result: int; }',
+    ]){
+      const result=await normalize_verified_caret_sequences(src,compileGuest);
+      assert.equal(result.guest_sha256_same,true);
+      assert.equal(normalize_caret_sequence_spacing(result.formatted),result.formatted);
+    }
+});
+
+test('version-gated seq syntax rejects before emitting a guest in this compiler',
+  {skip:!attoc},async()=>{
+    // This is a strict fail-closed check on the known unsupported source
+    // grammar, not a claim that the future-version seq syntax is invalid.
+    await assert.rejects(
+      ()=>compileGuest('pub fnc main(): int { ^seq let x=5, x+37; }'),
+      /E_SEMICOLON/);
+});
+} else {
 test('real compiler output identical for caret and nested sequence formatting',
   {skip:!attoc},async()=>{
     for(const src of [
@@ -119,4 +178,35 @@ test('real compiler output identical for caret and nested sequence formatting',
       assert.equal(result.guest_sha256_same,true);
       assert.equal(normalize_caret_sequence_spacing(result.formatted),result.formatted);
     }
+});
+}
+
+test('guarded match return and caret arms preserve grammar and normalize only caret spacing', () => {
+  const returnForm = `
+fnc classify(int value): int {
+  return match value over
+    on 0 -> { return 0; }
+    on 1 -> { return 1; }
+    on n when n > 1 -> { return 2; }
+    on _ -> { return -1; }
+  end
+}
+fnc xyx(int value): int {
+  return match value over
+    on 0 -> 0,
+    on 1 -> 1,
+    on n when n > 1 -> 2,
+    on _ -> -1,
+  end
+}
+`;
+  const caretForm = returnForm.replaceAll('return match value over', '^match value over');
+  const expected = returnForm.replaceAll('return match value over', '^ match value over');
+  assert.equal(normalize_caret_sequence_spacing(returnForm), returnForm);
+  assert.equal(normalize_caret_sequence_spacing(caretForm), expected);
+  assert.equal(normalize_caret_sequence_spacing(expected), expected);
+  // Do not change arrow arms, binding guards, wildcards, the end delimiter,
+  // or braced early-return semantics.
+  assert.equal((expected.match(/on n when n > 1/g) || []).length, 2);
+  assert.equal((expected.match(/on _ ->/g) || []).length, 2);
 });
