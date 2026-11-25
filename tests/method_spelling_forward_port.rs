@@ -19,3 +19,43 @@ fn method_spelling_inside_quoted_string_is_not_rewritten() {
     assert!(result.contains("\"fnc fake() -> void\""), "{result}");
     assert!(result.contains("pub method_name("), "{result}");
 }
+
+#[test]
+fn generic_class_factory_and_members_omit_fnc_but_free_and_static_retain_it() {
+    let input = r#"define pub class Container[T]
+    implements Newable[Container[T]] as
+  pub fnc new(): Container[T] {
+    return new Container[T]();
+  }
+  val int count = 21;
+  val bool ready = true;
+  val string label = "ok";
+  pub fnc echo(T value): T {
+    return value;
+  }
+  pub fnc get_count(): int {
+    return self.count;
+  }
+  pub fnc is_ready(): bool {
+    return self.ready;
+  }
+  pub fnc get_label(): string {
+    return self.label;
+  }
+  static fnc helper(): int {
+    return 42;
+  }
+end
+pub fnc main(): int {
+  return 42;
+}
+"#;
+    let output = format_source(input).unwrap();
+    for name in ["new", "echo", "get_count", "is_ready", "get_label"] {
+        assert!(output.contains(&format!("pub {name}(")), "{output}");
+        assert!(!output.contains(&format!("pub fnc {name}(")), "{output}");
+    }
+    assert!(output.contains("static fnc helper("), "{output}");
+    assert!(output.contains("pub fnc main("), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+}
