@@ -3096,9 +3096,9 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         .or_else(|| lower.strip_prefix("private "))
         .unwrap_or(lower);
     if ["const", "let", "val", "final"].iter().any(|keyword| {
-        binding_head.strip_prefix(keyword).is_some_and(|rest| {
-            rest.starts_with(char::is_whitespace)
-        })
+        binding_head
+            .strip_prefix(keyword)
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
     }) {
         return false;
     }
