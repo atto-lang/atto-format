@@ -234,7 +234,9 @@ fn lex(source: &str) -> (Vec<Payload>, BTreeMap<String, usize>) {
             }
             let declaration_marker = matches!(word.as_str(), "method" | "mtd")
                 && after > j
-                && chars.get(after).is_some_and(|c| c.is_alphabetic() || *c == '_');
+                && chars
+                    .get(after)
+                    .is_some_and(|c| c.is_alphabetic() || *c == '_');
             if !declaration_marker && !REWRITABLE.contains(&word.as_str()) {
                 *idents.entry(word).or_insert(0) += 1;
             }
