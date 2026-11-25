@@ -645,7 +645,41 @@ pub fn format_source_with_mtd(source: &str) -> Result<String, FormatError> {
     format_source_impl(source, true)
 }
 
+// Validate original code before any normalizer can repair invalid syntax.
+fn reject_compact_bang_keywords(source: &str) -> Result<(), FormatError> {
+    let mut lex = LexState::default();
+    let mut lines = source.split('\n').peekable();
+    let mut number = 0;
+    while let Some(line) = lines.next() {
+        number += 1;
+        for span in visible_word_spans(line, lex) {
+            let word = &line[span.start..span.end];
+            if !matches!(word, "trap" | "throw" | "raise" | "panic" | "copy" | "take"
+                | "borrow" | "share" | "pin" | "drop" | "pipe" | "rpipe" | "stop" | "expand")
+                || line[..span.start].ends_with('#') {
+                continue;
+            }
+            let Some(suffix) = line[span.end..].strip_prefix('!') else { continue; };
+            if suffix.starts_with('=') || (suffix.starts_with("eq") &&
+                suffix[2..].chars().next().is_none_or(|c| !is_ident_char(c))) {
+                continue;
+            }
+            let rest = if word == "copy" { suffix.strip_prefix('!').unwrap_or(suffix) } else { suffix };
+            let valid = rest.as_bytes().first().is_some_and(|b|
+                matches!(*b, b' ' | b'\t' | b'\r' | 0x0b | 0x0c))
+                || (rest.is_empty() && lines.peek().is_some());
+            if !valid {
+                return Err(FormatError::new(number,
+                    "E_BANG_KEYWORD_WHITESPACE: whitespace required after bang keyword"));
+            }
+        }
+        let _ = scan_visible(line, &mut lex);
+    }
+    Ok(())
+}
+
 fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatError> {
+    reject_compact_bang_keywords(source)?;
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n");
@@ -758,6 +792,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_conditional_line(&content, lex);
         content = canonicalize_forever_loop_line(&content, lex);
         content = canonicalize_rt_cooperate_line(&content, lex);
+        content = canonicalize_ownership_aliases_line(&content, lex);
         // Generator declaration headers are preserved verbatim (apart from
         // indentation). The production backends currently admit disjoint
         // spellings: Java accepts `fnc gen*`, `async fnc gen*` and
@@ -4232,6 +4267,177 @@ fn canonicalize_single_quoted_symbol(source: &str, start: usize) -> Option<(usiz
     None
 }
 
+/// Rewrite only adjacent, lexically visible ownership prefix operators.
+/// Normal identifier calls, comments, strings and comparison '!' operators
+/// remain opaque. This is source canonicalization, not a borrow checker.
+fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String {
+    fn whitespace_only(text: &str) -> bool {
+        text.chars().all(char::is_whitespace)
+    }
+    fn verb(text: &str) -> bool {
+        matches!(text, "copy" | "take" | "borrow" | "share")
+    }
+
+    let words = visible_word_spans(line, initial);
+    let mut rewrites: Vec<(usize, usize, &'static str)> = Vec::new();
+    let word = |n: usize| &line[words[n].start..words[n].end];
+    let mut i = 0usize;
+    while i < words.len() {
+        if word(i) == "rt" && i + 1 < words.len()
+            && whitespace_only(&line[words[i].end..words[i + 1].start])
+        {
+            let (end, replacement, consumed) = if i + 2 < words.len()
+                && word(i + 1) == "mut" && word(i + 2) == "borrow"
+                && whitespace_only(&line[words[i + 1].end..words[i + 2].start])
+            {
+                (words[i + 2].end, Some("borrow! mut"), 3)
+            } else if i + 2 < words.len()
+                && word(i + 1) == "borrow" && word(i + 2) == "mut"
+                && whitespace_only(&line[words[i + 1].end..words[i + 2].start])
+            {
+                (words[i + 2].end, Some("borrow! mut"), 3)
+            } else if verb(word(i + 1)) {
+                let op = match word(i + 1) {
+                    "copy" => "copy!",
+                    "take" => "take!",
+                    "borrow" => "borrow!",
+                    "share" => "share!",
+                    _ => unreachable!(),
+                };
+                (words[i + 1].end, Some(op), 2)
+            } else {
+                (0, None, 0)
+            };
+            if let Some(replacement) = replacement {
+                // The qualifier follows the attached bang. Keep a separating
+                // space when the legacy operand is adjacent (e.g. rt mut borrow(foo)).
+                let replacement = if replacement == "borrow! mut"
+                    && !line[end..].chars().next().is_some_and(char::is_whitespace)
+                {
+                    "borrow! mut "
+                } else {
+                    replacement
+                };
+                // A legacy marker with no expression operand must not be
+                // fabricated into a valid operation. The compiler diagnoses it.
+                let tail = line[end..].trim_start();
+                // An adjacent 'rt copy!foo' is a malformed mixed spelling;
+                // do not manufacture copy!!foo. But 'rt copy !foo' is a
+                // legitimate ownership operation on logical negation and
+                // must canonicalize to 'copy! !foo'.
+                if !tail.is_empty() && !line[end..].starts_with('!')
+                    && !tail.starts_with(';') && !tail.starts_with('}') {
+                    rewrites.push((words[i].start, end, replacement));
+                    i += consumed;
+                    continue;
+                }
+            }
+        }
+        // Older mutable-borrow prefix remains accepted but must never survive
+        // canonical formatting. Rewriting requires visible words, whitespace
+        // between mut/borrow, and borrow immediately adjacent to its bang.
+        if word(i) == "mut" && i + 1 < words.len()
+            && word(i + 1) == "borrow"
+            && whitespace_only(&line[words[i].end..words[i + 1].start])
+            && line[words[i + 1].end..].starts_with('!')
+        {
+            let end = words[i + 1].end + 1;
+            let suffix = &line[end..];
+            let tail = suffix.trim_start();
+            let is_eq = suffix.starts_with("eq") &&
+                suffix[2..].chars().next().is_none_or(|c|
+                    !(c.is_alphabetic() || c.is_ascii_digit() || c == '_'));
+            if !tail.is_empty() && !tail.starts_with(';') && !tail.starts_with('}')
+                && !tail.starts_with("//") && !tail.starts_with("/*")
+                && !suffix.starts_with('=') && !is_eq
+            {
+                let replacement = if suffix.chars().next().is_some_and(char::is_whitespace) {
+                    "borrow! mut"
+                } else {
+                    "borrow! mut "
+                };
+                rewrites.push((words[i].start, end, replacement));
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    // Each reverse replace_range would shift an entire suffix. Dense prefix
+    // chains could therefore turn a linear formatting pass into quadratic
+    // work. Emit one monotonic forward stream instead.
+    let mut result = String::with_capacity(line.len() + rewrites.len());
+    let mut cursor = 0usize;
+    for (start, end, replacement) in rewrites {
+        result.push_str(&line[cursor..start]);
+        result.push_str(replacement);
+        cursor = end;
+    }
+    result.push_str(&line[cursor..]);
+    // Normalize both compact and already-spaced forms to exactly one ASCII
+    // space after '!'. The verb and bang must be adjacent. Comments and
+    // strings never become candidate words; leave comments after '!' intact.
+    let words = visible_word_spans(&result, initial);
+    let mut inserts = Vec::new();
+    for span in words {
+        let name = &result[span.start..span.end];
+        if !verb(name) || !result[span.end..].starts_with('!') {
+            continue;
+        }
+        let at = span.end + if name == "copy" && result[span.end..].starts_with("!!") { 2 } else { 1 };
+        let suffix = &result[at..];
+        if suffix.starts_with('=') || (suffix.starts_with("eq")
+            // Java accepts BMP Unicode letters in identifiers; an ASCII
+            // word-boundary test would incorrectly treat copy!eqé as !eq.
+            // LLVM's currently ASCII-only identifier admission is tracked
+            // separately in spec S-22; formatting must not corrupt Java ASTs.
+            && suffix[2..].chars().next().is_none_or(|c|
+                !(c.is_alphabetic() || c.is_ascii_digit() || c == '_'))) {
+            continue;
+        }
+        let spaces = suffix.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
+        let rest = &suffix[spaces..];
+        if rest.is_empty() || rest.starts_with(';') || rest.starts_with('}')
+            || rest.starts_with("//") || rest.starts_with("/*") {
+            continue;
+        }
+        inserts.push((at, at + spaces));
+    }
+    let mut normalized = String::with_capacity(result.len() + inserts.len());
+    let mut cursor = 0usize;
+    for (start, end) in inserts {
+        normalized.push_str(&result[cursor..start]);
+        normalized.push(' ');
+        cursor = end;
+    }
+    normalized.push_str(&result[cursor..]);
+
+    // A mutable loan may have a parenthesized operand with no source gap
+    // after its distinct 'mut' keyword: borrow!mut(value). Preserve the
+    // parentheses and insert the canonical separator without touching
+    // ordinary identifiers such as mutfoo or text inside comments/quotes.
+    let mut qualifier_parens = Vec::new();
+    for span in visible_word_spans(&normalized, initial) {
+        if &normalized[span.start..span.end] == "borrow"
+            && normalized[span.end..].starts_with("! mut(")
+        {
+            qualifier_parens.push(span.end + "! mut".len());
+        }
+    }
+    if qualifier_parens.is_empty() {
+        return normalized;
+    }
+    let mut formatted = String::with_capacity(normalized.len() + qualifier_parens.len());
+    let mut cursor = 0usize;
+    for at in qualifier_parens {
+        formatted.push_str(&normalized[cursor..at]);
+        formatted.push(' ');
+        cursor = at;
+    }
+    formatted.push_str(&normalized[cursor..]);
+    formatted
+}
+
 fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError> {
     let mut lex = LexState::default();
     for (index, line) in source.lines().enumerate() {
@@ -4245,15 +4451,6 @@ fn reject_pointer_style_ownership_syntax(source: &str) -> Result<(), FormatError
             .collect();
         let words = visible_word_spans(&visible, LexState::default());
         let word = |span: WordSpan| &visible[span.start..span.end];
-
-        for triple in words.windows(3) {
-            if word(triple[0]) == "rt" && word(triple[1]) == "borrow" && word(triple[2]) == "mut" {
-                return Err(FormatError::new(
-                    index + 1,
-                    "legacy rt borrow mut; use rt mut borrow",
-                ));
-            }
-        }
 
         for pair in words.windows(2) {
             if word(pair[0]) != "rt" {
