@@ -68,9 +68,14 @@ export function normalize_caret_sequence_spacing(source) {
     }
     if (c === '^') {
       const next = source[i+1];
-      // Only a known statement boundary, never infix, exponentiation,
-      // caret assignment, nested return or a comment/string.
-      if (statementPosition() && next !== undefined && next !== ';' &&
+      // Only the literal `return` followed by ^ and a parenthesized
+      // sequence gains this contextual selector. Do not alter infix ^ or
+      // a standalone statement ^ before ordinary grouped/tuple expressions.
+      const returnSequence = previous === 'return' && /^\s*\(/.test(source.slice(i+1));
+      if (returnSequence && i > 0 && !/\s/.test(source[i-1])) {
+        edits.push({at:i, text:' '});
+      }
+      if ((statementPosition() || returnSequence) && next !== undefined && next !== ';' &&
           next !== '^' && next !== '=' && !/\s/.test(next) &&
           !source.startsWith('//', i+1) && !source.startsWith('/*', i+1)) {
         edits.push({at:i+1, text:' '});
