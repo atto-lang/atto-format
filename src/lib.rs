@@ -114,72 +114,51 @@ struct LexState {
     escape: bool,
 }
 
-/// Normalize only visible `typeof(identifier)` binding queries. The
-/// existing `typeof fnc(...)` callable signature is never rewritten.
+/// Normalize visible binding queries without changing comments or literals.
 fn canonicalize_typeof_queries(source: &str) -> Result<String, FormatError> {
     let mut out = String::with_capacity(source.len());
     let mut state = LexState::default();
     for (line_idx, line) in source.split_inclusive('\n').enumerate() {
-        let visible = scan_visible(line, &mut state);
-        let chars: Vec<char> = visible;
-        let offsets: Vec<usize> = line.char_indices()
-            .map(|(index, _)| index).chain(std::iter::once(line.len())).collect();
-        if chars.len() + 1 != offsets.len() {
-            return Err(FormatError::new(line_idx + 1, "invalid typeof lexical span"));
-        }
-        let mut replacements: Vec<(usize, usize, String)> = Vec::new();
-        let mut i = 0usize;
-        while i + 6 <= chars.len() {
-            let token = ['t', 'y', 'p', 'e', 'o', 'f'];
-            if chars[i..i+6] != token
-                || (i > 0 && (chars[i-1].is_ascii_alphanumeric() || chars[i-1] == '_'))
-                || (i + 6 < chars.len() && (chars[i+6].is_ascii_alphanumeric() || chars[i+6] == '_')) {
-                i += 1;
-                continue;
-            }
-            let mut j = i + 6;
-            while j < chars.len() && chars[j].is_whitespace() { j += 1; }
-            if j < chars.len() && chars[j] == '!' {
-                return Err(FormatError::new(line_idx + 1,
-                    "typeof! is not a type query; use 'typeof name'"));
-            }
-            if j >= chars.len() || chars[j] != '(' {
-                i += 6;
-                continue;
-            }
-            let mut k = j + 1;
-            while k < chars.len() && chars[k].is_whitespace() { k += 1; }
-            let start_name = k;
-            if k >= chars.len() || !(chars[k].is_ascii_alphabetic() || chars[k] == '_') {
-                i += 6;
-                continue;
-            }
-            while k < chars.len() && (chars[k].is_ascii_alphanumeric() || chars[k] == '_') { k += 1; }
-            let end_name = k;
-            while k < chars.len() && chars[k].is_whitespace() { k += 1; }
-            if k >= chars.len() || chars[k] != ')' {
-                i += 6;
-                continue;
-            }
-            // Never delete comment/literal payload masquerading as whitespace.
-            if !line[offsets[i+6]..offsets[j]].chars().all(char::is_whitespace)
-                || !line[offsets[j+1]..offsets[start_name]].chars().all(char::is_whitespace)
-                || !line[offsets[end_name]..offsets[k]].chars().all(char::is_whitespace) {
-                i += 6;
-                continue;
-            }
-            let name = &line[offsets[start_name]..offsets[end_name]];
-            if name == "fnc" {
-                i += 6;
-                continue;
-            }
-            replacements.push((offsets[i], offsets[k+1], format!("typeof {name}")));
-            i = k + 1;
-        }
+        let words = visible_word_spans(line, state);
+        scan_visible(line, &mut state);
         let mut previous = 0usize;
-        for (start, end, replacement) in replacements {
-            out.push_str(&line[previous..start]);
-            out.push_str(&replacement);
+        for span in words {
+            if span.start < previous || &line[span.start..span.end] != "typeof" {
+                continue;
+            }
+            // Member selectors and symbols are not the type-query keyword.
+            if line[..span.start].trim_end().ends_with(['.', '#']) {
+                continue;
+            }
+            let tail = line[span.end..].trim_start();
+            if tail.starts_with('!') {
+                return Err(FormatError::new(
+                    line_idx + 1,
+                    "typeof! is not a type query; use 'typeof name'",
+                ));
+            }
+            let Some(inner) = tail.strip_prefix('(') else {
+                continue;
+            };
+            let inner = inner.trim_start();
+            let Some(first) = inner.chars().next() else {
+                continue;
+            };
+            if !first.is_ascii_alphabetic() && first != '_' {
+                continue;
+            }
+            let end_name = inner
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .unwrap_or(inner.len());
+            let name = &inner[..end_name];
+            let after = inner[end_name..].trim_start();
+            if !after.starts_with(')') || name == "fnc" {
+                continue;
+            }
+            let end = line.len() - after.len() + 1;
+            out.push_str(&line[previous..span.start]);
+            out.push_str("typeof ");
+            out.push_str(name);
             previous = end;
         }
         out.push_str(&line[previous..]);
@@ -389,12 +368,10 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             } else if chunks[*index].starts_with("fnc(") {
                 *index += 1;
             } else {
-                // Canonical bare binding query: `typeof identifier`.
                 let candidate = chunks[*index];
-                if candidate.is_empty()
-                    || !candidate.chars().next().unwrap().is_ascii_alphabetic()
-                        && !candidate.starts_with('_')
-                    || !candidate.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                if !candidate.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    || !candidate.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
                     return false;
                 }
                 *index += 1;
@@ -3170,18 +3147,19 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         return false;
     }
     let lower = structural.trim_start();
-    // A typed *binding* may contain both a function-type arrow inside
-    // <(Args...) => Return> and an anonymous fnc(...) -> Return initializer.
-    // Its first parenthesis belongs to the type ascription, NOT to a callable
-    // declaration header. Never rewrite that type-level '=>' into '->'.
+    // The first parenthesis of a named typed binding belongs to its type,
+    // not the initializer callable. Preserve type-level arrows. Require
+    // whitespace after a binding qualifier so a method named final() still
+    // receives ordinary executable arrow normalization.
     let binding_head = lower
         .strip_prefix("pub ")
         .or_else(|| lower.strip_prefix("private "))
         .unwrap_or(lower);
-    if ["const", "let", "val", "final"]
-        .iter()
-        .any(|keyword| starts_word(binding_head, keyword))
-    {
+    if ["const", "let", "val", "final"].iter().any(|keyword| {
+        binding_head.strip_prefix(keyword).is_some_and(|rest| {
+            rest.starts_with(char::is_whitespace)
+        })
+    }) {
         return false;
     }
     for kw in [
