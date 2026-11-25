@@ -285,7 +285,7 @@ fn return_expression_is_multiline(tokens: &[Token<'_>], next: &str) -> bool {
     let expression_head = tokens.get(1).map(|token| token.text);
     let expression_tail = tokens.last().map(|token| token.text);
 
-    matches!(expression_head, Some("match" | "select" | "switch" | "do"))
+    matches!(expression_head, Some("match" | "select" | "switch" | "do" | "maybe"))
         || matches!(
             expression_tail,
             Some(

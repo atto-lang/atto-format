@@ -55,3 +55,29 @@ case 1 -> { return 1; }
     assert!(result.contains("default -> {"), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
+
+#[test]
+fn actor_send_result_match_preserves_on_for_ok_err_and_wildcard() {
+    // The formatter is syntactic: no claim that the guest send return type
+    // has already been lowered by an LLVM or Wasm compiler.
+    let source = r#"pub fnc handle_send(ActorRef<Worker> worker): void {
+  val result = worker.send(42);
+  match result over
+    on Ok(ack) -> { accepted(ack); }
+    on Err(err) -> { rejected(err); }
+  end
+  match result over
+    on Ok(ack) -> { accepted(ack); }
+    on _ -> { ignored(); }
+  end
+}
+"#;
+    let formatted = format_source(source).expect("canonical on-arm formatting");
+    assert!(formatted.contains("on Ok(ack) -> {"), "{formatted}");
+    assert!(formatted.contains("on Err(err) -> {"), "{formatted}");
+    assert!(formatted.contains("on _ -> {"), "{formatted}");
+    assert!(!formatted.contains("default ->"), "{formatted}");
+    assert!(!formatted.contains("\n    Ok(ack) ->"), "{formatted}");
+    assert!(!formatted.contains("\n    Err(err) ->"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
