@@ -19,3 +19,13 @@ fn method_spelling_inside_quoted_string_is_not_rewritten() {
     assert!(result.contains("\"fnc fake() -> void\""), "{result}");
     assert!(result.contains("pub method_name("), "{result}");
 }
+
+#[test]
+fn out_of_line_receiver_method_tracks_its_own_end_and_real_parameters() {
+    let source = "pub mtd (Calculator _) four() -> int\n  let int x = self.seed,\n  x + 2\nend\n\npub mtd (self: Calculator) five() -> int ::\n  let int x = self.seed,\n  x + 2\nend\n";
+    let output = format_source(source).expect("receiver-qualified end-delimited methods");
+    assert!(output.contains("mtd (Calculator _) four()"), "{output}");
+    assert!(output.contains("mtd (self: Calculator) five()"), "{output}");
+    assert_eq!(output.lines().filter(|line| line.trim() == "end").count(), 2);
+    assert_eq!(format_source(&output).unwrap(), output);
+}

@@ -2909,7 +2909,8 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     {
         return false;
     }
-    let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
+    let standalone = contains_word(line, "fnc") || contains_word(line, "routine")
+        || explicit_receiver_method(line, LexState::default());
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
     if !line.contains('(')
@@ -3511,7 +3512,42 @@ fn canonicalize_name_first_parameter(parameter: &str) -> Option<String> {
     Some(format!("{ty} {name}"))
 }
 
+// Out-of-line methods have a receiver group before the ordinary parameter
+// group. Only an explicit leading mtd header selects that second group.
+fn explicit_receiver_method(line: &str, initial: LexState) -> bool {
+    let words = visible_word_spans(line, initial);
+    let mut iter = words.iter();
+    let Some(mut span) = iter.next() else { return false; };
+    if matches!(&line[span.start..span.end], "pub" | "private") {
+        let Some(next) = iter.next() else { return false; };
+        span = next;
+    }
+    &line[span.start..span.end] == "mtd"
+        && line[span.end..].trim_start().starts_with('(')
+}
+
 fn callable_parameter_bounds(
+    line: &str,
+    limit: usize,
+    initial: LexState,
+) -> Option<(usize, usize)> {
+    let first = first_parameter_bounds(line, limit, initial)?;
+    if !explicit_receiver_method(&line[..limit], initial) {
+        return Some(first);
+    }
+    let offset = first.1 + 1;
+    let rest = &line[offset..limit];
+    let (open, close) = first_parameter_bounds(rest, rest.len(), LexState::default())?;
+    // The receiver is followed by the actual method name, not another
+    // arbitrary parenthesized expression. Preserve the receiver verbatim.
+    let name = rest[..open].trim();
+    if name.is_empty() || !name.chars().all(is_ident_char) {
+        return None;
+    }
+    Some((offset + open, offset + close))
+}
+
+fn first_parameter_bounds(
     line: &str,
     limit: usize,
     initial: LexState,
