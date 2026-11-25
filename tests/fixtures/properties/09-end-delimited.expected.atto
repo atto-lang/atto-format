@@ -1,0 +1,13 @@
+define class Calc as
+  pub sum(int a, int b) -> int ::
+    if a > b then
+      return a + b;
+    else
+      return b + a;
+    fi
+  end
+end
+pub fnc main() -> int {
+  let Calc c = new Calc();
+  return c.sum(40, 2);
+}

@@ -22,6 +22,10 @@ Specify deterministic formatting and round-trip parsing behavior.
 
 Named AttoLang callables must explicitly declare a return type, including `-> void`. Explicit `-> infer` is accepted but a concrete type is preferred. The lexical formatter preserves these annotations, does not synthesize a result for omitted annotations, and refuses to normalize malformed unannotated method headers. A verified formatter rewrite still requires the real compiler to accept both programs and emit byte-identical guest artifacts. See [atto-spec](https://github.com/atto-lang/atto-spec/blob/main/language/explicit-callable-return-types-v1.md).
 
+## Unsafe-block layout (target only)
+
+[Unsafe block layout v1](docs/unsafe-blocks-v1.md) preserves lexical `unsafe { }` scope, nested braces, explicit unsafe callable headers, and safe near-miss literals. This is not an implemented formatter rewrite or compiler/guest parity claim.
+
 ## Validation
 
 Validation should rely on checked-in tests and exact-commit CI results. When reporting parity, distinguish **passed**, **failed**, **unsupported**, and **not executed**. Avoid inferring guest-runtime support from host-only tests.
@@ -100,3 +104,8 @@ test execution is **not** a passed runner receipt. This does not establish JVM/L
 guest compiler parity or automatic formatting of unsupported grammar.
 Related source and language PRs: atto-source.rs#344, atto-spec#92,
 atto-borrow-checker.rs#43 and atto-platform-conformance#76.
+
+## Checked owned Dyn interface-erasure formatting (target v1)
+
+Preserve the author-selected `Dyn<I>(take! owner)`, `(take! owner) as Dyn<I>`, `take! owner as Dyn<I>`, and `val Dyn<I> x = take! owner` spellings. Formatting MUST NOT synthesize or remove `take!`, forge a borrowed-to-owned conversion, or silently change cast precedence. The new `tests/checked_owned_dyn_as_roundtrip.rs` checks lexical preservation, comments/strings and idempotence. This is formatting source-test coverage, not executed compiler/guest runtime proof. Normative contract: [atto-spec checked owned Dyn erasure v1](https://github.com/atto-lang/atto-spec/blob/feat/checked-owned-dyn-as-v1/language/checked-owned-dyn-erasure-v1.md). Rust compiler draft: [#509](https://github.com/atto-lang/atto-source.rs/pull/509).
+
