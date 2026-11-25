@@ -226,7 +226,18 @@ fn lex(source: &str) -> (Vec<Payload>, BTreeMap<String, usize>) {
                 .find(|&k| !(chars[k].is_alphanumeric() || chars[k] == '_'))
                 .unwrap_or(chars.len());
             let word = text(i, j);
-            if !REWRITABLE.contains(&word.as_str()) {
+            // Only an explicit declaration marker may migrate; a callable
+            // literally named `method` or `mtd` must still be counted.
+            let mut after = j;
+            while after < chars.len() && chars[after].is_whitespace() {
+                after += 1;
+            }
+            let declaration_marker = matches!(word.as_str(), "method" | "mtd")
+                && after > j
+                && chars
+                    .get(after)
+                    .is_some_and(|c| c.is_alphabetic() || *c == '_');
+            if !declaration_marker && !REWRITABLE.contains(&word.as_str()) {
                 *idents.entry(word).or_insert(0) += 1;
             }
             i = j;
