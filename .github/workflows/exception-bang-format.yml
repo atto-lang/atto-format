@@ -1,0 +1,35 @@
+name: Canonical exceptional bang formatter
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/exception_bang_spellings.rs'
+      - 'tests/exception_effect_annotations.rs'
+      - 'Cargo.toml'
+      - '.github/workflows/exception-bang-format.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust-format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify checkout identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          git rev-parse 'HEAD^{tree}'
+      - name: Run real Rust formatter test suite
+        run: cargo test --all-targets --offline
+      - name: Verify format source
+        run: cargo fmt --all -- --check
