@@ -1,7 +1,7 @@
 use oreslang_format::format_source;
 
 #[test]
-fn preserves_explicit_bindings_and_elides_only_redundant_val() {
+fn preserves_explicit_bindings_including_val() {
     let input = r#"define class Foo as
   pub let int foo = 5;
   const int bar = 6;
@@ -14,11 +14,14 @@ fn preserves_explicit_bindings_and_elides_only_redundant_val() {
   }
 end
 "#;
+    // `val`, `let` and `const` are semantic. A bare type-first field is LET
+    // in Java and non-final in LLVM, so eliding `val` would change meaning,
+    // and Java's parseField accepts only `=` after these binding keywords.
     let expected = r#"define class Foo as
-  pub let int foo: 5;
-  const int bar: 6;
-  const Map m: new Map();
-  Map m1: new Map();
+  pub let int foo = 5;
+  const int bar = 6;
+  const Map m = new Map();
+  val Map m1 = new Map();
   final mut Map already: new Map();
   constructor() {
     let int local = 2;
@@ -41,7 +44,7 @@ end
     let expected = r#"define class Foo as
   int x: 1;
   mut Map<string, int> values: new Map();
-  const mut Map<string, int> fixed: new Map();
+  const mut Map<string, int> fixed = new Map();
 end
 "#;
     assert_eq!(format_source(input).unwrap(), expected);
@@ -101,8 +104,8 @@ fn generic_named_type_arguments_do_not_become_initializers() {
 end
 "#;
     let expected = r#"define class Pipeline as
-  const Box<messages=Message> queue: new Box();
-  pub let Map<string, Box<messages=Message>> routes: new Map();
+  const Box<messages=Message> queue = new Box();
+  pub let Map<string, Box<messages=Message>> routes = new Map();
   final int answer: 42;
 end
 "#;
@@ -164,7 +167,7 @@ end
 }
 
 #[test]
-fn implicit_val_only_changes_direct_class_members() {
+fn binding_qualifiers_on_direct_class_members_are_preserved() {
     let input = r#"define class Envelope as
   pub val String method;
   val Map<string, int> values: new Map();
@@ -182,8 +185,9 @@ define actor Receiver as
 end
 "#;
     let formatted = format_source(input).unwrap();
-    assert!(formatted.contains("pub String method;"));
-    assert!(formatted.contains("Map<string, int> values: new Map();"));
+    // Eliding `val` here would make Java parse `String method;` as a method.
+    assert!(formatted.contains("pub val String method;"));
+    assert!(formatted.contains("val Map<string, int> values: new Map();"));
     assert!(formatted.contains("let int changes: 0;"));
     assert!(formatted.contains("const int immutable: 3;"));
     assert!(formatted.contains("final int once;"));

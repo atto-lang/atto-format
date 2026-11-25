@@ -1,0 +1,16 @@
+fnc classify(int x): int {
+if x > 10; then return 3; elseif x > 5; then return 2; else return 1; fi
+}
+fnc braced(int x): int {
+  if (x eq 1) { return 10; } fi
+  if x eq 2 {
+    return 20;
+  } elif x eq 3 {
+    return 30;
+  } else {
+    return 40;
+  } fi
+}
+pub fnc main(): int {
+  return classify(7) + braced(3);
+}
