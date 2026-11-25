@@ -73,7 +73,7 @@ end
         "{formatted}"
     );
     assert!(
-        formatted.contains("const int explicit_constant: 7;"),
+        formatted.contains("const int explicit_constant = 7;"),
         "{formatted}"
     );
     assert!(
