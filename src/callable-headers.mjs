@@ -3,6 +3,7 @@
  * Accepted spelling contract: atto-spec language/callable-body-styles-v1.md.
  */
 import { assert_namespace_header_order } from './namespace-header-guard.mjs';
+import { normalize_task_aliases } from './task-aliases.mjs';
 
 export function normalize_callable_headers(source) {
   assert_namespace_header_order(source);
@@ -222,5 +223,5 @@ export function normalize_callable_headers(source) {
   edits.sort((a, b) => b.start - a.start);
   let result = source;
   for (const { start, end, replacement } of edits) result = result.slice(0, start) + replacement + result.slice(end);
-  return result;
+  return normalize_task_aliases(result);
 }
