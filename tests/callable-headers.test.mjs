@@ -88,3 +88,31 @@ for (const [name,input,expected] of cases) {
     assert.equal(normalize_callable_headers(output), output, 'format twice equals format once');
   });
 }
+
+test('canonical public generic class factory and methods omit fnc, free and static functions retain it', () => {
+  const input = `define pub class Container[T]
+    implements Newable[Container[T]] as
+  pub fnc new(): Container[T] { return new Container[T](); }
+  val int count = 21;
+  val bool ready = true;
+  val string label = "fnc fake()";
+  fnc hidden(T value): T { return value; }
+  pub fnc echo(T value): T { return value; }
+  pub fnc get_count(): int { return self.count; }
+  pub static fnc helper(): int { return 42; }
+end
+pub fnc main(): int { return 42; }`;
+  const expected = input.replace('pub fnc new(', 'pub new(')
+    .replace('fnc hidden(', 'hidden(').replace('pub fnc echo(', 'pub echo(')
+    .replace('pub fnc get_count(', 'pub get_count(');
+  assert.equal(normalize_callable_headers(input), expected);
+  assert.equal(normalize_callable_headers(expected), expected);
+});
+test('unclosed generic header cannot capture later free callable', () => {
+  const input = 'define pub class Box[T implements Newable[Box[T]] as\nend\npub fnc main(): int { return 42; }';
+  assert.equal(normalize_callable_headers(input), input);
+});
+test('generic factory comment boundary remains unchanged', () => {
+  const input = 'define pub class Box[T] implements Newable[Box[T]] as pub fnc /* keep */ new(): Box[T] { return new Box[T](); } end';
+  assert.equal(normalize_callable_headers(input), input);
+});

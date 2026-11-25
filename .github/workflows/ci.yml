@@ -25,6 +25,8 @@ jobs:
         run: |
           node --version
           node --test tests/*.test.mjs
+      - name: Run native Rust method spelling regression
+        run: cargo test --locked --offline --test method_spelling_forward_port
       - name: Real compiler conformance must not be inferred from JS-only checks
         run: |
           echo "Node golden tests are not a real parser/guest ABI proof."

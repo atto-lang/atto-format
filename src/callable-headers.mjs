@@ -70,8 +70,9 @@ export function normalize_callable_headers(source) {
       if (j < 0) return -1;
     } else {
       while (true) {
-        if (is(j, '<')) {
-          j = skipPaired(j, '<', '>');
+        if (is(j, '<') || (is(j, '[') && !is(j + 1, ']'))) {
+          const square = is(j, '[');
+          j = skipPaired(j, square ? '[' : '<', square ? ']' : '>');
           if (j < 0) return -1;
         }
         if ((is(j, '.') || is(j, '::')) && ident(j + 1)) {
@@ -140,10 +141,31 @@ export function normalize_callable_headers(source) {
     return -1;
   }
   for (let i = 0; i < toks.length; ++i) {
-    if (!is(i, 'define') || !(is(i + 1, 'class') || is(i + 1, 'actor'))) continue;
-    let as = i + 3;
-    while (as < toks.length && as < i + 20 && !is(as, 'as')) ++as;
-    if (!is(as, 'as')) continue;
+    // Recognize canonical define pub class and historical pub define class,
+    // with balanced generic parameters and nominal implements/extends lists.
+    if (!is(i, 'define')) continue;
+    let k = i + 1;
+    if (is(k, 'pub') || is(k, 'private')) ++k;
+    if (!(is(k, 'class') || is(k, 'actor')) || !ident(k + 1)) continue;
+    let as = k + 2;
+    if (is(as, '[') || is(as, '<')) {
+      const square = is(as, '[');
+      as = skipPaired(as, square ? '[' : '<', square ? ']' : '>');
+      if (as < 0) continue;
+    }
+    while (is(as, 'implements') || is(as, 'extends')) {
+      ++as;
+      let next = skipType(as);
+      if (next < 0) { as = -1; break; }
+      as = next;
+      while (is(as, ',')) {
+        next = skipType(as + 1);
+        if (next < 0) { as = -1; break; }
+        as = next;
+      }
+      if (as < 0) break;
+    }
+    if (as < 0 || !is(as, 'as')) continue;
     let j = as + 1;
     while (j < toks.length && !is(j, 'end')) {
       if (is(j, 'pub') || is(j, 'private')) { ++j; continue; }
