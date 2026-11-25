@@ -1,0 +1,24 @@
+name: Actor protocol formatter roundtrip (no compiler/runtime proof)
+on:
+  pull_request:
+    paths:
+      - 'src/lib.rs'
+      - 'tests/actor_protocol_roundtrip.rs'
+      - '.github/workflows/actor-protocol-formatter-v1.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/lib.rs'
+      - 'tests/actor_protocol_roundtrip.rs'
+      - '.github/workflows/actor-protocol-formatter-v1.yml'
+permissions:
+  contents: read
+jobs:
+  source-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Protocol declaration idempotence and source preservation
+        run: cargo test --test actor_protocol_roundtrip
