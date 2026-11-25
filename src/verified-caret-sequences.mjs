@@ -5,12 +5,21 @@
  */
 import {normalize_caret_sequence_spacing} from './caret-sequences.mjs';
 
-export async function normalize_verified_caret_sequences(source, compileGuest) {
+export async function normalize_verified_caret_sequences(
+  source, compileGuest, {language_version=1}={}
+) {
   if(typeof source!=='string' || typeof compileGuest!=='function')
     throw new TypeError('Atto source and real compiler callback required');
+  if(language_version!==1 && language_version!==2)
+    throw new RangeError('Unsupported Atto language_version; choose 1 or 2');
+  // An opt-in strict-v2 caller must provide a compiler callback that accepts
+  // an explicit edition; otherwise a legacy-only compiler might attest the
+  // wrong grammar and authorize a destructive write.
+  if(language_version===2 && compileGuest.length<2)
+    throw new TypeError('Version 2 formatting requires a version-aware compiler callback');
   const formatted=normalize_caret_sequence_spacing(source);
   const compile=async text=>{
-    const guest=await compileGuest(text);
+    const guest=await compileGuest(text, language_version);
     if(!(guest instanceof Uint8Array) || guest.byteLength<8 ||
        guest.byteLength>16*1024*1024 ||
        Buffer.from(guest.subarray(0,8)).toString('hex')!=='0061736d01000000' ||
