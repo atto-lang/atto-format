@@ -2221,7 +2221,7 @@ fn failure_signatures_and_recovery_preserve_semantics_and_are_idempotent() {
     let source = "fnc fail(): void throws raises panics {\nraise 42;\n}\nfnc handle(): void {\ndefer || -> { recover(); };\n}\n";
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("throws raises panics"));
-    assert!(formatted.contains("raise 42;"));
+    assert!(formatted.contains("raise! 42;"));
     assert!(formatted.contains("recover()"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
