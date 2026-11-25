@@ -4107,6 +4107,16 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
                 }
             }
         }
+        // A canonical borrow! mut qualifier belongs to the preceding borrow.
+        // Do not treat it as the start of a new legacy mut borrow! prefix.
+        // Skip the qualifier as a unit so nested canonical loans are stable.
+        if word(i) == "borrow" && i + 1 < words.len() && word(i + 1) == "mut"
+            && line[words[i].end..words[i + 1].start].strip_prefix('!')
+                .is_some_and(|gap| !gap.is_empty() && whitespace_only(gap))
+        {
+            i += 2;
+            continue;
+        }
         // Older mutable-borrow prefix remains accepted but must never survive
         // canonical formatting. Rewriting requires visible words, whitespace
         // between mut/borrow, and borrow immediately adjacent to its bang.

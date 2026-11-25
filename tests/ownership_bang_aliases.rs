@@ -86,6 +86,6 @@ fn dense_prefixes_format_linearly_without_losing_tokens() {
     let source = format!("fnc f(): int {{\n  return {old};\n}}\n");
     let result = format_source(&source).unwrap();
     assert_eq!(result.matches("borrow! mut ").count(), 256);
-    assert!(!result.contains("mut borrow!"), "{result}");
+    assert!(result.contains(&format!("return {}foo;", "borrow! mut ".repeat(256))), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
