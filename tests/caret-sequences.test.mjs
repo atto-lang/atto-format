@@ -137,3 +137,33 @@ test('version-gated seq syntax rejects before emitting a guest in this compiler'
       ()=>compileGuest('pub fnc main(): int { ^seq let x=5, x+37; }'),
       /E_SEMICOLON/);
 });
+
+test('guarded match return and caret arms preserve grammar and normalize only caret spacing', () => {
+  const returnForm = `
+fnc classify(int value): int {
+  return match value over
+    on 0 -> { return 0; }
+    on 1 -> { return 1; }
+    on n when n > 1 -> { return 2; }
+    on _ -> { return -1; }
+  end
+}
+fnc xyx(int value): int {
+  return match value over
+    on 0 -> 0,
+    on 1 -> 1,
+    on n when n > 1 -> 2,
+    on _ -> -1,
+  end
+}
+`;
+  const caretForm = returnForm.replaceAll('return match value over', '^match value over');
+  const expected = returnForm.replaceAll('return match value over', '^ match value over');
+  assert.equal(normalize_caret_sequence_spacing(returnForm), returnForm);
+  assert.equal(normalize_caret_sequence_spacing(caretForm), expected);
+  assert.equal(normalize_caret_sequence_spacing(expected), expected);
+  // Do not change arrow arms, binding guards, wildcards, the end delimiter,
+  // or braced early-return semantics.
+  assert.equal((expected.match(/on n when n > 1/g) || []).length, 2);
+  assert.equal((expected.match(/on _ ->/g) || []).length, 2);
+});
