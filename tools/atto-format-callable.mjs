@@ -38,7 +38,10 @@ async function compileGuest(input, selectedVersion) {
   try {
     const src=join(dir,'input.atto'),dst=join(dir,'guest.wasm');
     await writeFile(src,input,'utf8');
-    execFileSync(process.env.ATTOC,['--language-version',String(selectedVersion),src,'-o',dst],{timeout:15000,stdio:['ignore','pipe','pipe']});
+    // No explicit edition means the compiler's legacy/default-v1 entry point.
+    // An explicit request is never downgraded if the compiler rejects the flag.
+    const compilerArgs=versions.length===0 ? [src,'-o',dst] : ['--language-version',String(selectedVersion),src,'-o',dst];
+    execFileSync(process.env.ATTOC,compilerArgs,{timeout:15000,stdio:['ignore','pipe','pipe']});
     return await readFile(dst);
   } finally { await rm(dir,{recursive:true,force:true}); }
 }

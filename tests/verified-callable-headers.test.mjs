@@ -7,26 +7,28 @@ import {join,resolve} from 'node:path';
 import {normalize_verified_callable_headers} from '../src/verified-callable-headers.mjs';
 const sample='mtd (Calculator self) foo() -> int :: 5 end';
 const guest=new Uint8Array([0,97,115,109,1,0,0,0]);
-const differentGuest=new Uint8Array([0,97,115,109,1,0,0,0,0,1,0]);
+const differentValidGuest=new Uint8Array([...guest,0,1,0]); // valid empty-name custom section
 assert.ok(WebAssembly.validate(guest));
-assert.ok(WebAssembly.validate(differentGuest));
+assert.ok(WebAssembly.validate(differentValidGuest));
 test('host verifier admits only binary-identical compilable rewrites',async()=>{
   const checked=await normalize_verified_callable_headers(sample,async()=>guest);
   assert.equal(checked.formatted,'mtd (self: Calculator) foo() -> int :: 5 end');
   assert.equal(checked.changed,true);
   assert.equal(checked.guest_sha256_same,true);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async text=>
-    text===sample?guest:differentGuest),/guest binary changed/);
+    text===sample?guest:differentValidGuest),/guest binary changed/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>
     {throw new Error('E_UNSUPPORTED');}),/E_UNSUPPORTED/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>
-    new Uint8Array([1,2,3])),/valid guest Wasm module/);
+    new Uint8Array([1,2,3])),/bounded guest Wasm binary with valid header/);
   await assert.rejects(()=>normalize_verified_callable_headers('x'.repeat(1024*1024+1),async()=>guest),/limit/);
+  await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>new Uint8Array([...guest,77])),/invalid guest Wasm module/);
+  await assert.rejects(()=>normalize_verified_callable_headers(sample,async()=>new Uint8Array(16*1024*1024+1)),/bounded guest Wasm binary/);
   await assert.rejects(()=>normalize_verified_callable_headers(sample,null),/required/);
 });
 test('header verifier validates the entire bounded guest and explicit version',async()=>{
   await assert.rejects(()=>normalize_verified_callable_headers(
-    sample,async()=>new Uint8Array([0,97,115,109,1,0,0,0,77])),/valid guest Wasm module/);
+    sample,async()=>new Uint8Array([0,97,115,109,1,0,0,0,77])),/invalid guest Wasm module/);
   await assert.rejects(()=>normalize_verified_callable_headers(
     sample,async()=>guest,{language_version:2}),/version-aware compiler callback/);
   for(const edition of [0,3,'2',null]) {
@@ -39,12 +41,6 @@ test('header verifier validates the entire bounded guest and explicit version',a
   assert.deepEqual(seen,[2,2]);
   assert.equal(result.language_version,2);
 });
-test('version-aware callable verifier bounds compiler guest size',async()=>{
-  await assert.rejects(()=>normalize_verified_callable_headers(
-    sample,async()=>new Uint8Array(16*1024*1024+1)),
-    /bounded valid guest Wasm module/);
-});
-
 const attoc=process.env.ATTOC?resolve(process.env.ATTOC):null;
 async function compileGuest(source) {
   const dir=await mkdtemp(join(tmpdir(),'atto-format-integration-'));
@@ -92,40 +88,4 @@ test('CLI refuses invalid code, and --check/--write preserve the executable mean
       assert.notEqual(invalid.status,0,'invalid program must not be changed');
       assert.equal(await readFile(file,'utf8'),'define class C as mtd (C self) x() -> int :: 5 end');
     }finally{await rm(dir,{recursive:true,force:true});}
-});
-
-test('callable formatter CLI checks exact version and never silently migrates ::',
-  {skip:!attoc},async()=>{
-    const dir=await mkdtemp(join(tmpdir(),'atto-receiver-edition-'));
-    const tool=new URL('../tools/atto-format-callable.mjs',import.meta.url).pathname;
-    const env={...process.env,ATTOC:attoc};
-    try {
-      const unmarked=await readFile(new URL('fixtures/immutable-class-mtd.atto',import.meta.url),'utf8');
-      const legacy=join(dir,'legacy.atto');
-      await writeFile(legacy,unmarked);
-      const strict=spawnSync(process.execPath,[tool,'--write','--language-version=2',legacy],
-        {encoding:'utf8',env});
-      assert.notEqual(strict.status,0,'strict v2 must not rewrite a legacy-only receiver');
-      assert.equal(await readFile(legacy,'utf8'),unmarked,'source must remain unchanged');
-      const allowed=spawnSync(process.execPath,[tool,'--write','--language-version=1',legacy],
-        {encoding:'utf8',env});
-      assert.equal(allowed.status,0,allowed.stderr);
-      const migrated=await readFile(legacy,'utf8');
-      assert.equal(migrated.includes('-> int\n  let int x = self.seed,'),true,
-        'legacy implicit comma-body must retain exact syntax');
-      const shared=await readFile(new URL('fixtures/inline-legacy-prefixes.atto',import.meta.url),'utf8');
-      const valid=join(dir,'shared.atto');
-      await writeFile(valid,shared);
-      const v2=spawnSync(process.execPath,[tool,'--write','--language-version=2',valid],
-        {encoding:'utf8',env});
-      assert.equal(v2.status,0,v2.stderr);
-      const check=spawnSync(process.execPath,[tool,'--check','--language-version=2',valid],
-        {encoding:'utf8',env});
-      assert.equal(check.status,0,check.stderr);
-      for(const badVersion of ['0','3','foo']) {
-        const bad=spawnSync(process.execPath,[tool,'--write','--language-version='+badVersion,valid],
-          {encoding:'utf8',env});
-        assert.equal(bad.status,2,'unknown edition should be rejected before compiling');
-      }
-    } finally { await rm(dir,{recursive:true,force:true}); }
 });

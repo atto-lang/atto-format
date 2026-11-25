@@ -1,0 +1,28 @@
+# Reviewed acceptance-delta findings for scripts/check_formatter_acceptance_delta.py --triaged.
+# CASE<TAB>FINDING<TAB>reason. Cases are <corpus-dir-name>/<path> from the 2026-11-08 wide audit.
+# Each is a documented formatter migration that repairs source a compiler rejected;
+# none changes the meaning of source the compiler already accepted.
+oreslang-common-source/contracts/atto-scalar-v1/positive/pure-call.atto	newly-accepted:llvm	name-first parameters (a: int) migrate to type-first (int a); LLVM rejects name-first, Java accepts both
+oreslang-compilers-parity-testing/checks/parameter-syntax/name-first.ores	newly-accepted:llvm	name-first parameters (a: int) migrate to type-first (int a); LLVM rejects name-first, Java accepts both
+oreslang-demo/examples/features/01_async_await.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/features/06_option_unwrap.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/features/imports/math.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/keywords/01_defer.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/keywords/07_actor_no_caller_stack.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/keywords/08_async_await_contract.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/keywords/09_async_no_sync_fallback.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demo/examples/keywords/12_gc_contract.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/cli/math.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/cli/math.ores	newly-accepted:llvm	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/cli/messages.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/desktop-app/body.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/desktop-app/title.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/desktop-app/window.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/desktop-app/window.ores	newly-accepted:llvm	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/interop/OreslangEmbedsJava.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/web-server/health.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+oreslang-demos/web-server/index.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+gh-linguist-fork/samples/Oreslang/web_index.ores	newly-accepted:java	executable callable => migrates to -> (Java: named executable callables use : or ->) and module headers gain as
+orestra/.toolchain/java/src/contracts/atto-scalar-v1/positive/pure-call.atto	newly-accepted:llvm	name-first parameters (a: int) migrate to type-first (int a); LLVM rejects name-first, Java accepts both
+atto-lang/atto-source.rs/tests/fixtures/pass/43-param-name-colon-form.atto	newly-accepted:llvm	name-first parameters (a: int) migrate to type-first (int a); LLVM rejects name-first, Java accepts both
+java-main/contracts/atto-scalar-v1/positive/pure-call.atto	newly-accepted:llvm	name-first parameters (a: int) migrate to type-first (int a); LLVM rejects name-first, Java accepts both

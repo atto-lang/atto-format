@@ -17,7 +17,7 @@ test('caret/sequence formatter never rewrites nominal is-ADT binders or unary st
   }
 });
 test('comments and strings containing constructor-shaped text are opaque',()=>{
-  const code='// on is Ok<_> -> match << input\\n'+
-    'pub fnc main(): int { val s="on is Some<item>"; return 0; }';
-  assert.equal(normalize_caret_sequence_spacing(code),code);
+  const code='// on is Ok<_> -> match << input\n'+
+    'pub fnc main(): int { val s="on is Some<item>"; ^0; }';
+  assert.equal(normalize_caret_sequence_spacing(code),code.replace('^0','^ 0'));
 });

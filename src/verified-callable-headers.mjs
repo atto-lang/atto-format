@@ -1,12 +1,11 @@
-/** Compiler-verified receiver-header normalization.
- * The same selected language version is used to compile before and after;
- * a header rewrite may NEVER migrate an unmarked comma body into v2.
+/** Admission gate for canonicalizing Atto method/receiver headers.
+ * The caller must supply the *real* compiler, not a JS syntax simulation.
+ * A normalized result is usable only when both sources compile to exactly
+ * the same guest binary. Unsupported/invalid source fails closed.
  */
 import { normalize_callable_headers } from './callable-headers.mjs';
 
-export async function normalize_verified_callable_headers(
-  source, compileGuest, {language_version=1}={}
-) {
+export async function normalize_verified_callable_headers(source, compileGuest, {language_version=1}={}) {
   if (typeof source !== 'string' || typeof compileGuest !== 'function')
     throw new TypeError('Source and compiler callback are required');
   if (language_version!==1 && language_version!==2)
@@ -19,16 +18,16 @@ export async function normalize_verified_callable_headers(
   const read = async (text) => {
     const guest = await compileGuest(text,language_version);
     if (!(guest instanceof Uint8Array) || guest.byteLength < 8 ||
-        guest.byteLength>16*1024*1024 ||
-        Buffer.from(guest.subarray(0, 8)).toString('hex') !== '0061736d01000000' ||
-        !WebAssembly.validate(guest))
-      throw new Error('Compiler did not return a bounded valid guest Wasm module');
+        guest.byteLength > 16 * 1024 * 1024 ||
+        Buffer.from(guest.subarray(0, 8)).toString('hex') !== '0061736d01000000')
+      throw new Error('Compiler did not return a bounded guest Wasm binary with valid header');
+    if (!WebAssembly.validate(guest))
+      throw new Error('Compiler returned an invalid guest Wasm module');
     return Buffer.from(guest);
   };
   const before = await read(source);
   const after = formatted === source ? before : await read(formatted);
   if (!before.equals(after))
     throw new Error('Unsafe callable formatting: guest binary changed');
-  return {ok:true, changed:formatted!==source,
-    formatted,guest_sha256_same:true, language_version};
+  return { ok: true, changed: formatted !== source, formatted, guest_sha256_same: true, language_version };
 }
