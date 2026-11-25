@@ -1,35 +1,23 @@
 use oreslang_format::{format_source, is_formatted};
 
 #[test]
-fn canonicalizes_spaced_compact_and_legacy_ownership_prefixes() {
+fn canonicalizes_spaced_and_legacy_ownership_prefixes() {
     for (input, expected) in [
-        ("copy!foo", "copy! foo"),
-        ("copy!eqfoo", "copy! eqfoo"),
-        ("copy!eqé", "copy! eqé"),
         ("copy!   foo", "copy! foo"),
         ("rt copy foo", "copy! foo"),
-        ("take!foo", "take! foo"),
         ("rt take foo", "take! foo"),
-        ("borrow!foo.member", "borrow! foo.member"),
         ("rt borrow foo", "borrow! foo"),
         ("borrow! mut foo", "borrow! mut foo"),
-        ("borrow!mut foo", "borrow! mut foo"),
         ("borrow! mutfoo", "borrow! mutfoo"),
         // The complete 'mut' keyword is required; mutfoo stays the name of
         // an immutable-loan operand even in the compact source form.
-        ("borrow!mutfoo", "borrow! mutfoo"),
-        ("borrow!mut(value)", "borrow! mut (value)"),
         ("borrow! mut(value)", "borrow! mut (value)"),
-        ("mut borrow!foo", "borrow! mut foo"),
         ("mut borrow! foo", "borrow! mut foo"),
         ("rt mut borrow foo", "borrow! mut foo"),
         ("rt borrow mut foo", "borrow! mut foo"),
         ("rt mut borrow(foo)", "borrow! mut (foo)"),
-        ("share!foo", "share! foo"),
         ("rt share foo", "share! foo"),
         ("rt copy !foo", "copy! !foo"),
-        ("copy!!foo", "copy! !foo"),
-        ("copy!(foo + bar)", "copy! (foo + bar)"),
     ] {
         let source = format!("fnc f(): int {{\n  return {input};\n}}\n");
         let output = format_source(&source).expect(input);
@@ -80,7 +68,7 @@ fn mixed_legacy_and_bang_tokens_never_create_double_bang() {
 
 #[test]
 fn dense_prefixes_format_linearly_without_losing_tokens() {
-    let nested = "copy!".repeat(256) + "foo";
+    let nested = "copy! ".repeat(256) + "foo";
     let source = format!("fnc f(): int {{\n  return {nested};\n}}\n");
     let result = format_source(&source).unwrap();
     assert_eq!(result.matches("copy! ").count(), 256);
@@ -94,7 +82,7 @@ fn dense_prefixes_format_linearly_without_losing_tokens() {
 
     // A long chain of compatibility mutable-loan prefixes must not incur
     // quadratic suffix rewriting or accidentally duplicate the qualifier.
-    let old = "mut borrow!".repeat(256) + "foo";
+    let old = "mut borrow! ".repeat(256) + "foo";
     let source = format!("fnc f(): int {{\n  return {old};\n}}\n");
     let result = format_source(&source).unwrap();
     assert_eq!(result.matches("borrow! mut ").count(), 256);

@@ -577,7 +577,41 @@ pub fn format_source_with_mtd(source: &str) -> Result<String, FormatError> {
     format_source_impl(source, true)
 }
 
+// Validate original code before any normalizer can repair invalid syntax.
+fn reject_compact_bang_keywords(source: &str) -> Result<(), FormatError> {
+    let mut lex = LexState::default();
+    let mut lines = source.split('\n').peekable();
+    let mut number = 0;
+    while let Some(line) = lines.next() {
+        number += 1;
+        for span in visible_word_spans(line, lex) {
+            let word = &line[span.start..span.end];
+            if !matches!(word, "trap" | "throw" | "raise" | "panic" | "copy" | "take"
+                | "borrow" | "share" | "pin" | "drop" | "pipe" | "rpipe" | "stop" | "expand")
+                || line[..span.start].ends_with('#') {
+                continue;
+            }
+            let Some(suffix) = line[span.end..].strip_prefix('!') else { continue; };
+            if suffix.starts_with('=') || (suffix.starts_with("eq") &&
+                suffix[2..].chars().next().is_none_or(|c| !is_ident_char(c))) {
+                continue;
+            }
+            let rest = if word == "copy" { suffix.strip_prefix('!').unwrap_or(suffix) } else { suffix };
+            let valid = rest.as_bytes().first().is_some_and(|b|
+                matches!(*b, b' ' | b'\t' | b'\r' | 0x0b | 0x0c))
+                || (rest.is_empty() && lines.peek().is_some());
+            if !valid {
+                return Err(FormatError::new(number,
+                    "E_BANG_KEYWORD_WHITESPACE: whitespace required after bang keyword"));
+            }
+        }
+        let _ = scan_visible(line, &mut lex);
+    }
+    Ok(())
+}
+
 fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatError> {
+    reject_compact_bang_keywords(source)?;
     reject_pointer_style_ownership_syntax(source)?;
     reject_multiline_literals(source)?;
     let normalized = source.replace("\r\n", "\n");
@@ -4088,7 +4122,7 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
         if !verb(name) || !result[span.end..].starts_with('!') {
             continue;
         }
-        let at = span.end + 1;
+        let at = span.end + if name == "copy" && result[span.end..].starts_with("!!") { 2 } else { 1 };
         let suffix = &result[at..];
         if suffix.starts_with('=') || (suffix.starts_with("eq")
             // Java accepts BMP Unicode letters in identifiers; an ASCII
