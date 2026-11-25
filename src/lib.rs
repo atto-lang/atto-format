@@ -369,8 +369,13 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
                 *index += 1;
             } else {
                 let candidate = chunks[*index];
-                if !candidate.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                    || !candidate.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                if !candidate
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    || !candidate
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
                 {
                     return false;
                 }
@@ -3156,9 +3161,9 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         .or_else(|| lower.strip_prefix("private "))
         .unwrap_or(lower);
     if ["const", "let", "val", "final"].iter().any(|keyword| {
-        binding_head.strip_prefix(keyword).is_some_and(|rest| {
-            rest.starts_with(char::is_whitespace)
-        })
+        binding_head
+            .strip_prefix(keyword)
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
     }) {
         return false;
     }
@@ -5311,5 +5316,4 @@ end
         assert!(format_source("fnc bad(int x): typeof !x { return x; }\n").is_err());
         assert!(format_source("type F = typeof fnc(int) => int;\n").is_ok());
     }
-
 }
