@@ -48,12 +48,16 @@ impl std::error::Error for FormatError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DefineKind {
+    Maybe,
+    Try,
     Switch,
     Match,
     Select,
     Module,
     Class,
     Actor,
+    Protocol,
+    ProtocolState,
     Interface,
     Contract,
     Trait,
@@ -695,6 +699,8 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let mut pending_blank = false;
     let mut prev_event = PrevEvent::Other;
     let mut define_stack: Vec<DefineFrame> = Vec::new();
+    // Atto maybe v1 requires one explicit value-failure else before end.
+    let mut maybe_else_orders = std::collections::HashSet::<usize>::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
     let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
     let mut lex = LexState::default();
@@ -833,8 +839,29 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
         let starts_fi = starts_block_keyword(structural, "fi");
         let starts_done = starts_block_keyword(structural, "done");
+        // A keyword/end try owns its catch/finally arms; braced try forms
+        // are outside this stack and retain their original layout.
+        let try_arm = (starts_word(structural, "catch")
+            || starts_block_keyword(structural, "finally"))
+            && define_stack.last().is_some_and(|frame| {
+                frame.kind == DefineKind::Try
+                    && frame.brace_depth == brace_stack.len()
+                    && frame.keyword_depth == keyword_stack.len()
+            });
+        let maybe_else = starts_block_keyword(structural, "else")
+            && define_stack.last().is_some_and(|frame| {
+                frame.kind == DefineKind::Maybe
+                    && frame.brace_depth == brace_stack.len()
+                    && frame.keyword_depth == keyword_stack.len()
+            });
         let branch_line =
             starts_block_keyword(structural, "else") || starts_block_keyword(structural, "elif");
+        if maybe_else {
+            let owner = define_stack.last().expect("matching maybe frame");
+            if !maybe_else_orders.insert(owner.order) {
+                return Err(FormatError::new(line_no, "duplicate maybe else handler"));
+            }
+        }
 
         let fi_keyword_indented =
             starts_fi && matches!(keyword_stack.last(), Some(KeywordTerminator::FiKeyword));
@@ -878,6 +905,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         }
 
         if branch_line
+            && !maybe_else
             && !matches!(
                 keyword_stack.last(),
                 Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced)
@@ -891,7 +919,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         let leading_closing_braces = leading_closing_braces(structural);
         let keyword_dedent = usize::from(
-            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented,
+            starts_end || starts_done || fi_keyword_indented || branch_keyword_indented || try_arm || maybe_else,
         );
         let pre_dedent = leading_closing_braces + keyword_dedent;
         indent = indent.saturating_sub(pre_dedent);
@@ -913,6 +941,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             }
             if frame.kind == DefineKind::Callable {
                 ended_end_callable = Some(indent);
+            }
+            if frame.kind == DefineKind::Maybe && !maybe_else_orders.remove(&frame.order) {
+                return Err(FormatError::new(
+                    line_no,
+                    "maybe v1 requires an else handler before end",
+                ));
             }
             define_stack.pop();
         }
@@ -1147,11 +1181,25 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             indent = indent.saturating_sub(nonleading_closes - opens);
         }
 
-        if let Some(kind) = define_kind(structural) {
+        // Protocol state blocks are end-delimited only inside a protocol. A
+        // plain actor state field or a call named state must not open a frame.
+        let mut protocol_words = structural.split_whitespace();
+        let state_header = matches!(
+            (protocol_words.next(), protocol_words.next(),
+             protocol_words.next(), protocol_words.next()),
+            (Some("state"), Some(_name), Some("as"), None)
+        );
+        let protocol_state = define_stack.last().is_some_and(|f|
+            f.kind == DefineKind::Protocol) && state_header;
+        if let Some(kind) = if protocol_state {
+            Some(DefineKind::ProtocolState)
+        } else { define_kind(structural) } {
             // Empty type-only bodies may keep their matching `as end` on
             // one line; they must not leave a phantom block frame behind.
-            let compact_empty_type = matches!(kind, DefineKind::Trait | DefineKind::Interface)
-                && structural.trim_end().ends_with(" as end");
+            let compact_empty_type = matches!(
+                kind,
+                DefineKind::Trait | DefineKind::Interface | DefineKind::Actor
+            ) && structural.trim_end().ends_with(" as end");
             if !structural.contains('{') && !ends_statement(structural) && !compact_empty_type {
                 next_order += 1;
                 define_stack.push(DefineFrame {
@@ -1162,6 +1210,37 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 });
                 indent += 1;
             }
+        }
+
+        // "try" without an opening brace is an end-delimited block.
+        // Store it alongside callable/dispatch frames so nested constructs
+        // close at their own END and cannot steal the outer try terminator.
+        if structural.trim() == "try" {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Try,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
+        // These contextual forms open an end-delimited value-match scope.
+        // A variable named maybe (e.g. return maybe;) is not a scope.
+        if matches!(structural.trim(), "do maybe" | "return maybe") {
+            next_order += 1;
+            define_stack.push(DefineFrame {
+                kind: DefineKind::Maybe,
+                order: next_order,
+                brace_depth: brace_stack.len(),
+                keyword_depth: keyword_stack.len(),
+            });
+            indent += 1;
+        }
+
+        if try_arm || maybe_else {
+            indent += 1;
         }
 
         if end_delimited_callable {
@@ -1992,7 +2071,7 @@ fn canonicalize_declaration_line(
     }
 
     (instance_member
-        .then(|| canonicalize_instance_method_fnc(line, &words))
+        .then(|| canonicalize_instance_method_prefix(line, &words))
         .flatten())
     .or_else(|| {
         class_member
@@ -2131,10 +2210,11 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
-// Legacy "fnc name(...)" inside a class or actor is an instance method,
-// not a static, reifiable function. Drop only that declaration marker.
-// In particular never touch static fnc, comments, strings or nested callables.
-fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<String> {
+// In a class or actor, legacy `fnc name(...)` denotes an instance method and
+// becomes a bare declaration; legacy `method name(...)` becomes canonical
+// `mtd name(...)`. Keep existing `mtd`, statics, named methods, literals,
+// comments and nested callable bodies untouched.
+fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_modifier = |word: &str| {
         matches!(
             word,
@@ -2149,15 +2229,23 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         )
     };
     let mut prefix_len = 0;
-    let mut saw_fnc = false;
+    let mut keyword: Option<&str> = None;
     let mut modifiers: Vec<&str> = Vec::new();
     for span in words {
         let word = &line[span.start..span.end];
-        if word == "fnc" {
-            if saw_fnc {
+        if matches!(word, "fnc" | "method") {
+            if keyword.is_some() {
+                // A callable can literally be named method(), including
+                // "method method()" and "fnc method()". The second word is
+                // the name when immediately followed by '(' or '<', not a
+                // second declaration introducer.
+                let following = line[span.end..].trim_start();
+                if following.starts_with('(') || following.starts_with('<') {
+                    break;
+                }
                 return None;
             }
-            saw_fnc = true;
+            keyword = Some(word);
         } else if is_modifier(word) {
             if modifiers.contains(&word) {
                 return None;
@@ -2168,7 +2256,7 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
         }
         prefix_len += 1;
     }
-    if !saw_fnc || prefix_len >= words.len() {
+    if keyword.is_none() || prefix_len >= words.len() {
         return None;
     }
     // No static modifier, comments, punctuation or expressions may appear
@@ -2206,6 +2294,9 @@ fn canonicalize_instance_method_fnc(line: &str, words: &[WordSpan]) -> Option<St
     if !canonical.is_empty() {
         out.push_str(&canonical.join(" "));
         out.push(' ');
+    }
+    if keyword == Some("method") {
+        out.push_str("mtd ");
     }
     out.push_str(&line[name.start..]);
     Some(out)
@@ -2692,6 +2783,19 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
     {
         return false;
     }
+    // Contextual bang spellings are aliases of the corresponding pipeline
+    // words. Treat a contiguous, whole-word "pipe!" / "rpipe!" at the end
+    // of a visible line as a continuation without rewriting its spelling.
+    if let Some(prefix) = line.strip_suffix('!') {
+        let word_start = prefix
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !is_ident_char(c))
+            .map_or(0, |(at, c)| at + c.len_utf8());
+        if matches!(&prefix[word_start..], "pipe" | "rpipe") {
+            return true;
+        }
+    }
     let mut chars = line.chars().rev();
     let Some(last) = chars.next() else {
         return false;
@@ -2710,9 +2814,27 @@ fn ends_with_continuation_operator(structural: &str) -> bool {
                 .rev()
                 .find(|&(_, c)| !is_ident_char(c))
                 .map_or(0, |(at, c)| at + c.len_utf8());
-            matches!(&line[word_start..], "and" | "or" | "pipe")
+            matches!(&line[word_start..], "and" | "or" | "pipe" | "rpipe")
         }
     }
+}
+
+// Only whole contextual pipeline words may begin a continuation. A
+// non-word immediately after the contiguous bang is required, so identifiers
+// such as pipe!suffix or rpipe!suffix do not receive operator indentation.
+fn starts_pipeline_keyword(line: &str, word: &str) -> bool {
+    if !starts_word(line, word) {
+        return false;
+    }
+    let suffix = &line[word.len()..];
+    let Some(after_bang) = suffix.strip_prefix('!') else {
+        return true;
+    };
+    !after_bang.starts_with('!')
+        && after_bang
+            .chars()
+            .next()
+            .is_none_or(|c| !is_ident_char(c))
 }
 
 /// A visible line beginning with a binary operator continues the previous one.
@@ -2724,7 +2846,8 @@ fn starts_with_continuation_operator(structural: &str) -> bool {
         || (line.starts_with('.') && !line.starts_with(".."))
         || starts_word(line, "and")
         || starts_word(line, "or")
-        || starts_word(line, "pipe")
+        || starts_pipeline_keyword(line, "pipe")
+        || starts_pipeline_keyword(line, "rpipe")
 }
 
 fn set_once(value: &mut bool) -> bool {
@@ -2832,6 +2955,7 @@ fn define_kind(line: &str) -> Option<DefineKind> {
             "module" => return Some(DefineKind::Module),
             "class" => return Some(DefineKind::Class),
             "actor" | "isoactor" => return Some(DefineKind::Actor),
+            "protocol" => return Some(DefineKind::Protocol),
             "interface" => return Some(DefineKind::Interface),
             "contract" => return Some(DefineKind::Contract),
             "trait" => return Some(DefineKind::Trait),
@@ -2947,16 +3071,36 @@ fn canonicalize_initialize_header(
 
 fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> bool {
     let line = structural.trim();
+    // A static fnc *inside a class* is still a legitimate :: callable.
+    // Do not relax the ban for top-level static declarations, nor treat an
+    // arbitrary static member as a callable frame without an exact marker.
+    let static_class_function = instance_member
+        && contains_word(line, "static")
+        && contains_word(line, "fnc")
+        && line.ends_with("::");
     if line.ends_with(';')
         || contains_word(line, "actor")
         || contains_word(line, "isoactor")
-        || contains_word(line, "static")
+        || (contains_word(line, "static") && !static_class_function)
         || contains_word(line, "abstract")
         || starts_word(line, "constructor")
     {
         return false;
     }
-    let standalone = contains_word(line, "fnc") || contains_word(line, "routine");
+    // An out-of-line 'mtd (receiver) method(args) -> Type' has two
+    // parenthesized groups. The first is the receiver, not the callable
+    // parameters. Only accept a visible mtd introducer, never a stray 'mtd'
+    // appearing inside a parameter, return type, string, or ordinary call.
+    let without_visibility = line
+        .strip_prefix("pub ")
+        .or_else(|| line.strip_prefix("private "))
+        .unwrap_or(line)
+        .trim_start();
+    // Inside a class, mtd is a normal single-parameter-list instance method.
+    // Only free-standing mtd declarations have the separate receiver group.
+    let out_of_line_mtd = !instance_member && starts_word(without_visibility, "mtd");
+    let standalone =
+        contains_word(line, "fnc") || contains_word(line, "routine") || out_of_line_mtd;
     // Bare class and actor methods have no 'fnc' introducer. Requiring an
     // explicit '::' avoids misclassifying a field, call or incomplete header.
     if !line.contains('(')
@@ -2965,8 +3109,32 @@ fn is_end_delimited_callable_header(structural: &str, instance_member: bool) -> 
     {
         return false;
     }
-    let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
-        return false;
+    let close = if out_of_line_mtd {
+        let Some(receiver_close) = callable_parameter_close(line, line.len(), LexState::default())
+        else {
+            return false;
+        };
+        let after_receiver = &line[receiver_close + 1..];
+        let Some((method_open, method_close)) =
+            callable_parameter_bounds(after_receiver, after_receiver.len(), LexState::default())
+        else {
+            return false;
+        };
+        let method_name = after_receiver[..method_open].trim();
+        if !method_name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            || !method_name.chars().all(is_ident_char)
+        {
+            return false;
+        }
+        receiver_close + 1 + method_close
+    } else {
+        let Some(close) = callable_parameter_close(line, line.len(), LexState::default()) else {
+            return false;
+        };
+        close
     };
     let header_tail = line[close + 1..].trim();
     if !header_tail.starts_with("->") {
@@ -3002,6 +3170,20 @@ fn is_callable_body_header(structural: &str, signature_context: bool) -> bool {
         return false;
     }
     let lower = structural.trim_start();
+    // A typed *binding* may contain both a function-type arrow inside
+    // <(Args...) => Return> and an anonymous fnc(...) -> Return initializer.
+    // Its first parenthesis belongs to the type ascription, NOT to a callable
+    // declaration header. Never rewrite that type-level '=>' into '->'.
+    let binding_head = lower
+        .strip_prefix("pub ")
+        .or_else(|| lower.strip_prefix("private "))
+        .unwrap_or(lower);
+    if ["const", "let", "val", "final"]
+        .iter()
+        .any(|keyword| starts_word(binding_head, keyword))
+    {
+        return false;
+    }
     for kw in [
         "if", "for", "while", "switch", "match", "catch", "recover", "defer", "when", "case",
         "default",
@@ -3412,7 +3594,21 @@ fn canonicalize_pipe_lambda_parameter_order(line: &str, initial: LexState) -> St
             return line.to_string();
         };
         let candidate = search + relative;
-        if line[candidate + 1..].trim_start().starts_with("->") {
+        let suffix = line[candidate + 1..].trim_start();
+        // A colon-annotated return type sits between the closing pipe and
+        // the body arrow: |name: T| : void -> { ... }. Accept only a
+        // bounded, comment-free type spelling here; do not mistake an OR
+        // operator or a malformed colon suffix for a lambda header.
+        let colon_result = suffix.strip_prefix(':').and_then(|after_colon| {
+            let (ty, _) = after_colon.split_once("->")?;
+            let ty = ty.trim();
+            (!ty.is_empty() && ty.chars().all(|ch| {
+                ch.is_ascii_alphanumeric()
+                    || ch.is_ascii_whitespace()
+                    || matches!(ch, '_' | '.' | '<' | '>' | ',' | '?' | '[' | ']')
+            })).then_some(())
+        }).is_some();
+        if suffix.starts_with("->") || colon_result {
             break candidate;
         }
         search = candidate + 1;

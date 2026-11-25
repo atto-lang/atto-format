@@ -163,12 +163,85 @@ fn take_keyword(tokens: &[Token], at: &mut usize, keyword: &str) -> Option<()> {
     Some(())
 }
 
+// Returns a raw unescaped package selector for conservative binding analysis.
+// Resolution, export visibility, capability checks and initialization belong
+// to the compiler, not to the formatter.
+fn package_literal<'a>(token: &Token, source: &'a str) -> Option<&'a str> {
+    if !matches!(&token.kind, Kind::Literal) {
+        return None;
+    }
+    let quoted = source.get(token.start..token.end)?;
+    if quoted.len() < 3 {
+        return None;
+    }
+    let quote = quoted.as_bytes()[0];
+    if !matches!(quote, b'\'' | b'"') || *quoted.as_bytes().last()? != quote {
+        return None;
+    }
+    let identity = quoted.get(1..quoted.len() - 1)?;
+    if identity.is_empty()
+        || identity.contains('\\')
+        || identity.contains("..")
+        || identity.starts_with('.')
+        || identity.starts_with('/')
+        || identity.ends_with('/')
+        || identity.contains("//")
+        || !identity.chars().all(|ch| ch.is_ascii_alphanumeric()
+            || matches!(ch, '_' | '-' | '.' | '/' | '@' | '+'))
+    {
+        return None;
+    }
+    Some(identity)
+}
+
+fn safe_package_alias(name: &str) -> bool {
+    let Some(first) = name.chars().next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    if !name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        return false;
+    }
+    !matches!(name, "import" | "from" | "as" | "module" | "pkg"
+        | "class" | "actor" | "type" | "fnc" | "pub" | "self"
+        | "use" | "namespace")
+}
+
+fn package_implicit_binding(identity: &str) -> Option<String> {
+    let name = identity.rsplit('.').next()?;
+    if !safe_package_alias(name) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
 // Returns locally exposed bindings and the token immediately after ';'.
 // Unknown or malformed imports are left active rather than guessed at.
-fn parse_import(tokens: &[Token], start: usize) -> Option<(Vec<String>, usize)> {
+fn parse_import(tokens: &[Token], start: usize, source: &str) -> Option<(Vec<String>, usize)> {
     let mut at = start;
     take_keyword(tokens, &mut at, "import")?;
     let mut bindings = Vec::new();
+    if tokens.get(at)?.word("pkg") {
+        at += 1;
+        let literal = tokens.get(at)?;
+        let identity = package_literal(literal, source)?;
+        at += 1;
+        let local_name = if tokens.get(at).is_some_and(|t| t.word("as")) {
+            at += 1;
+            let alias = take_word(tokens, &mut at)?;
+            if !safe_package_alias(alias) {
+                return None;
+            }
+            alias.to_string()
+        } else {
+            package_implicit_binding(identity)?
+        };
+        bindings.push(local_name);
+        take_mark(tokens, &mut at, ';')?;
+        return Some((bindings, at));
+    }
     if tokens.get(at)?.mark('*') {
         at += 1;
         take_keyword(tokens, &mut at, "as")?;
@@ -222,6 +295,11 @@ fn parse_import(tokens: &[Token], start: usize) -> Option<(Vec<String>, usize)> 
         }
     }
     take_keyword(tokens, &mut at, "from")?;
+    // The package selector is a dependency kind, not a local identifier.
+    if tokens.get(at).is_some_and(|t| t.word("pkg")) {
+        at += 1;
+        package_literal(tokens.get(at)?, source)?;
+    }
     if !matches!(&tokens.get(at)?.kind, Kind::Literal) {
         return None;
     }
@@ -277,7 +355,7 @@ pub(super) fn comment_unused(source: &str) -> String {
     let mut imports = Vec::new();
     while all.get(at).is_some_and(|t| t.word("import")) {
         let first_token = at;
-        let Some((bindings, next)) = parse_import(&all, at) else {
+        let Some((bindings, next)) = parse_import(&all, at, source) else {
             return source.to_owned();
         };
         let first_offset = all[first_token].start;

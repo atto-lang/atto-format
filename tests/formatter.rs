@@ -1262,7 +1262,7 @@ return value.id;
 }
 
 #[test]
-fn legacy_instance_fnc_is_canonicalized_but_explicit_method_and_static_fnc_remain() {
+fn legacy_instance_fnc_and_method_use_canonical_instance_spelling() {
     let input = r#"define actor ConnectionActor as
 final rooms: Map<RoomId, ActorGroup>
 
@@ -1292,10 +1292,10 @@ fnc standalone(): int { return 4; }
     let out = format_source(input).unwrap();
     assert!(out.contains("suspend join_room("), "{out}");
     assert!(out.contains("  leave_room(ActorGroup group) {"), "{out}");
-    assert!(out.contains("suspend method explicit_join("), "{out}");
+    assert!(out.contains("suspend mtd explicit_join("), "{out}");
     assert!(out.contains("static fnc static_send("), "{out}");
     assert!(out.contains("  legacy() -> int {"), "{out}");
-    assert!(out.contains("  method explicit() -> int {"), "{out}");
+    assert!(out.contains("  mtd explicit() -> int {"), "{out}");
     assert!(out.contains("  static fnc helper() -> int {"), "{out}");
     assert!(out.contains("fnc standalone() -> int {"), "{out}");
     assert!(!out.contains("fnc join_room"), "{out}");
@@ -1342,7 +1342,7 @@ end
         "{once}"
     );
     assert!(once.contains("  method_name() -> int {"), "{once}");
-    assert!(once.contains("  method method() -> int {"), "{once}");
+    assert!(once.contains("  mtd method() -> int {"), "{once}");
     assert_eq!(once, format_source(&once).unwrap());
 }
 
@@ -1374,7 +1374,7 @@ end
 "#;
     let out = format_source(src).unwrap();
     assert!(out.contains("  handle(): int {"), "{out}");
-    assert!(out.contains("  method explicit(): int {"), "{out}");
+    assert!(out.contains("  mtd explicit(): int {"), "{out}");
     assert!(out.contains("  static fnc helper(): int {"), "{out}");
     assert_eq!(out, format_source(&out).unwrap());
 }
@@ -2234,4 +2234,30 @@ fn unchecked_call_markers_preserve_call_scope() {
     assert!(formatted.contains("await unchecked fetch()"));
     assert!(formatted.contains("trap unchecked read()"));
     assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
+fn explicit_legacy_method_prefix_canonicalizes_to_mtd_without_stealing_method_names() {
+    let source = r#"define class C as
+  pub method explicit(): int { return 2; }
+  mtd already() -> int { return 3; }
+  method(): int { return 4; }
+  fnc legacy(): int { return 5; }
+  fnc method(): int { return 8; }
+  method method(): int { return 9; }
+  static fnc helper(): int { return 6; }
+end
+pub fnc method(): int { return 7; }
+"#;
+    let formatted = oreslang_format::format_source(source).unwrap();
+    assert!(formatted.contains("pub mtd explicit() -> int {"), "{formatted}");
+    assert!(formatted.contains("mtd already() -> int {"), "{formatted}");
+    assert!(formatted.contains("  method() -> int {"), "{formatted}");
+    assert!(formatted.contains("  legacy() -> int {"), "{formatted}");
+    assert!(formatted.contains("  method() -> int { return 8; }"), "{formatted}");
+    assert!(formatted.contains("  mtd method() -> int { return 9; }"), "{formatted}");
+    assert!(formatted.contains("static fnc helper() -> int {"), "{formatted}");
+    assert!(formatted.contains("pub fnc method() -> int {"), "{formatted}");
+    assert!(!formatted.contains("  method explicit()"), "{formatted}");
+    assert_eq!(formatted, oreslang_format::format_source(&formatted).unwrap());
 }
