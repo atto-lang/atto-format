@@ -114,6 +114,58 @@ struct LexState {
     escape: bool,
 }
 
+/// Normalize visible binding queries without changing comments or literals.
+fn canonicalize_typeof_queries(source: &str) -> Result<String, FormatError> {
+    let mut out = String::with_capacity(source.len());
+    let mut state = LexState::default();
+    for (line_idx, line) in source.split_inclusive('\n').enumerate() {
+        let words = visible_word_spans(line, state);
+        scan_visible(line, &mut state);
+        let mut previous = 0usize;
+        for span in words {
+            if span.start < previous || &line[span.start..span.end] != "typeof" {
+                continue;
+            }
+            // Member selectors and symbols are not the type-query keyword.
+            if line[..span.start].trim_end().ends_with(['.', '#']) {
+                continue;
+            }
+            let tail = line[span.end..].trim_start();
+            if tail.starts_with('!') {
+                return Err(FormatError::new(
+                    line_idx + 1,
+                    "typeof! is not a type query; use 'typeof name'",
+                ));
+            }
+            let Some(inner) = tail.strip_prefix('(') else {
+                continue;
+            };
+            let inner = inner.trim_start();
+            let Some(first) = inner.chars().next() else {
+                continue;
+            };
+            if !first.is_ascii_alphabetic() && first != '_' {
+                continue;
+            }
+            let end_name = inner
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .unwrap_or(inner.len());
+            let name = &inner[..end_name];
+            let after = inner[end_name..].trim_start();
+            if !after.starts_with(')') || name == "fnc" {
+                continue;
+            }
+            let end = line.len() - after.len() + 1;
+            out.push_str(&line[previous..span.start]);
+            out.push_str("typeof ");
+            out.push_str(name);
+            previous = end;
+        }
+        out.push_str(&line[previous..]);
+    }
+    Ok(out)
+}
+
 fn normalize_header_type_source(text: &str) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -316,7 +368,19 @@ fn parse_type_atom_chunks(chunks: &[&str], index: &mut usize) -> bool {
             } else if chunks[*index].starts_with("fnc(") {
                 *index += 1;
             } else {
-                return false;
+                let candidate = chunks[*index];
+                if !candidate
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    || !candidate
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    return false;
+                }
+                *index += 1;
+                return true;
             }
             if *index >= chunks.len() || chunks[*index] != "=>" {
                 return false;
@@ -596,6 +660,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             "bare CR line terminator is ambiguous (comment boundaries differ between the compilers and the spec); convert the file to LF or CRLF first",
         ));
     }
+    let normalized = canonicalize_typeof_queries(&normalized)?;
     let normalized = canonicalize_hash_symbol_quotes(&normalized);
     // Legacy/hand-formatted explicit callable headers may already split their
     // parameter list across physical lines. Reassemble only that narrow header
@@ -5226,5 +5291,29 @@ end
         assert!(format_source("fnc casty() -> int { return value as int; }\n").is_ok());
         let invalid = "initialize(int id) -> void as return;";
         assert!(canonicalize_initialize_header(invalid, LexState::default(), 1).is_err());
+    }
+    #[test]
+    fn typeof_binding_query_uses_bare_canonical_spelling() {
+        let source = "type T = typeof(value);\nfnc id(int x): typeof(x) { return x; }\n";
+        let formatted = format_source(source).expect("canonical formatter");
+        assert!(formatted.contains("typeof value"), "{formatted}");
+        assert!(formatted.contains("typeof x"), "{formatted}");
+        assert!(!formatted.contains("typeof("), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn typeof_query_is_literal_and_comment_safe() {
+        let source = "// typeof(x) stays\nfnc show(): string { return \"typeof(x)\"; }\n";
+        let formatted = format_source(source).unwrap();
+        assert!(formatted.contains("// typeof(x)"), "{formatted}");
+        assert!(formatted.contains("\"typeof(x)\""), "{formatted}");
+    }
+
+    #[test]
+    fn typeof_bang_is_rejected_without_affecting_callable_signature() {
+        assert!(format_source("fnc bad(int x): typeof! x { return x; }\n").is_err());
+        assert!(format_source("fnc bad(int x): typeof !x { return x; }\n").is_err());
+        assert!(format_source("type F = typeof fnc(int) => int;\n").is_ok());
     }
 }
