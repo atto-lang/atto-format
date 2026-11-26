@@ -12,7 +12,7 @@ suspends fnc increment(Mutex<int> counter): int {
     return lock_lease.value;
   }
 }`, `
-susp fnc increment(Mutex<int> counter): int {
+suspends fnc increment(Mutex<int> counter): int {
   using counter.lock_async() as lock_lease {
     lock_lease.value += 1;
     return lock_lease.value;
@@ -25,7 +25,7 @@ pub suspends fnc increment(Mutex<int> counter): int {
     return lock_lease.value;
   }
 }`, `
-pub susp fnc increment(Mutex<int> counter): int {
+pub suspends fnc increment(Mutex<int> counter): int {
   using await counter.lock_async() as lock_lease {
     lock_lease.value += 1;
     return lock_lease.value;
@@ -37,7 +37,7 @@ val source = "using counter.lock_async() as fake";
 pub suspends fnc main(): int { return 0; }`,
     `// using await counter.lock_async() as fake { }
 val source = "using counter.lock_async() as fake";
-pub susp fnc main(): int { return 0; }`]
+pub suspends fnc main(): int { return 0; }`]
 ];
 
 for (const [name, input, expected] of cases) {
@@ -67,7 +67,7 @@ test('formatter preserves mandatory new on opaque Mutex resource class', () => {
   }
 });
 
-test('effect aliases canonicalize but class constructor and scope remain byte-identical', () => {
+test('effect aliases, class constructor and scope remain byte-identical', () => {
   const input=[
     'suspends fnc increment(Mutex<int> counter): int {',
     '  using await counter.lock_async() as lease {',
@@ -80,6 +80,6 @@ test('effect aliases canonicalize but class constructor and scope remain byte-id
     '  return await increment(counter);',
     '}',
   ].join('\n');
-  const expected=input.replaceAll('suspends fnc','susp fnc');
+  const expected=input;
   assert.equal(normalize_callable_headers(input),expected);
 });
