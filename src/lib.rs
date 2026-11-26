@@ -586,7 +586,7 @@ fn reject_compact_bang_keywords(source: &str) -> Result<(), FormatError> {
         number += 1;
         for span in visible_word_spans(line, lex) {
             let word = &line[span.start..span.end];
-            if !matches!(word, "trap" | "throw" | "raise" | "panic" | "copy" | "take"
+            if !matches!(word, "trap" | "throw" | "raise" | "panic" | "copy" | "take" | "move"
                 | "borrow" | "share" | "pin" | "drop" | "pipe" | "rpipe" | "stop" | "expand")
                 || line[..span.start].ends_with('#') {
                 continue;
@@ -4057,6 +4057,19 @@ fn canonicalize_ownership_aliases_line(line: &str, initial: LexState) -> String 
     let word = |n: usize| &line[words[n].start..words[n].end];
     let mut i = 0usize;
     while i < words.len() {
+        // Only the complete spaced contextual spelling is canonicalized.
+        // Bare move, symbols, inequality and malformed mixed rt move forms
+        // are not aliases.
+        if word(i) == "move" && !line[..words[i].start].ends_with('#')
+            && !(i > 0 && word(i - 1) == "rt"
+                && whitespace_only(&line[words[i - 1].end..words[i].start]))
+            && line[words[i].end..].strip_prefix('!')
+                .is_some_and(|tail| tail.chars().next().is_some_and(char::is_whitespace))
+        {
+            rewrites.push((words[i].start, words[i].end + 1, "take!"));
+            i += 1;
+            continue;
+        }
         if word(i) == "rt" && i + 1 < words.len()
             && whitespace_only(&line[words[i].end..words[i + 1].start])
         {
