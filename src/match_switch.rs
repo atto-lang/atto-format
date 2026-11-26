@@ -62,6 +62,14 @@ pub(crate) fn normalize(source: &str) -> String {
         if i > 0 && lexed[i - 1].text == "." {
             continue;
         }
+        // Pipeline value-match arms may be arbitrary expressions, including
+        // nested blocks. The legacy block-arm separator normalizer cannot
+        // safely identify all of those boundaries, so preserve their tokens.
+        if matches!(kind, Kind::Match) && i >= 2
+            && lexed[i - 2].text == "|" && lexed[i - 1].text == ">"
+            && lexed[i - 2].end == lexed[i - 1].start {
+            continue;
+        }
         let Some(open) = outer_open(&lexed, i, kind) else {
             continue;
         };
@@ -182,6 +190,30 @@ pub(crate) fn normalize(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::normalize;
+
+    #[test]
+    fn preserves_pipeline_match_outer_delimiters_and_mixed_arm_commas() {
+        let braced = "return result |> match<int> over { on Ok(v) -> v, on Err(e) -> { return 42; }, } |> increment;";
+        let ended = "return result |> match over on Ok(v) -> v, on Err(e) -> 42, end |> increment;";
+        assert_eq!(normalize(braced), braced);
+        assert_eq!(normalize(ended), ended);
+        for source in [
+            "fnc f(int n): int {\n    return n\n        |> match over\n            on 1 -> 42,\n            default -> 0,\n        end |> increment;\n}\n",
+            "fnc f(int n): int {\n    return n\n        |> match over {\n            on 1 -> 42,\n            default -> 0,\n        } |> increment;\n}\n"
+        ] {
+            let formatted = crate::format_source(source).expect("pipeline match formatting");
+            assert!(formatted.contains("match over"));
+            assert!(formatted.contains("on 1 -> 42,"));
+            assert!(formatted.contains("default -> 0,"));
+            assert_eq!(crate::format_source(&formatted).unwrap(), formatted);
+            if source.contains("over {") {
+                assert!(formatted.contains("over {"));
+                assert!(formatted.contains("} |> increment"));
+            } else {
+                assert!(formatted.contains("end |> increment"));
+            }
+        }
+    }
 
     #[test]
     fn strips_only_arm_separators_not_case_alternatives() {

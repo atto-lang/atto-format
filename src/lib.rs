@@ -1450,6 +1450,14 @@ fn canonicalize_legacy_catchall(
 /// fictitious block.
 fn end_delimited_dispatch_kind(line: &str) -> Option<DefineKind> {
     let lexed = select::tokens(line);
+    // A subject-elided pipeline stage owns its end just like a direct
+    // match expression. The shared token scanner ignores comments/strings.
+    // The outer formatting pass separately excludes brace-delimited heads.
+    if lexed.windows(3).any(|w| w[0].text == "|" && w[1].text == ">"
+        && w[0].end == w[1].start && w[2].text == "match"
+        && lexed.iter().any(|t| t.start > w[2].end && t.text == "over")) {
+        return Some(DefineKind::Match);
+    }
     let mut index = 0usize;
     match lexed.first()?.text {
         "return" | "do" => index = 1,
