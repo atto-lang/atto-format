@@ -1469,7 +1469,7 @@ end
 "#;
     let canonical = format_source(braced).unwrap();
     assert!(
-        canonical.contains("on is MessagePatterns.Reset as m {"),
+        canonical.contains("is MessagePatterns.Reset as m {") && !canonical.contains("on is MessagePatterns.Reset as m {"),
         "{canonical}"
     );
     assert!(
