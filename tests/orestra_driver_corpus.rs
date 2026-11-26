@@ -137,13 +137,13 @@ define module oci_lifecycle as
     bool same_workload_uid,
     bool deleting
   ) -> bool {
-    if current_agent_epoch <= 0 || claimed_agent_epoch != current_agent_epoch; then
+    if current_agent_epoch <= 0 || claimed_agent_epoch != current_agent_epoch; do
       return false;
     fi
-    if requested_generation <= 0 || observed_generation < 0; then
+    if requested_generation <= 0 || observed_generation < 0; do
       return false;
     fi
-    if requested_generation < observed_generation; then
+    if requested_generation < observed_generation; do
       return false;
     fi
     return same_workload_uid && !deleting;

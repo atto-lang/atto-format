@@ -14,7 +14,7 @@ enum Kind {
 fn arm_starts(kind: Kind, text: &str) -> bool {
     match kind {
         Kind::Switch => matches!(text, "case" | "default" | "_"),
-        Kind::Match => matches!(text, "on" | "default"),
+        Kind::Match => matches!(text, "on" | "is" | "default"),
     }
 }
 
@@ -29,7 +29,7 @@ fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
             // *before* any outer '{'. Its arm's own body brace must never
             // be mistaken for a switch/match block opener.
             "case" | "default" | "_" if parens == 0 && matches!(kind, Kind::Switch) => return None,
-            "on" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => {
+            "on" | "is" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => {
                 return None;
             }
             "over" if parens == 0 => saw_over = true,
@@ -132,6 +132,19 @@ pub(crate) fn normalize(source: &str) -> String {
             };
             break_after(source, lexed[body].end, &mut edits);
             break_before(source, lexed[end].start, &mut edits);
+            // Canonicalize only an identified block-arm introducer; never
+            // remove 'on' across comments or from ordinary value patterns.
+            if matches!(kind, Kind::Match)
+                && lexed[arm].text == "on"
+                && arm + 1 < body
+                && lexed[arm + 1].text == "is"
+                && source[lexed[arm].end..lexed[arm + 1].start]
+                    .chars().all(|c| c == ' ' || c == '\t')
+            {
+                for pos in lexed[arm].start..lexed[arm + 1].start {
+                    removed.insert(pos);
+                }
+            }
             // Rewrite only verified catch-all arm heads, never tuple discards.
             let start = arm;
             if matches!(kind, Kind::Switch) && lexed[start].text == "_" {
@@ -213,6 +226,21 @@ mod tests {
                 assert!(formatted.contains("end |> increment"));
             }
         }
+    }
+
+    #[test]
+    fn canonicalizes_type_test_block_arms_without_removing_other_on_tokens() {
+        let input = "match v over { on 42 -> { return 100; } on is int -> { return -20; } on _ -> { return 0; } }";
+        let output = normalize(input);
+        assert!(output.contains("is int ->"));
+        assert!(!output.contains("on is int"));
+        assert!(output.contains("on 42 ->"));
+        assert!(output.contains("on _ ->"));
+        assert_eq!(normalize(&output), output);
+        let commented = "match v over { on /* keep */ is int -> { return 1; } }";
+        assert!(normalize(commented).contains("on /* keep */ is int"));
+        let ended = "match v over is int -> { return 1; } end";
+        assert_eq!(normalize(ended), ended);
     }
 
     #[test]
