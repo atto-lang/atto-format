@@ -56,3 +56,17 @@ fn braced_method_signatures_keep_comments_and_explicit_mtd() {
     assert!(got.contains("mtd size()"), "{got}");
     assert_eq!(format_source(&got).unwrap(), got);
 }
+
+#[test]
+fn obsolete_method_introducer_is_not_rewritten() {
+    for kind in ["class", "actor", "struct", "interface", "trait"] {
+        let source = format!("define {kind} C as\n  method ping(): int;\nend\n");
+        for result in [format_source(&source), oreslang_format::format_source_with_mtd(&source)] {
+            assert!(result.unwrap_err().message().contains("obsolete method introducer"));
+        }
+    }
+    let source = "define class C as\n  mtd method(): int { return 42; }\nend\n";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("mtd method()"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
