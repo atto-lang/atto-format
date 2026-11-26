@@ -232,7 +232,7 @@ fi
 }
 "#;
     let expected = r#"fnc classify(int value) -> int {
-  if value < 0 do
+  if value < 0 then
     return -1;
   else
     if value == 0 then
