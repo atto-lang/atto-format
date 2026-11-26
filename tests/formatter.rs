@@ -483,11 +483,11 @@ end
   }
 
   define interface LocalShape
-    fnc project(String value) => String;
+    project(String value) => String;
   end
 
   define trait Retryable
-    fnc retry() => bool;
+    retry() => bool;
   end
 end
 "#;
@@ -580,7 +580,7 @@ return;
 "#;
     let expected = r#"fnc outer() -> void {
   define interface Local
-    fnc run() => int;
+    run() => int;
   end
   return;
 }
@@ -595,7 +595,7 @@ fnc area() -> f64;
 }
 "#;
     let expected = r#"pub interface Shape {
-  fnc area() => f64;
+  area() => f64;
 }
 "#;
     assert_eq!(format_source(src).unwrap(), expected);
@@ -643,7 +643,7 @@ end
 }
 
 define interface Factory
-  fnc make_callback() => (() => int);
+  make_callback() => (() => int);
 end
 "#;
     assert_eq!(format_source(src).unwrap(), expected);
