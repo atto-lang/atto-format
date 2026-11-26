@@ -116,3 +116,18 @@ test('generic factory comment boundary remains unchanged', () => {
   const input = 'define pub class Box[T] implements Newable[Box[T]] as pub fnc /* keep */ new(): Box[T] { return new Box[T](); } end';
   assert.equal(normalize_callable_headers(input), input);
 });
+
+test('all four suspension modifier spellings survive header normalization unchanged', () => {
+  for (const spelling of ['suspends','susp','⧖','∂']) {
+    const source = [
+      'pub '+spelling+' fnc fetch() -> int { return 42; }',
+      'pub '+spelling+' routine read() -> int { return 42; }',
+      'pub '+spelling+' mtd (self: Calculator) square(int x) -> int :: x*x end',
+      '// '+spelling+' fnc comment()',
+      'fnc literal() -> String { return "'+spelling+' fnc"; }'
+    ].join('\n');
+    const formatted = normalize_callable_headers(source);
+    assert.equal(formatted, source, spelling);
+    assert.equal(normalize_callable_headers(formatted), formatted, spelling);
+  }
+});

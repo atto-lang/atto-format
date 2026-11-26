@@ -234,14 +234,8 @@ export function normalize_callable_headers(source) {
     add(toks[i].end, toks[i + 1].start, ' ');
     add(toks[i + 3].end, toks[i + 4].start, '');
   }
-  // Canonical spelling of the callable effect: suspends -> susp.
-  // Only rewrite in known modifier positions. The tokenizer has already
-  // skipped strings and comments; all other identifiers remain untouched.
-  for (let i = 0; i < toks.length; ++i) {
-    if (!is(i, 'suspends')) continue;
-    if (['fnc', 'routine', 'mtd', 'method', '|'].some(next => is(i + 1, next)))
-      add(toks[i].start, toks[i].end, 'susp');
-  }
+  // Suspension effect spellings are equivalent, but deliberately preserved.
+  // Do not canonicalize suspends, susp, ⧖ or ∂ into another spelling.
   edits.sort((a, b) => b.start - a.start);
   let result = source;
   for (const { start, end, replacement } of edits) result = result.slice(0, start) + replacement + result.slice(end);
