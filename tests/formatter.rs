@@ -1262,7 +1262,7 @@ return value.id;
 }
 
 #[test]
-fn legacy_instance_fnc_and_method_use_canonical_instance_spelling() {
+fn legacy_instance_fnc_and_mtd_use_canonical_instance_spelling() {
     let input = r#"define actor ConnectionActor as
 final rooms: Map<RoomId, ActorGroup>
 
@@ -1275,7 +1275,7 @@ group.join(permit)
 fnc leave_room(group: ActorGroup) {
 group.leave()
 }
-suspend method explicit_join(group: ActorGroup) {
+suspend mtd explicit_join(group: ActorGroup) {
 group.join()
 }
 static fnc static_send(group: ActorGroup) {
@@ -1284,7 +1284,7 @@ group.leave()
 end
 define class Client as
 fnc legacy(): int { return 1; }
-method explicit(): int { return 2; }
+mtd explicit(): int { return 2; }
 static fnc helper(): int { return 3; }
 end
 fnc standalone(): int { return 4; }
@@ -1330,7 +1330,7 @@ fnc suspend pub deferred(): int { return 2; }
 pub fnc async compute(): int { return 3; }
 fnc static pub reusable(): int { return 4; }
 fnc method_name(): int { return 5; }
-method method(): int { return 6; }
+mtd method(): int { return 6; }
 end
 "#;
     let once = format_source(src).unwrap();
@@ -1368,7 +1368,7 @@ end
 fn bare_keyword_actor_end_body_is_an_instance_method_scope() {
     let src = r#"shared actor Worker as
 fnc handle(): int { return 1; }
-method explicit(): int { return 2; }
+mtd explicit(): int { return 2; }
 static fnc helper(): int { return 3; }
 end
 "#;
@@ -2237,14 +2237,14 @@ fn unchecked_call_markers_preserve_call_scope() {
 }
 
 #[test]
-fn explicit_legacy_method_prefix_canonicalizes_to_mtd_without_stealing_method_names() {
+fn explicit_mtd_prefix_is_preserved_without_stealing_method_names() {
     let source = r#"define class C as
-  pub method explicit(): int { return 2; }
+  pub mtd explicit(): int { return 2; }
   mtd already() -> int { return 3; }
   method(): int { return 4; }
   fnc legacy(): int { return 5; }
   fnc method(): int { return 8; }
-  method method(): int { return 9; }
+  mtd method(): int { return 9; }
   static fnc helper(): int { return 6; }
 end
 pub fnc method(): int { return 7; }
