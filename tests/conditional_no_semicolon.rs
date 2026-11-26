@@ -13,7 +13,7 @@ return 2;
 }
 "#;
     let expected = r#"fnc verify(int value) -> int {
-  if value < 0; then
+  if value < 0; do
     return -1;
   fi
   if value == 0; then

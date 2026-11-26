@@ -3864,14 +3864,18 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 // The branch introducer is syntactic. A semicolon immediately
                 // before then/do is legacy punctuation, not a statement end.
                 // Preserve an explicit conditional separator while
-                // normalizing all surrounding whitespace and the then marker.
+                // normalizing whitespace without changing the branch category.
                 let has_separator = before.ends_with(';');
                 let replacement_start = if has_separator {
                     before.trim_end_matches(';').trim_end().len()
                 } else {
                     before.len()
                 };
-                let replacement = if has_separator { "; then" } else { " then" }.to_string();
+                let replacement = if has_separator {
+                    format!("; {last_word}")
+                } else {
+                    format!(" {last_word}")
+                };
                 replacements.push((replacement_start, last.end, replacement));
             }
         }

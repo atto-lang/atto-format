@@ -93,3 +93,33 @@ fn keeps_ternary_thunks_distinct_from_immediate_typed_lambda_calls() {
     assert!(formatted.contains("return []"), "{formatted}");
     assert_eq!(format_source(&formatted).unwrap(), formatted);
 }
+
+#[test]
+fn explicit_ternary_aggregates_and_arm_results_keep_their_categories() {
+    let source = r#"pub fnc choose(bool ready): int {
+  if ready do
+    work();
+  fi
+  val s = ready ? struct{status: 42} : struct{status: 7};
+  val r = ready ? Record.of(status: 42) : Record.of(status: 7);
+  val empty_struct = ready ? struct{} : struct{};
+  val empty_record = ready ? Record.of() : Record.of();
+  val result = ready ? {
+    return Record.of(status: 42);
+  } : {
+    ^ Record.of(status: 7);
+  };
+  return if ready then 42 else 7 fi;
+}
+"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("if ready do"), "{formatted}");
+    assert!(formatted.contains("return if ready then 42 else 7 fi"), "{formatted}");
+    assert!(formatted.contains("struct{status: 42}"), "{formatted}");
+    assert!(formatted.contains("Record.of(status: 42)"), "{formatted}");
+    assert!(formatted.contains("struct{}"), "{formatted}");
+    assert!(formatted.contains("Record.of()"), "{formatted}");
+    assert!(formatted.contains("return Record.of(status: 42);"), "{formatted}");
+    assert!(formatted.contains("^ Record.of(status: 7);"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
