@@ -89,3 +89,21 @@ fn dense_prefixes_format_linearly_without_losing_tokens() {
     assert!(result.contains(&format!("return {}foo;", "borrow! mut ".repeat(256))), "{result}");
     assert_eq!(format_source(&result).unwrap(), result);
 }
+
+#[test]
+fn move_alias_is_canonical_and_contextual() {
+    let source = "fnc f(): int {\n  return move!   foo;\n}\n";
+    let output = format_source(source).unwrap();
+    assert!(output.contains("return take! foo;"), "{output}");
+    assert_eq!(format_source(&output).unwrap(), output);
+    for bad in ["move!foo", "move!(foo)", "move!! foo"] {
+        let source = format!("fnc f(): int {{\n  return {bad};\n}}\n");
+        assert!(format_source(&source).is_err(), "{bad}");
+    }
+    let source = "fnc f(): bool {\n  val move = 7;\n  // move! foo\n  stdio.println(\"move! foo\");\n  return move!eq foo;\n}\n";
+    let output = format_source(source).unwrap();
+    assert!(output.contains("val move = 7;"), "{output}");
+    assert!(output.contains("// move! foo"), "{output}");
+    assert!(output.contains("\"move! foo\""), "{output}");
+    assert!(output.contains("move!eq foo"), "{output}");
+}
