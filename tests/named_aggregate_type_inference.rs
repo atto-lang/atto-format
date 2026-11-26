@@ -19,3 +19,18 @@ return 0;
     }
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn callable_aggregate_and_typeof_sequence_roundtrip() {
+    for body in ["return (input.a, input.b, input.c);",
+                 "return seq (input.a, input.b, input.c);",
+                 "return seq input.a, input.b, input.c;"] {
+        let ret = if body.starts_with("return seq") { "typeof input.c" } else { "Tuple<T2>" };
+        let source = format!("const Record<infer T1> r = (a=true, b=\"xyz\", c=5);\nconst Tuple<infer T2> t = (true, \"xyz\", 5);\nfnc process(Record<T1> input) -> {ret} {{ {body} }}");
+        let output = format_source(&source).expect("aggregate callable should format");
+        assert!(output.contains("Record<T1>"), "{output}");
+        assert!(output.contains(ret), "{output}");
+        assert_eq!(output.contains("seq"), body.starts_with("return seq"), "{output}");
+        assert_eq!(format_source(&output).unwrap(), output);
+    }
+}
