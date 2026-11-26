@@ -2279,3 +2279,16 @@ pub fnc method(): int { return 7; }
         oreslang_format::format_source(&formatted).unwrap()
     );
 }
+
+#[test]
+fn suspension_modifier_spellings_survive_rust_formatting() {
+    for spelling in ["suspends", "susp", "⧖", "∂"] {
+        let source = format!(
+            "pub {spelling} fnc fetch(): int {{ return 42; }}\n// {spelling} fnc comment\n"
+        );
+        let formatted = format_source(&source).unwrap();
+        assert!(formatted.contains(&format!("pub {spelling} fnc fetch")), "{formatted}");
+        assert!(formatted.contains(&format!("// {spelling} fnc comment")), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+}
