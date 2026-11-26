@@ -1937,6 +1937,9 @@ fn insert_contextual_mtd(line: &str, initial: LexState) -> String {
                 | "async"
                 | "suspend"
                 | "suspends"
+                | "susp"
+                | "⧖"
+                | "∂"
                 | "critical"
                 | "structural"
                 | "abstract"
@@ -2212,6 +2215,9 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
                 | "private"
                 | "async"
                 | "suspends"
+                | "susp"
+                | "⧖"
+                | "∂"
                 | "suspend"
                 | "critical"
                 | "structural"
@@ -2254,7 +2260,7 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
     // without manufacturing plausible-looking source.
     if !plain_word_prefix(line, &words[..=prefix_len])
         || (modifiers.contains(&"pub") && modifiers.contains(&"private"))
-        || (modifiers.contains(&"suspend") && modifiers.contains(&"suspends"))
+        || modifiers.iter().filter(|&&word| matches!(word, "suspend" | "suspends" | "susp" | "⧖" | "∂")).count() > 1
     {
         return None;
     }
@@ -2271,6 +2277,9 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
         "async",
         "suspend",
         "suspends",
+        "susp",
+        "⧖",
+        "∂",
         "critical",
         "structural",
         "abstract",
@@ -2559,6 +2568,9 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
                 | "async"
                 | "suspend"
                 | "suspends"
+                | "susp"
+                | "⧖"
+                | "∂"
                 | "generator"
                 | "nlex"
                 | "pure"
@@ -2627,7 +2639,7 @@ fn canonicalize_callable_declaration(line: &str, words: &[WordSpan]) -> Option<S
             }
             "static" => set_once(&mut is_static),
             "async" => set_once(&mut is_async),
-            "suspend" | "suspends" => {
+            "suspend" | "suspends" | "susp" | "⧖" | "∂" => {
                 suspends_word = word;
                 set_once(&mut is_suspends)
             }
@@ -3952,6 +3964,9 @@ fn is_generator_declaration_header(line: &str, initial: LexState) -> bool {
                 | "async"
                 | "suspend"
                 | "suspends"
+                | "susp"
+                | "⧖"
+                | "∂"
                 | "generator"
                 | "gen"
                 | "nlex"
@@ -4090,6 +4105,12 @@ fn visible_word_spans(line: &str, initial: LexState) -> Vec<WordSpan> {
         }
         if matches!(c, '"' | '\'' | '`') {
             state.quote = Some(c);
+            i += 1;
+            continue;
+        }
+
+        if matches!(c, '⧖' | '∂') {
+            words.push(WordSpan { start, end: start + c.len_utf8() });
             i += 1;
             continue;
         }
