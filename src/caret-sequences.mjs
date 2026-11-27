@@ -11,8 +11,11 @@ export function normalize_caret_sequence_spacing(source) {
   if (typeof source !== 'string') throw new TypeError('Atto source string required');
   if (Buffer.byteLength(source, 'utf8') > 1024 * 1024) throw new RangeError('Atto source exceeds 1 MiB');
 
-  const wordStart = c => /[A-Za-z_]/.test(c || '');
-  const wordTail = c => /[A-Za-z0-9_]/.test(c || '');
+  // Treat Unicode identifier characters conservatively as part of the
+  // surrounding word; never split a name ending in ASCII 'seq' or 'return'.
+  const wordStart = c => /^[\p{ID_Start}_]$/u.test(c || '');
+  const wordTail = c => /^[\p{ID_Continue}_\u200c\u200d]$/u.test(c || '');
+  const charAt = i => i < source.length ? String.fromCodePoint(source.codePointAt(i)) : '';
   const edits = [];
   let previous = null;
 
@@ -51,9 +54,12 @@ export function normalize_caret_sequence_spacing(source) {
       previous = 'literal';
       continue;
     }
-    if (wordStart(c)) {
-      const start = i++;
-      while (wordTail(source[i])) ++i;
+    // This spacing-only adapter does not parse template interpolation.
+    // Preserve the whole source instead of rewriting opaque template text.
+    if (c === '\x60') return source;
+    if (wordStart(charAt(i))) {
+      const start = i; i += charAt(i).length;
+      while (wordTail(charAt(i))) i += charAt(i).length;
       const word = source.slice(start, i);
       // seq! is a contiguous construct marker. Only normalize the
       // unambiguous delimited opener here; never join a separated bang
