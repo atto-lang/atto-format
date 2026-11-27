@@ -28,19 +28,23 @@ const rr = (outer = (inner = 42));"#,
 }
 
 #[test]
-fn direct_quoted_record_is_not_a_named_argument() {
+fn quoted_named_arguments_and_explicit_records_remain_distinct() {
     preserve(r#"foo(x = 42);
 foo("x" = 42);
+foo((x = 42));
+foo(("x" = 42));
 foo(("x" = 42, y = 5));
 foo("x" = 1, "y" = 2);
+foo(("x" = 1), ("y" = 2));
 foo("outer" = ("inner" = 42));
 foo((outer = (inner = 42)));
+foo(("outer" = ("inner" = 42)));
 foo("x" := 42);
 foo("x" => 42);
 foo("x" == "y");"#,
-        &["foo(x = 42);", r#"foo("x" = 42);"#, r#"foo(("x" = 42, y = 5));"#,
-          r#"foo("x" = 1, "y" = 2);"#, r#"foo("outer" = ("inner" = 42));"#,
-          "foo((outer = (inner = 42)));", r#"foo("x" := 42);"#, r#"foo("x" => 42);"#,
+        &["foo(x = 42);", r#"foo("x" = 42);"#, "foo((x = 42));", r#"foo(("x" = 42));"#, r#"foo(("x" = 42, y = 5));"#,
+          r#"foo("x" = 1, "y" = 2);"#, r#"foo(("x" = 1), ("y" = 2));"#, r#"foo("outer" = ("inner" = 42));"#,
+          "foo((outer = (inner = 42)));", r#"foo(("outer" = ("inner" = 42)));"#, r#"foo("x" := 42);"#, r#"foo("x" => 42);"#,
           r#"foo("x" == "y");"#]);
 }
 
