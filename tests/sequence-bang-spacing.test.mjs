@@ -25,3 +25,12 @@ for (const [before,after] of cases) {
   assert.equal(format(after),after);
  });
 }
+
+for (const source of [
+ 'return αseq!(1,42);',
+ 'return 漢seq!(1,42);',
+ 'return 𠀀seq!(1,42);',
+ 'αreturn^42;',
+ 'return `opaque seq!(1,42) return^42`;',
+ 'return `opaque ${foo(`seq!(1,42)`)}`;'
+]) test('opaque identifier or template: '+source,()=>assert.equal(format(source),source));
