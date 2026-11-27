@@ -1,0 +1,21 @@
+name: Destructure capture formatter regression
+on:
+  pull_request:
+    paths: ['tests/destructure_capture_v1.rs','src/**','.github/workflows/destructure-capture-format.yml']
+  push:
+    branches: ['test/destructure-capture-format-v1-20261127']
+permissions:
+  contents: read
+jobs:
+  formatter:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - run: cargo test --locked --test destructure_capture_v1 --test recursive_product_literals
