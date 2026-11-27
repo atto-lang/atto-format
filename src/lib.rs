@@ -2794,7 +2794,7 @@ fn code_with_literal_placeholders(line: &str, initial: LexState) -> String {
 /// A visible line ending with a binary operator continues onto the next line.
 fn ends_with_continuation_operator(structural: &str) -> bool {
     let line = structural.trim_end();
-    for op in ["&&", "||", "|>", "==", "!="] {
+    for op in ["&&", "||", "|>", "==", "!=", ":="] {
         if line.ends_with(op) {
             return true;
         }
@@ -5367,5 +5367,40 @@ end
         assert!(format_source("fnc bad(int x): typeof! x { return x; }\n").is_err());
         assert!(format_source("fnc bad(int x): typeof !x { return x; }\n").is_err());
         assert!(format_source("type F = typeof fnc(int) => int;\n").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod pair_capture_v3_tests {
+    use super::*;
+
+    #[test]
+    fn pair_operator_is_a_continuation_but_capture_colon_is_not() {
+        assert!(ends_with_continuation_operator("const x :="));
+        assert!(ends_with_continuation_operator("x:="));
+        assert!(!ends_with_continuation_operator("const z = {:age}"));
+        assert!(!ends_with_continuation_operator(":age"));
+    }
+
+    #[test]
+    fn aggregate_forms_keep_distinct_tokens_and_round_trip() {
+        let src = r#"fnc example(): void {
+const name = "Alice";
+const age = 42;
+const p := 5;
+const r = {:name, :age};
+const s = struct{:name, :age};
+const t = (name := name, age := age);
+foo(...r);
+foo(x = p.value);
+logger.info("Request completed", {:name}, {:age});
+}"#;
+        let output = format_source(src).unwrap();
+        for fragment in ["const p := 5;", "{:name, :age}", "struct{:name, :age}",
+            "(name := name, age := age)", "foo(...r);", "foo(x = p.value);",
+            "logger.info(\"Request completed\", {:name}, {:age});"] {
+            assert!(output.contains(fragment), "missing {fragment}: {output}");
+        }
+        assert_eq!(format_source(&output).unwrap(),output);
     }
 }
