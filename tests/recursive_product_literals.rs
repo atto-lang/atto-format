@@ -1,5 +1,5 @@
-//! Host-only formatter regression tests for atto-spec#303.
-//! Formatting does not certify compiler parsing or execution.
+//! Host-only formatter regressions for revised atto-spec#303.
+//! Text preservation does not certify parser equivalence or guest execution.
 use oreslang_format::format_source;
 
 fn preserve(source: &str, fragments: &[&str]) {
@@ -12,63 +12,72 @@ fn preserve(source: &str, fragments: &[&str]) {
 }
 
 #[test]
+fn declaration_context_and_empty_aggregate_identity() {
+    preserve(r#"const x = ();
+const Record empty = ();
+const Record empty2 = {};
+const p = (five := 5);
+const t = (five := 5, six := 8);
+const r = (five: 5, six: 8);
+const Record explicit_r = (five := 5, six := 8);
+const Record explicit_colon = (a: 5);
+const Record explicit_equal = (a = 5);
+const r2 = {five := 5, six = 8};
+const Map<string,int> m = {};"#,
+        &["const x = ();", "const Record empty = ();", "const Record empty2 = {};",
+          "(five := 5);", "(five := 5, six := 8);", "(five: 5, six: 8);",
+          "const Record explicit_r = (five := 5, six := 8);",
+          "(a: 5);", "(a = 5);", "{five := 5, six = 8}", "m = {};"]);
+}
+
+#[test]
 fn recursive_aggregate_delimiters_remain_distinct() {
     preserve(r#"const p = x := (1, 2);
 const t = (x := 1, y := 2);
-const r = (x = (1, 2), y = (3, 4));
-const tr = ((x = 1), (y = 2));
-const rp = (a = (x := 1), b = (y := 2));
-const pr = x := (y = 2);
+const r = {x: (1, 2), y: (3, 4)};
+const tr = ({x: 1}, {y: 2});
+const rp = {a: (x := 1), b: (y := 2)};
+const pr = x := {y: 2};
 const pp = x := (y := 2);
 const tt = ((1, 2), (3, 4));
-const rr = (outer = (inner = 42));"#,
-        &["x := (1, 2)", "(x := 1, y := 2)", "(x = (1, 2), y = (3, 4))",
-          "((x = 1), (y = 2))", "(a = (x := 1), b = (y := 2))", "x := (y = 2)",
-          "x := (y := 2)", "((1, 2), (3, 4))", "(outer = (inner = 42))"]);
+const rr = {outer: {inner: 42}};"#,
+        &["x := (1, 2)", "(x := 1, y := 2)", "{x: (1, 2), y: (3, 4)}",
+          "({x: 1}, {y: 2})", "{a: (x := 1), b: (y := 2)}", "x := {y: 2}",
+          "x := (y := 2)", "((1, 2), (3, 4))", "{outer: {inner: 42}}"]);
 }
 
 #[test]
-fn quoted_named_arguments_and_explicit_records_remain_distinct() {
+fn calls_keep_brace_records_and_named_arguments_distinct() {
     preserve(r#"foo(x = 42);
 foo("x" = 42);
-foo((x = 42));
-foo(("x" = 42));
-foo(("x" = 42, y = 5));
-foo("x" = 1, "y" = 2);
-foo(("x" = 1), ("y" = 2));
-foo("outer" = ("inner" = 42));
-foo((outer = (inner = 42)));
-foo(("outer" = ("inner" = 42)));
-foo("x" := 42);
-foo("x" => 42);
-foo("x" == "y");"#,
-        &["foo(x = 42);", r#"foo("x" = 42);"#, "foo((x = 42));", r#"foo(("x" = 42));"#, r#"foo(("x" = 42, y = 5));"#,
-          r#"foo("x" = 1, "y" = 2);"#, r#"foo(("x" = 1), ("y" = 2));"#, r#"foo("outer" = ("inner" = 42));"#,
-          "foo((outer = (inner = 42)));", r#"foo(("outer" = ("inner" = 42)));"#, r#"foo("x" := 42);"#, r#"foo("x" => 42);"#,
-          r#"foo("x" == "y");"#]);
+foo(x: 42);
+foo({x: 42});
+foo({x := 42});
+foo({x = 42});
+foo({"x": 42, y := 5});
+foo({x: 1}, {y: 2});
+foo({x: 1, y: 2});
+foo("outer" = {inner: 42});
+foo((x := 42));
+foo((x := 42,));
+foo((x := 42, y := 5));
+foo("x" => 42);"#,
+        &["foo(x = 42);", r#"foo("x" = 42);"#, "foo(x: 42);",
+          "foo({x: 42});", "foo({x := 42});", "foo({x = 42});",
+          r#"foo({"x": 42, y := 5});"#, "foo({x: 1}, {y: 2});",
+          "foo({x: 1, y: 2});", r#"foo("outer" = {inner: 42});"#,
+          "foo((x := 42));", "foo((x := 42,));", "foo((x := 42, y := 5));",
+          r#"foo("x" => 42);"#]);
 }
 
 #[test]
-fn singleton_tuple_commas_and_pair_grouping_are_preserved() {
-    preserve(r#"const p = (x := 1);
-const t = (x := 1,);
-const r = (x = 1,);
-const tr = ((x = 1),);
-const tt = ((1, 2),);
-const pt = x := (1,);
-const rr = (outer = (inner = 42));"#,
-        &["(x := 1);", "(x := 1,);", "(x = 1,);", "((x = 1),);", "((1, 2),);",
-          "x := (1,);", "(outer = (inner = 42));"]);
-}
-
-#[test]
-fn quoted_label_bytes_and_invalid_labels_are_not_repaired() {
-    preserve(r#"foo("x-y" = 1);
-foo("x " = 2);
-foo("x" /* label */ = 3);
-const r = ("x" = 1, "\u{78}" = 2);
-const m = {"x-y": 1};
-const p = "x-y" := 1;"#,
-        &[r#"foo("x-y" = 1);"#, r#"foo("x " = 2);"#, r#"foo("x" /* label */ = 3);"#,
-          r#"("x" = 1, "\u{78}" = 2)"#, r#"{"x-y": 1}"#, r#""x-y" := 1"#]);
+fn quoted_record_fields_and_arrow_map_keys_remain_distinct() {
+    preserve(r#"const r = {"name": "Alice"};
+const m = {"name" => "Alice"};
+const m2 = {"x-y" => 1};
+const p = "x-y" := 1;
+const t = ({x: 1},);
+const r2 = {"x" /* label */ : 42};"#,
+        &[r#"{"name": "Alice"}"#, r#"{"name" => "Alice"}"#, r#"{"x-y" => 1}"#,
+          r#""x-y" := 1"#, "({x: 1},);", r#"{"x" /* label */ : 42}"#]);
 }
