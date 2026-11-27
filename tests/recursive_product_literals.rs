@@ -85,3 +85,17 @@ const r2 = {"x" /* label */ : 42};"#,
         &[r#"{"name": "Alice"}"#, r#"{"name" => "Alice"}"#, r#"{"x-y" => 1}"#,
           r#""x-y" := 1"#, "({x: 1},);", r#"{"x" /* label */ : 42}"#]);
 }
+
+#[test]
+fn portable_call_boundaries_and_unresolved_grouped_forms_survive_formatting() {
+    // Text preservation only: grouped forms are deliberately not assigned
+    // portable call semantics by the formatter.
+    preserve(r#"foo(x = 4, y = 8);
+foo({x = 4, y = 8});
+foo(data = {x = 4, y = 8});
+foo((x = 4, y = 8));
+foo((x: 4, y: 8));"#,
+        &["foo(x = 4, y = 8);", "foo({x = 4, y = 8});",
+          "foo(data = {x = 4, y = 8});", "foo((x = 4, y = 8));",
+          "foo((x: 4, y: 8));"]);
+}
