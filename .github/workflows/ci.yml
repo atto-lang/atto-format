@@ -29,6 +29,8 @@ jobs:
         run: cargo test --locked --offline --test method_spelling_forward_port
       - name: Pipeline match delimiter and idempotence regression
         run: cargo test --locked --offline --lib match_switch::tests::preserves_pipeline_match_outer_delimiters_and_mixed_arm_commas
+      - name: Membership match delimiter and idempotence regression
+        run: cargo test --locked --offline --lib match_switch::tests::membership_arms_preserve_list_commas_and_type_lists
       - name: Real compiler conformance must not be inferred from JS-only checks
         run: |
           echo "Node golden tests are not a real parser/guest ABI proof."
