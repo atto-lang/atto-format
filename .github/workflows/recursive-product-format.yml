@@ -1,0 +1,30 @@
+name: Recursive product formatter regression
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/recursive_product_literals.rs'
+      - '.github/workflows/recursive-product-format.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  format-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify immutable source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+      - name: Execute production formatter integration tests
+        run: cargo test --locked --test recursive_product_literals
+      - name: Evidence boundary
+        run: echo 'FORMATTER_HOST_ONLY; compiler AST and guest parity NOT_EXECUTED'
