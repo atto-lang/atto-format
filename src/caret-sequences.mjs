@@ -54,7 +54,16 @@ export function normalize_caret_sequence_spacing(source) {
     if (wordStart(c)) {
       const start = i++;
       while (wordTail(source[i])) ++i;
-      previous = source.slice(start, i);
+      const word = source.slice(start, i);
+      // seq! is a contiguous construct marker. Only normalize the
+      // unambiguous delimited opener here; never join a separated bang
+      // or rewrite an ordinary seq(...) function call.
+      if (word === 'seq' && source.startsWith('!(', i) &&
+          previous !== '.' && previous !== '::') {
+        edits.push({at:i+1, text:' '});
+        previous = 'seq!'; ++i; continue;
+      }
+      previous = word;
       continue;
     }
     if (/[0-9]/.test(c)) {
@@ -68,14 +77,14 @@ export function normalize_caret_sequence_spacing(source) {
     }
     if (c === '^') {
       const next = source[i+1];
-      // Only the literal `return` followed by ^ and a parenthesized
-      // sequence gains this contextual selector. Do not alter infix ^ or
-      // a standalone statement ^ before ordinary grouped/tuple expressions.
-      const returnSequence = previous === 'return' && /^\s*\(/.test(source.slice(i+1));
-      if (returnSequence && i > 0 && !/\s/.test(source[i-1])) {
+      // The literal return followed by ^ is redundant, not a sequence
+      // selector. Preserve both tokens for compiler diagnostics and
+      // normalize only spacing; never rewrite the tuple operand.
+      const redundantReturn = previous === 'return';
+      if (redundantReturn && i > 0 && !/\s/.test(source[i-1])) {
         edits.push({at:i, text:' '});
       }
-      if ((statementPosition() || returnSequence) && next !== undefined && next !== ';' &&
+      if ((statementPosition() || redundantReturn) && next !== undefined && next !== ';' &&
           next !== '^' && next !== '=' && !/\s/.test(next) &&
           !source.startsWith('//', i+1) && !source.startsWith('/*', i+1)) {
         edits.push({at:i+1, text:' '});
