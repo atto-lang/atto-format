@@ -1,0 +1,21 @@
+name: Local binding spelling v2 formatter regression
+on:
+  pull_request:
+    paths: ['tests/local_binding_spelling_v2.rs','.github/workflows/local-binding-spelling-v2.yml','src/**']
+  push:
+    branches: ['feat/local-binding-spellings-v2-20261127']
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Exact source head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - run: cargo test --locked --test local_binding_spelling_v2
