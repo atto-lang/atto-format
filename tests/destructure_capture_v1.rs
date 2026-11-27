@@ -22,7 +22,7 @@ fn capture_patterns_keep_delimiters_and_binding_modes() {
         "const [] as a = foo();",
         "const [a, let b, c] as let r = foo();",
     ] {
-        let source = format!("fnc main(): void {{\n{decl}\nreturn;\n}}\n");
+        let source = format!("fnc main() -> void {{\n{decl}\nreturn;\n}}\n");
         let formatted = format_source(&source).expect("capture source should be preserved");
         assert_eq!(compact(&formatted), compact(&source), "{decl}");
         assert_eq!(format_source(&formatted).unwrap(), formatted, "{decl}");
