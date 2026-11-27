@@ -3,6 +3,7 @@
 //! The formatter deliberately has no style options. `format_source` is the SDK
 //! entry point used by the CLI, editors, build tools, and language servers.
 
+use keyword_blocks::HeaderTerminator;
 use std::fmt;
 
 #[cfg(target_arch = "wasm32")]
@@ -63,6 +64,7 @@ enum DefineKind {
     Trait,
     Struct,
     Callable,
+    Guard,
     Other,
 }
 
@@ -92,6 +94,25 @@ struct DefineFrame {
     order: usize,
     brace_depth: usize,
     keyword_depth: usize,
+}
+
+struct GuardFrame {
+    kind: HeaderTerminator,
+    depth: (usize, usize, usize),
+    returned: bool,
+}
+
+impl GuardFrame {
+    fn check_return(&self, line: usize) -> Result<(), FormatError> {
+        if self.returned {
+            Ok(())
+        } else {
+            Err(FormatError::new(
+                line,
+                "guard body requires a return at its outermost scope",
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -685,6 +706,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     let mut maybe_else_orders = std::collections::HashSet::<usize>::new();
     let mut brace_stack: Vec<BraceFrame> = Vec::new();
     let mut keyword_stack: Vec<KeywordTerminator> = Vec::new();
+    let mut guard_stack: Vec<GuardFrame> = Vec::new();
     let mut lex = LexState::default();
     let mut next_order = 0usize;
     // Expression-bodied pipe lambdas require an explicit statement semicolon.
@@ -801,6 +823,17 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             .into_iter()
             .collect();
         let structural = structural_content.trim_start();
+        let guard_header = if starts_word(structural, "guard") {
+            keyword_blocks::guard_body_kind(&content, lex)
+        } else {
+            None
+        };
+        let scope = (brace_stack.len(), define_stack.len(), keyword_stack.len());
+        if expr_paren_balance == 0 && starts_word(structural, "return") {
+            if let Some(guard) = guard_stack.last_mut().filter(|guard| guard.depth == scope) {
+                guard.returned = true;
+            }
+        }
 
         let starts_end = starts_block_keyword(structural, "end");
         // Brace-form conditionals still close with `fi` (Java parseIf:
@@ -911,7 +944,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             let frame = define_stack.last().ok_or_else(|| {
                 FormatError::new(
                     line_no,
-                    "encountered `end` without a matching define, callable, or dispatch block",
+                    "encountered `end` without a matching define, callable, dispatch, or guard block",
                 )
             })?;
             if brace_stack.len() != frame.brace_depth || keyword_stack.len() != frame.keyword_depth
@@ -929,6 +962,9 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                     line_no,
                     "maybe v1 requires an else handler before end",
                 ));
+            }
+            if frame.kind == DefineKind::Guard {
+                guard_stack.pop().unwrap().check_return(line_no)?;
             }
             define_stack.pop();
         }
@@ -1139,6 +1175,11 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                             "encountered `}` before closing an end-delimited block",
                         ));
                     }
+                    if guard_stack.last().is_some_and(|guard| {
+                        guard.kind == HeaderTerminator::Brace && guard.depth.0 == brace_stack.len()
+                    }) {
+                        guard_stack.pop().unwrap().check_return(line_no)?;
+                    }
                     let frame = brace_stack.pop().ok_or_else(|| {
                         FormatError::new(line_no, "encountered `}` without a matching `{`")
                     })?;
@@ -1234,6 +1275,24 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 keyword_depth: keyword_stack.len(),
             });
             indent += 1;
+        }
+
+        if let Some(kind) = guard_header {
+            if kind == HeaderTerminator::Keyword {
+                next_order += 1;
+                define_stack.push(DefineFrame {
+                    kind: DefineKind::Guard,
+                    order: next_order,
+                    brace_depth: brace_stack.len(),
+                    keyword_depth: keyword_stack.len(),
+                });
+                indent += 1;
+            }
+            guard_stack.push(GuardFrame {
+                kind,
+                depth: (brace_stack.len(), define_stack.len(), keyword_stack.len()),
+                returned: false,
+            });
         }
 
         // Switch subjects may end with an optional semicolon, but the block
@@ -1373,7 +1432,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
     if !define_stack.is_empty() {
         return Err(FormatError::new(
             normalized.lines().count().max(1),
-            "unterminated define, callable, or dispatch block (expected `end`)",
+            "unterminated define, callable, dispatch, or guard block (expected `end`)",
         ));
     }
     if let Some(terminator) = keyword_stack.last() {
