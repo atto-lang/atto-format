@@ -2081,6 +2081,10 @@ fn canonicalize_declaration_line(
         return line.to_string();
     }
 
+    if let Some(denotation) = canonicalize_denotation_prefix(line, &words) {
+        return denotation;
+    }
+
     (instance_member
         .then(|| canonicalize_instance_method_prefix(line, &words))
         .flatten())
@@ -2097,6 +2101,33 @@ fn canonicalize_declaration_line(
     .or_else(|| canonicalize_actor_declaration(line, &words))
     .or_else(|| canonicalize_callable_declaration(line, &words))
     .unwrap_or_else(|| line.to_string())
+}
+
+/// Normalize whitespace in the already-ordered contextual denotation prefix.
+/// No migration from declare/define, no modifier reordering, and no RHS edits.
+/// Package-qualified visibility and multiline/comment-split prefixes are
+/// preserved until the compiler's full grammar is available.
+fn canonicalize_denotation_prefix(line: &str, words: &[WordSpan]) -> Option<String> {
+    let spelling = |i: usize| words.get(i).map(|span| &line[span.start..span.end]);
+    if spelling(0) != Some("denote") {
+        return None;
+    }
+    let kind_index = match spelling(1)? {
+        "type" => 1,
+        "pub" | "private" if spelling(2) == Some("type") => 2,
+        _ => return None,
+    };
+    let name_index = kind_index + 1;
+    if words.len() <= name_index || !plain_word_prefix(line, &words[..=name_index]) {
+        return None;
+    }
+    // The next word must be a name, not a misplaced visibility or kind.
+    if matches!(spelling(name_index)?, "denote" | "declare" | "define" | "pub" | "private" | "type") {
+        return None;
+    }
+    let prefix = &words[..=name_index];
+    let canonical: Vec<&str> = prefix.iter().map(|span| &line[span.start..span.end]).collect();
+    Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
 /// Normalize only explicitly declared type-only source headers. The contextual
@@ -5402,5 +5433,56 @@ logger.info("Request completed", {:name}, {:age});
             assert!(output.contains(fragment), "missing {fragment}: {output}");
         }
         assert_eq!(format_source(&output).unwrap(),output);
+    }
+}
+
+#[cfg(test)]
+mod denote_header_v1_tests {
+    use super::*;
+
+    fn prefix(line: &str) -> Option<String> {
+        canonicalize_denotation_prefix(line, &visible_word_spans(line, LexState::default()))
+    }
+
+    #[test]
+    fn canonicalizes_only_plain_ordered_header_whitespace() {
+        for (input, expected) in [
+            ("denote   type   Dice = 5 | 6 | 7;", "denote type Dice = 5 | 6 | 7;"),
+            ("denote  pub  type  Pair<T> = [T, T];", "denote pub type Pair<T> = [T, T];"),
+            ("denote  private type Name = String; // keep", "denote private type Name = String; // keep"),
+        ] {
+            let actual = prefix(input).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(prefix(&actual).unwrap(), actual);
+        }
+    }
+
+    #[test]
+    fn leaves_comments_literals_legacy_and_unsupported_headers_alone() {
+        for input in [
+            "declare type Dice = 5 | 6 | 7;",
+            "define type Dice as int;",
+            "pub denote type Dice = int;",
+            "denote pub[pkg] type Dice = int;",
+            "denote /* keep */ type Dice = int;",
+            "// denote type Dice = int;",
+            "const s = \"denote type Dice = int;\";",
+            "denote(type, value);",
+            "denote actor Worker;",
+            "denote type pub = int;",
+            "denote type",
+        ] {
+            assert!(prefix(input).is_none(), "{input}");
+        }
+    }
+
+    #[test]
+    fn formatter_preserves_denotation_and_legacy_introducers() {
+        let source = "denote   type   Dice = 5 | 6 | 7;\ndeclare type Existing = int;\n// denote type Comment = int;\n";
+        let formatted = format_source(source).unwrap();
+        assert!(formatted.contains("denote type Dice = 5 | 6 | 7;"), "{formatted}");
+        assert!(formatted.contains("declare type Existing = int;"), "{formatted}");
+        assert!(formatted.contains("// denote type Comment = int;"), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }
