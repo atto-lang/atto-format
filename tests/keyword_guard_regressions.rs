@@ -192,3 +192,22 @@ fn terminal_rest_bool_parameter_syntax_round_trips() {
     assert_eq!(output, expected);
     assert_eq!(format_source(&output).unwrap(), output);
 }
+
+#[test]
+fn six_canonical_conditionals_preserve_their_category_and_delimiters() {
+    for (body, witnesses) in [
+        ("return if true then 5 else 6 fi;", ["return if true then", "else", "fi"]),
+        ("return true ? 5 : 6;", ["return true ?", ":", "6"]),
+        ("return true ? { return 5; } : { return 6; };", ["return true ?", "return 5;", "return 6;"]),
+        ("do if true then return 5; else return 6; fi", ["do if true then", "else", "fi"]),
+        ("if true do return 5; else return 6; fi", ["if true do", "else", "fi"]),
+        ("if true { return 5; } else { return 6; }", ["if true {", "} else {", "return 6;"]),
+    ] {
+        let source = format!("pub fnc main(): int {{\n{body}\n}}\n");
+        let output = format_source(&source).unwrap();
+        for witness in witnesses {
+            assert!(output.contains(witness), "missing {witness} in {output}");
+        }
+        assert_eq!(format_source(&output).unwrap(), output);
+    }
+}
