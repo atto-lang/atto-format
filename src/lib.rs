@@ -3923,14 +3923,14 @@ fn canonicalize_conditional_line(line: &str, initial: LexState) -> String {
                 // The branch introducer is syntactic. A semicolon immediately
                 // before then/do is legacy punctuation, not a statement end.
                 // Preserve an explicit conditional separator while
-                // normalizing all surrounding whitespace and the then marker.
+                // normalizing surrounding whitespace without changing the delimiter.
                 let has_separator = before.ends_with(';');
                 let replacement_start = if has_separator {
                     before.trim_end_matches(';').trim_end().len()
                 } else {
                     before.len()
                 };
-                let replacement = if has_separator { "; then" } else { " then" }.to_string();
+                let replacement = if has_separator { format!("; {last_word}") } else { format!(" {last_word}") };
                 replacements.push((replacement_start, last.end, replacement));
             }
         }
@@ -4160,7 +4160,8 @@ fn visible_word_spans(line: &str, initial: LexState) -> Vec<WordSpan> {
 
 fn opens_conditional_block(line: &str) -> bool {
     let t = line.trim_end();
-    starts_word(t.trim_start(), "if")
+    (starts_word(t.trim_start(), "if")
+        || t.trim_start().strip_prefix("do ").is_some_and(|rest| starts_word(rest.trim_start(), "if")))
         && (t.ends_with(" then")
             || t.ends_with("; then")
             || t.ends_with(" do")
