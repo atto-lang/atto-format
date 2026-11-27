@@ -13,8 +13,8 @@ enum Kind {
 
 fn arm_starts(kind: Kind, text: &str) -> bool {
     match kind {
-        Kind::Switch => matches!(text, "case" | "default" | "_"),
-        Kind::Match => matches!(text, "on" | "is" | "default"),
+        Kind::Switch => matches!(text, "case" | "on" | "in" | "is" | "default" | "_"),
+        Kind::Match => matches!(text, "on" | "in" | "is" | "default"),
     }
 }
 
@@ -29,7 +29,7 @@ fn outer_open(tokens: &[Token<'_>], at: usize, kind: Kind) -> Option<usize> {
             // *before* any outer '{'. Its arm's own body brace must never
             // be mistaken for a switch/match block opener.
             "case" | "default" | "_" if parens == 0 && matches!(kind, Kind::Switch) => return None,
-            "on" | "is" | "default" if parens == 0 && saw_over && matches!(kind, Kind::Match) => {
+            "on" | "in" | "is" | "default" if parens == 0 && saw_over => {
                 return None;
             }
             "over" if parens == 0 => saw_over = true,
@@ -96,6 +96,20 @@ pub(crate) fn normalize(source: &str) -> String {
                     ")" => parens = parens.saturating_sub(1),
                     "[" => brackets += 1,
                     "]" => brackets = brackets.saturating_sub(1),
+                    "-" if parens == 0 && brackets == 0
+                        && body + 1 < close && lexed[body + 1].text == ">"
+                        && lexed[body].end == lexed[body + 1].start =>
+                    {
+                        // The next token must be an actual block body.
+                        // Never skip a value expression in search of a later
+                        // arm's brace and accidentally consume its separator.
+                        if body + 2 >= close || lexed[body + 2].text != "{" {
+                            body = close;
+                            break;
+                        }
+                        body += 2;
+                        break;
+                    }
                     "{" if parens == 0 && brackets == 0 => {
                         // The first brace in 'on Foo as {v} -> { ... }'
                         // is a *record pattern*, not an executable block.
@@ -241,6 +255,23 @@ mod tests {
         assert!(normalize(commented).contains("on /* keep */ is int"));
         let ended = "match v over is int -> { return 1; } end";
         assert_eq!(normalize(ended), ended);
+    }
+
+    #[test]
+    fn membership_arms_preserve_list_commas_and_type_lists() {
+        let source = "match v over { in [1, 2, 3] -> { return 1; }, is in [int, bool] -> { return 2; }, on _ -> { return 0; } }";
+        let formatted = normalize(source);
+        assert!(formatted.contains("in [1, 2, 3] ->"));
+        assert!(formatted.contains("is in [int, bool] ->"));
+        assert!(formatted.contains("on _ ->"));
+        assert_eq!(normalize(&formatted), formatted);
+        let legacy = "match v over in [1, 2] -> { return 42; } on _ -> { return 0; } end";
+        assert_eq!(normalize(legacy), legacy);
+        let mixed = "match v over { in [1, 2] -> 42, is in [int, bool] -> { return 1; }, on _ -> 0 }";
+        let preserved = normalize(mixed);
+        assert!(preserved.contains("in [1, 2] -> 42,"));
+        assert!(preserved.contains("is in [int, bool] -> { return 1; },"));
+        assert_eq!(normalize(&preserved), preserved);
     }
 
     #[test]
