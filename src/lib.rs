@@ -103,7 +103,7 @@ enum PrevEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeywordTerminator {
     FiKeyword,
-    FiBraced,
+    FiBraced(usize),
     Done,
 }
 
@@ -803,8 +803,23 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         let structural = structural_content.trim_start();
 
         let starts_end = starts_block_keyword(structural, "end");
-        // Brace-form conditionals still close with `fi` (Java parseIf:
-        // "every if closes with fi"); the idiomatic spelling is `} fi`.
+        // A completed braced conditional does not own a following outer fi.
+        // Keep a legacy explicit fi only when no enclosing keyword-if owns it.
+        while let Some(KeywordTerminator::FiBraced(depth)) = keyword_stack.last().copied() {
+            if brace_stack.len() > depth {
+                break;
+            }
+            let parent_keyword_if = keyword_stack[..keyword_stack.len() - 1]
+                .iter().any(|frame| matches!(frame, KeywordTerminator::FiKeyword));
+            let branch = starts_block_keyword(structural, "else")
+                || starts_block_keyword(structural, "elif");
+            if (branch && (structural.contains('{') || !parent_keyword_if))
+                || (starts_block_keyword(structural, "fi") && !parent_keyword_if) {
+                break;
+            }
+            keyword_stack.pop();
+        }
+        // Explicit legacy `} fi` is retained when it belongs to the braced form.
         let brace_fi = {
             let after_braces =
                 structural.trim_start_matches(|c: char| c == '}' || c.is_whitespace());
@@ -813,7 +828,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                 && starts_block_keyword(after_braces, "fi")
                 && after_braces.trim_end() == "fi"
         };
-        if brace_fi && !matches!(keyword_stack.last(), Some(KeywordTerminator::FiBraced)) {
+        if brace_fi && !matches!(keyword_stack.last(), Some(KeywordTerminator::FiBraced(_))) {
             return Err(FormatError::new(
                 line_no,
                 "encountered `} fi` without a matching brace-form `if`",
@@ -852,7 +867,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
 
         if starts_fi {
             match keyword_stack.pop() {
-                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced) => {}
+                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced(_)) => {}
                 Some(KeywordTerminator::Done) => {
                     return Err(FormatError::new(
                         line_no,
@@ -871,7 +886,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         } else if starts_done {
             match keyword_stack.pop() {
                 Some(KeywordTerminator::Done) => {}
-                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced) => {
+                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced(_)) => {
                     return Err(FormatError::new(
                         line_no,
                         "encountered `done` where `fi` was expected",
@@ -890,7 +905,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             && !maybe_else
             && !matches!(
                 keyword_stack.last(),
-                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced)
+                Some(KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced(_))
             )
         {
             return Err(FormatError::new(
@@ -1266,7 +1281,7 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
                             && rest.trim_end().ends_with('}')
                     });
             if !self_closed {
-                keyword_stack.push(KeywordTerminator::FiBraced);
+                keyword_stack.push(KeywordTerminator::FiBraced(brace_depth_before_line));
             }
         } else if opens_do_block(structural) && !branch_line {
             keyword_stack.push(KeywordTerminator::Done);
@@ -1376,9 +1391,12 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
             "unterminated define, callable, or dispatch block (expected `end`)",
         ));
     }
+    while matches!(keyword_stack.last(), Some(KeywordTerminator::FiBraced(depth)) if brace_stack.len() <= *depth) {
+        keyword_stack.pop();
+    }
     if let Some(terminator) = keyword_stack.last() {
         let message = match terminator {
-            KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced => {
+            KeywordTerminator::FiKeyword | KeywordTerminator::FiBraced(_) => {
                 "unterminated `if` block (expected `fi`)"
             }
             KeywordTerminator::Done => "unterminated `... do` block (expected `done`)",
@@ -4134,7 +4152,8 @@ fn visible_word_spans(line: &str, initial: LexState) -> Vec<WordSpan> {
 
 fn opens_conditional_block(line: &str) -> bool {
     let t = line.trim_end();
-    starts_word(t.trim_start(), "if")
+    (starts_word(t.trim_start(), "if")
+        || t.trim_start().strip_prefix("do ").is_some_and(|rest| starts_word(rest.trim_start(), "if")))
         && (t.ends_with(" then")
             || t.ends_with("; then")
             || t.ends_with(" do")

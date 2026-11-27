@@ -80,8 +80,7 @@ fn top_level_suspend_spelling_and_colon_are_kept() {
     assert!(out.starts_with("suspends fnc spin() -> void {"), "{out}");
 }
 
-// Java parseIf: brace form "still obeys the universal invariant: every if
-// closes with fi". 28 LLVM fixtures use `} fi`, previously all rejected.
+// Legacy LLVM fixtures use `} fi`; canonical brace forms are self-delimiting.
 #[test]
 fn brace_form_conditionals_close_with_same_line_fi() {
     let out = fmt("fnc f(): int {\nif (x eq 1) { return 1; } fi\nreturn 0;\n}\n");
@@ -98,8 +97,10 @@ fn brace_form_conditionals_close_with_same_line_fi() {
         "{out}"
     );
 
-    // `fi` remains mandatory, and a stray `} fi` is still rejected.
-    assert!(format_source("fnc f(): int {\nif x {\nreturn 1;\n}\nreturn 0;\n}\n").is_err());
+    // Canonical no-fi must round-trip; a stray `} fi` remains rejected.
+    let canonical = fmt("fnc f(): int {\nif x {\nreturn 1;\n}\nreturn 0;\n}\n");
+    assert!(canonical.contains("  }\n  return 0;"), "{canonical}");
+    assert_eq!(format_source(&canonical).unwrap(), canonical);
     assert!(format_source("fnc f(): int {\nif x then\nreturn 1;\n} fi\n}\n").is_err());
 }
 
