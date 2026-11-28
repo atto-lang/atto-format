@@ -99,3 +99,44 @@ foo((x: 4, y: 8));"#,
           "foo(data = {x = 4, y = 8});", "foo((x = 4, y = 8));",
           "foo((x: 4, y: 8));"]);
 }
+
+#[test]
+fn delimiter_key_domains_and_nested_record_arrays_are_preserved() {
+    // Formatting is not syntax admission; never rewrite a Map as a Record
+    // or choose a different quoted-key or product grammar for the caller.
+    preserve(r#"const Record a = {x: [1, 2, 3]};
+const Record b = ("x": [1, 2, 3]);
+const Record c = {x: [{a: 1}, {b: 2}, {c: 3}]};
+const Record d = ("x": [{a: 1}, ("b": 2), {c: 3}]);
+const Record e = {meta: ("content-type": "json", "first name": "Ada")};
+const Record f = ();
+const Record g = {};
+const m = {"x": 42};
+const p = (x := 42);
+const t = (x := 42, y := 8);
+foo(("x": [1, 2, 3]));
+foo({x: [1, 2, 3]});
+foo(x: 42);
+foo(x = 42);"#,
+        &[r#"{x: [1, 2, 3]}"#, r#"("x": [1, 2, 3])"#,
+          "{x: [{a: 1}, {b: 2}, {c: 3}]}",
+          r#"("x": [{a: 1}, ("b": 2), {c: 3}])"#,
+          r#"{meta: ("content-type": "json", "first name": "Ada")}"#,
+          "const Record f = ();", "const Record g = {};",
+          r#"const m = {"x": 42};"#, "(x := 42);", "(x := 42, y := 8);",
+          r#"foo(("x": [1, 2, 3]));"#, "foo({x: [1, 2, 3]});",
+          "foo(x: 42);", "foo(x = 42);"]);
+}
+
+#[test]
+fn quoted_key_escapes_comments_and_delimiter_characters_remain_opaque() {
+    preserve(r#"const Record a = ("x": 1, "\u0078": 2);
+const Record b = ("a){}[],:": 42, "https://example.test/a": 1);
+const Record c = ("x" /* label */ : 42);
+const Record d = {x /* label */ : ("y": 42)};
+const Map<string,int> m = {"x": 42};"#,
+        &[r#"("x": 1, "\u0078": 2)"#,
+          r#"("a){}[],:": 42, "https://example.test/a": 1)"#,
+          r#"("x" /* label */ : 42)"#, r#"{x /* label */ : ("y": 42)}"#,
+          r#"m = {"x": 42};"#]);
+}
