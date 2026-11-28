@@ -768,11 +768,23 @@ fn format_source_impl(source: &str, insert_mtd: bool) -> Result<String, FormatEr
         content = canonicalize_export_line(&content);
         let instance_member =
             keyword_stack.is_empty() && in_direct_instance_container(&define_stack, &brace_stack);
+        // Interface and trait signatures, and struct instance members, are
+        // also methods. Do not broaden executable class/actor detection or
+        // the opt-in --insert-mtd behavior in other contexts.
+        let method_spelling_member = instance_member
+            || (keyword_stack.is_empty()
+                && pending_callable_parameter_depth == 0
+                && in_direct_nominal_method_container(&define_stack, &brace_stack));
+        if method_spelling_member && pending_callable_parameter_depth == 0
+            && obsolete_method_introducer(&content, lex)
+        {
+            return Err(FormatError::new(line_no, "obsolete method introducer; use mtd"));
+        }
         if !generator_header {
             content = canonicalize_declaration_line(
                 &content,
                 lex,
-                instance_member,
+                method_spelling_member,
                 keyword_stack.is_empty()
                     && in_direct_storage_container(&define_stack, &brace_stack),
             );
@@ -1622,6 +1634,22 @@ fn in_direct_instance_container(define_stack: &[DefineFrame], brace_stack: &[Bra
     }
 }
 
+// Only direct nominal instance contracts/members use the method spelling
+// rule. A module/namespace/static contract specifies free/static functions.
+fn in_direct_nominal_method_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
+    let latest_define = define_stack.last().map(|frame| {
+        (frame.order, matches!(frame.kind, DefineKind::Interface | DefineKind::Trait | DefineKind::Struct))
+    });
+    let latest_brace = brace_stack.last().map(|frame| {
+        (frame.order, matches!(frame.kind, BraceKind::Interface | BraceKind::Trait | BraceKind::Struct))
+    });
+    match (latest_define, latest_brace) {
+        (Some((a, value)), Some((b, other))) => if a > b { value } else { other },
+        (Some((_, value)), None) | (None, Some((_, value))) => value,
+        (None, None) => false,
+    }
+}
+
 fn in_direct_actor_container(define_stack: &[DefineFrame], brace_stack: &[BraceFrame]) -> bool {
     let latest_define = define_stack
         .last()
@@ -2221,10 +2249,30 @@ fn canonicalize_defined_type_alias(line: &str, words: &[WordSpan]) -> Option<Str
     Some(rewrite_word_prefix(line, prefix, &canonical))
 }
 
-// In a class or actor, legacy `fnc name(...)` denotes an instance method and
-// becomes a bare declaration; legacy `method name(...)` becomes canonical
-// `mtd name(...)`. Keep existing `mtd`, statics, named methods, literals,
-// comments and nested callable bodies untouched.
+// Diagnose only a contextual obsolete introducer, not an identifier named
+// method(), a type field, a comment or a nested callable.
+fn obsolete_method_introducer(line: &str, initial: LexState) -> bool {
+    let words = visible_word_spans(line, initial);
+    let mut index = 0;
+    while index < words.len()
+        && matches!(&line[words[index].start..words[index].end],
+            "pub" | "private" | "async" | "suspend" | "suspends" |
+            "critical" | "structural" | "abstract")
+    {
+        index += 1;
+    }
+    if index + 1 >= words.len()
+        || &line[words[index].start..words[index].end] != "method"
+        || !plain_word_prefix(line, &words[..=index + 1])
+    {
+        return false;
+    }
+    let tail = line[words[index + 1].end..].trim_start();
+    tail.starts_with('(') || generic_method_parameter_list(tail)
+}
+
+// In a direct nominal method scope, legacy fnc becomes a bare declaration.
+// Keep explicit mtd, statics, names, comments and nested bodies unchanged.
 fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option<String> {
     let is_modifier = |word: &str| {
         matches!(
@@ -2247,12 +2295,9 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
     let mut modifiers: Vec<&str> = Vec::new();
     for span in words {
         let word = &line[span.start..span.end];
-        if matches!(word, "fnc" | "method") {
+        if word == "fnc" {
             if keyword.is_some() {
-                // A callable can literally be named method(), including
-                // "method method()" and "fnc method()". The second word is
-                // the name when immediately followed by '(' or '<', not a
-                // second declaration introducer.
+                // Do not normalize a repeated introducer into a new header.
                 let following = line[span.end..].trim_start();
                 if following.starts_with('(') || following.starts_with('<') {
                     break;
@@ -2311,9 +2356,6 @@ fn canonicalize_instance_method_prefix(line: &str, words: &[WordSpan]) -> Option
     if !canonical.is_empty() {
         out.push_str(&canonical.join(" "));
         out.push(' ');
-    }
-    if keyword == Some("method") {
-        out.push_str("mtd ");
     }
     out.push_str(&line[name.start..]);
     Some(out)
@@ -5221,8 +5263,8 @@ end
         let got = format_source(src).unwrap();
         assert!(got.contains("fnc load(int id) => tuple (int, string);"));
         assert!(got.contains("fnc build(int id) => Result<Option<tuple (int, string)>, string>;"));
-        assert!(got.contains("fnc run(int id) => int;"));
-        assert!(got.contains("fnc retry() => bool;"));
+        assert!(got.contains("run(int id) => int;"));
+        assert!(got.contains("retry() => bool;"));
         assert_eq!(format_source(&got).unwrap(), got);
     }
 
@@ -5307,8 +5349,8 @@ define class User implements Named, Retryable as
 end
 "#;
         let got = format_source(src).unwrap();
-        assert!(got.contains("fnc name() => String;"));
-        assert!(got.contains("fnc retry() => bool;"));
+        assert!(got.contains("name() => String;"));
+        assert!(got.contains("retry() => bool;"));
         assert!(got.contains("pub name() -> String {"));
     }
 
